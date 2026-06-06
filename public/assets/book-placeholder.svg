@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 320" role="img" aria-label="Book placeholder">
+  <rect width="240" height="320" rx="16" fill="#edf2f7"/>
+  <rect x="54" y="48" width="132" height="224" rx="8" fill="#2563eb"/>
+  <path d="M80 78h80M80 104h80M80 230h56" stroke="#fff" stroke-width="12" stroke-linecap="round"/>
+  <path d="M68 48v224" stroke="#1d4ed8" stroke-width="10"/>
+</svg>

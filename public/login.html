@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Login | MLSU Library</title>
+    <link rel="stylesheet" href="css/styles.css">
+  </head>
+  <body class="auth-page">
+    <main class="auth-shell">
+      <section class="auth-brand">
+        <h1>Welcome back</h1>
+        <p>Students request issues. Librarians approve and receive returns. Admins control access.</p>
+      </section>
+      <section class="auth-card">
+        <h2>Login</h2>
+        <form id="loginForm" class="form-grid">
+          <label>Email<input id="email" type="email" autocomplete="email" required></label>
+          <label>Password<input id="password" type="password" autocomplete="current-password" required></label>
+          <button class="btn btn-primary" type="submit">Login</button>
+        </form>
+        <p class="link-line">New student? <a href="signup.html">Create an account</a></p>
+      </section>
+    </main>
+    <div id="toast" class="toast"></div>
+    <script type="module" src="js/auth.js"></script>
+  </body>
+</html>

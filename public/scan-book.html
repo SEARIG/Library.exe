@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Scan Book | MLSU Library</title>
+    <link rel="stylesheet" href="css/styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="header-inner">
+        <a class="brand" href="student-dashboard.html">MLSU Library</a>
+        <nav class="nav">
+          <a href="student-dashboard.html">Student</a>
+          <a href="librarian-dashboard.html">Librarian</a>
+          <a href="books.html">Books</a>
+          <span class="user-chip"><span id="currentUserName"></span><span class="badge" id="currentUserRole"></span></span>
+          <button id="signOutBtn">Sign Out</button>
+        </nav>
+      </div>
+    </header>
+    <main class="app-main">
+      <section class="page-title">
+        <h1>Scan Book</h1>
+        <p>Use the camera scanner when available, or enter the barcode manually.</p>
+      </section>
+      <section class="scanner-layout">
+        <article class="panel">
+          <div class="toolbar">
+            <label>Mode
+              <select id="scanMode">
+                <option value="issue">Issue Request</option>
+                <option value="return">Return Book</option>
+              </select>
+            </label>
+            <button class="btn btn-primary" id="startCameraBtn" type="button">Start Camera</button>
+            <button class="btn btn-danger" id="stopCameraBtn" type="button" hidden>Stop Camera</button>
+          </div>
+          <video id="scannerVideo" class="scanner-video" playsinline autoplay muted hidden></video>
+          <form id="manualBarcodeForm" class="form-grid">
+            <label>Manual Barcode<input id="manualBarcode" placeholder="Scan or type book barcode"></label>
+            <button class="btn btn-muted" type="submit">Use Barcode</button>
+          </form>
+        </article>
+        <article id="issuePanel" class="panel">
+          <h2>Issue Request</h2>
+          <div id="bookPreview" class="list-stack">
+            <div class="empty">Scan a book to auto-fill the request form.</div>
+          </div>
+        </article>
+        <article id="returnPanel" class="panel" hidden>
+          <h2>Return Book</h2>
+          <form id="returnBookForm" class="form-grid">
+            <label>Book Barcode<input id="returnBookId" required></label>
+            <button class="btn btn-primary" type="submit">Mark Returned</button>
+          </form>
+          <div id="returnResult" class="list-stack"></div>
+        </article>
+      </section>
+    </main>
+    <dialog id="issueDialog">
+      <div class="dialog-inner">
+        <div class="dialog-top">
+          <div>
+            <h2>Confirm Issue Request</h2>
+            <p class="link-line">Review the auto-filled details before submitting.</p>
+          </div>
+          <button class="btn btn-muted dialog-close" type="button" aria-label="Close">X</button>
+        </div>
+        <div class="dialog-book">
+          <img id="issueBookImage" src="assets/book-placeholder.svg" alt="">
+          <div>
+            <strong id="dialogBookTitle"></strong>
+            <span>Pending librarian approval</span>
+          </div>
+        </div>
+        <form id="issueForm" class="form-grid two-col">
+          <label>Student UID<input id="requestStudentUid" readonly></label>
+          <label>Student Name<input id="requestStudentName" readonly></label>
+          <label>Book ID<input id="requestBookId" readonly></label>
+          <label>Book Name<input id="requestBookTitle" readonly></label>
+          <label>Issue Date<input id="requestIssueDate" type="date" readonly></label>
+          <label>Due Date<input id="requestDueDate" type="date" readonly></label>
+          <label class="checkbox">
+            <input id="confirmOwnAccount" type="checkbox" required>
+            <span>I confirm that I am requesting this book issue under my own student account.</span>
+          </label>
+          <button class="btn btn-primary" type="submit">Request Issue</button>
+        </form>
+      </div>
+    </dialog>
+    <div id="toast" class="toast"></div>
+    <script type="module" src="js/scan-book.js"></script>
+  </body>
+</html>

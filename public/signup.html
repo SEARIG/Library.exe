@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Student Signup | MLSU Library</title>
+    <link rel="stylesheet" href="css/styles.css">
+  </head>
+  <body class="auth-page">
+    <main class="auth-shell">
+      <section class="auth-brand">
+        <h1>Student signup</h1>
+        <p>Create your student profile before requesting book issues through barcode scanning.</p>
+      </section>
+      <section class="auth-card">
+        <h2>Create account</h2>
+        <form id="signupForm" class="form-grid two-col">
+          <label>Name<input id="name" required></label>
+          <label>Email<input id="email" type="email" autocomplete="email" required></label>
+          <label>Phone<input id="phone" type="tel" required></label>
+          <label>Student ID<input id="studentId" required></label>
+          <label>Class<input id="className" required></label>
+          <label>Department<input id="department" required></label>
+          <label>Roll Number<input id="rollNumber" required></label>
+          <label>ID Card Barcode<input id="idCardBarcode" required></label>
+          <label>Password<input id="password" type="password" autocomplete="new-password" minlength="6" required></label>
+          <button class="btn btn-primary" type="submit">Create Student Account</button>
+        </form>
+        <p class="link-line">Already registered? <a href="login.html">Login</a></p>
+      </section>
+    </main>
+    <div id="toast" class="toast"></div>
+    <script type="module" src="js/auth.js"></script>
+  </body>
+</html>

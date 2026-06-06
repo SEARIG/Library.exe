@@ -1,0 +1,90 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function role() {
+      return signedIn() && userDoc().data.active == true ? userDoc().data.role : null;
+    }
+
+    function isStudent(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isLibrarian() {
+      return role() in ["librarian", "admin"];
+    }
+
+    function isAdmin() {
+      return role() == "admin";
+    }
+
+    match /users/{uid} {
+      allow read: if isStudent(uid) || isLibrarian();
+      allow create: if isStudent(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.role == "student"
+        && request.resource.data.active == true;
+      allow update: if isAdmin()
+        || (isStudent(uid)
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["uid", "role", "active", "createdAt"]));
+      allow delete: if isAdmin();
+    }
+
+    match /students/{uid} {
+      allow read: if isStudent(uid) || isLibrarian();
+      allow create: if isStudent(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.active == true;
+      allow update: if isLibrarian()
+        || (isStudent(uid)
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["uid", "active", "createdAt"]));
+      allow delete: if isAdmin();
+    }
+
+    match /books/{bookId} {
+      allow read: if signedIn();
+      allow create: if isLibrarian()
+        && request.resource.data.bookId == bookId
+        && request.resource.data.status in ["available", "issued", "lost", "damaged"];
+      allow update: if isLibrarian()
+        && request.resource.data.bookId == bookId
+        && request.resource.data.status in ["available", "issued", "lost", "damaged"];
+      allow delete: if isAdmin();
+    }
+
+    match /issueRequests/{requestId} {
+      allow read: if signedIn() && (resource.data.studentUid == request.auth.uid || isLibrarian());
+      allow create: if signedIn()
+        && request.resource.data.studentUid == request.auth.uid
+        && request.resource.data.confirmationChecked == true
+        && request.resource.data.status == "pending"
+        && request.resource.data.reviewedBy == null
+        && request.resource.data.reviewedAt == null;
+      allow update: if isLibrarian()
+        || (signedIn()
+          && resource.data.studentUid == request.auth.uid
+          && resource.data.status == "pending"
+          && request.resource.data.status == "cancelled"
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["studentUid", "bookId", "issueDate", "dueDate"]));
+      allow delete: if isAdmin();
+    }
+
+    match /bookIssues/{issueId} {
+      allow read: if signedIn() && (resource.data.studentUid == request.auth.uid || isLibrarian());
+      allow create, update, delete: if false;
+    }
+
+    match /penalties/{penaltyId} {
+      allow read: if signedIn() && (resource.data.studentUid == request.auth.uid || isLibrarian());
+      allow create, update, delete: if false;
+    }
+  }
+}

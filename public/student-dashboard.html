@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Student Dashboard | MLSU Library</title>
+    <link rel="stylesheet" href="css/styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="header-inner">
+        <a class="brand" href="student-dashboard.html">MLSU Library</a>
+        <nav class="nav">
+          <a href="student-dashboard.html">Dashboard</a>
+          <a href="scan-book.html">Scan Book</a>
+          <span class="user-chip"><span id="currentUserName"></span><span class="badge" id="currentUserRole"></span></span>
+          <button id="signOutBtn">Sign Out</button>
+        </nav>
+      </div>
+    </header>
+    <main class="app-main">
+      <section class="page-title">
+        <h1>Student Dashboard</h1>
+        <p>Track your profile, active issues, due dates, penalties, and issue request history.</p>
+      </section>
+      <section class="dashboard-grid">
+        <article class="panel span-5">
+          <h2>Profile</h2>
+          <div id="profilePanel"></div>
+        </article>
+        <article class="panel span-7">
+          <h2>Issued Books</h2>
+          <div id="issuedBooks" class="list-stack"></div>
+        </article>
+        <article class="panel span-6">
+          <h2>Penalties</h2>
+          <div id="penalties" class="list-stack"></div>
+        </article>
+        <article class="panel span-6">
+          <h2>Issue History</h2>
+          <div id="issueHistory" class="list-stack"></div>
+        </article>
+        <article class="panel span-12">
+          <a class="btn btn-primary" href="scan-book.html">Scan Book Barcode</a>
+        </article>
+      </section>
+    </main>
+    <div id="toast" class="toast"></div>
+    <script type="module" src="js/student-dashboard.js"></script>
+  </body>
+</html>

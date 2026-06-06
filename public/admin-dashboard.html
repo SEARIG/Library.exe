@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin Dashboard | MLSU Library</title>
+    <link rel="stylesheet" href="css/styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="header-inner">
+        <a class="brand" href="admin-dashboard.html">MLSU Library</a>
+        <nav class="nav">
+          <a href="admin-dashboard.html">Admin</a>
+          <a href="librarian-dashboard.html">Librarian</a>
+          <a href="books.html">Books</a>
+          <span class="user-chip"><span id="currentUserName"></span><span class="badge" id="currentUserRole"></span></span>
+          <button id="signOutBtn">Sign Out</button>
+        </nav>
+      </div>
+    </header>
+    <main class="app-main">
+      <section class="page-title">
+        <h1>Admin Dashboard</h1>
+        <p>Manage roles, account access, books, requests, and issue activity.</p>
+      </section>
+      <section class="admin-metrics">
+        <article class="metric"><span>Users</span><strong id="metricUsers">0</strong></article>
+        <article class="metric"><span>Books</span><strong id="metricBooks">0</strong></article>
+        <article class="metric"><span>Pending</span><strong id="metricPending">0</strong></article>
+        <article class="metric"><span>Issued</span><strong id="metricIssued">0</strong></article>
+      </section>
+      <section class="dashboard-grid">
+        <article class="panel span-12">
+          <h2>User Access</h2>
+          <div id="usersTable" class="table-wrap"></div>
+        </article>
+      </section>
+    </main>
+    <div id="toast" class="toast"></div>
+    <script type="module" src="js/admin-dashboard.js"></script>
+  </body>
+</html>

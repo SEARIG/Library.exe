@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Books | MLSU Library</title>
+    <link rel="stylesheet" href="css/styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="header-inner">
+        <a class="brand" href="librarian-dashboard.html">MLSU Library</a>
+        <nav class="nav">
+          <a href="librarian-dashboard.html">Dashboard</a>
+          <a href="books.html">Books</a>
+          <a href="scan-book.html">Scan</a>
+          <span class="user-chip"><span id="currentUserName"></span><span class="badge" id="currentUserRole"></span></span>
+          <button id="signOutBtn">Sign Out</button>
+        </nav>
+      </div>
+    </header>
+    <main class="app-main">
+      <section class="page-title">
+        <h1>Books</h1>
+        <p>Add book records, barcode values, shelf locations, and availability status.</p>
+      </section>
+      <section class="dashboard-grid">
+        <article class="panel span-4">
+          <h2>Add or Update Book</h2>
+          <form id="bookForm" class="form-grid">
+            <label>Book ID<input id="bookId" required></label>
+            <label>Serial No.<input id="serialNo"></label>
+            <label>Barcode Value<input id="barcodeValue"></label>
+            <label>Title<input id="title" required></label>
+            <label>Author<input id="author"></label>
+            <label>Category<input id="category"></label>
+            <label>Image URL<input id="imageUrl" type="url"></label>
+            <label>Shelf Location<input id="shelfLocation"></label>
+            <label>Status
+              <select id="status">
+                <option value="available">available</option>
+                <option value="issued">issued</option>
+                <option value="lost">lost</option>
+                <option value="damaged">damaged</option>
+              </select>
+            </label>
+            <button class="btn btn-primary" type="submit">Save Book</button>
+          </form>
+        </article>
+        <article class="panel span-8">
+          <h2>Library Catalog</h2>
+          <div id="booksTable" class="table-wrap"></div>
+        </article>
+      </section>
+    </main>
+    <div id="toast" class="toast"></div>
+    <script type="module" src="js/books.js"></script>
+  </body>
+</html>
