@@ -1,10 +1,11 @@
-import { db } from "./firebase.js";
+import { db } from "./firebase-config.js";
 import {
   $,
   escapeHtml,
   formatDate,
   renderEmpty,
   requireAuth,
+  setLoading,
   showToast,
   statusBadge,
   wireSignOut
@@ -30,6 +31,7 @@ form.addEventListener("submit", async (event) => {
     showToast("Book ID is required.", "error");
     return;
   }
+  setLoading(form, true);
   try {
     await setDoc(doc(db, "books", bookId), {
       bookId,
@@ -51,6 +53,8 @@ form.addEventListener("submit", async (event) => {
     $("#status").value = "available";
   } catch (error) {
     showToast(error.message, "error");
+  } finally {
+    setLoading(form, false);
   }
 });
 

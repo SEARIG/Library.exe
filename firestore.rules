@@ -41,11 +41,10 @@ service cloud.firestore {
     match /students/{uid} {
       allow read: if isStudent(uid) || isLibrarian();
       allow create: if isStudent(uid)
-        && request.resource.data.uid == uid
-        && request.resource.data.active == true;
+        && request.resource.data.uid == uid;
       allow update: if isLibrarian()
         || (isStudent(uid)
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["uid", "active", "createdAt"]));
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["uid", "createdAt"]));
       allow delete: if isAdmin();
     }
 

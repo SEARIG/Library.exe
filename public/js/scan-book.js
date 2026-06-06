@@ -1,27 +1,20 @@
-import { auth, db, functions } from "./firebase.js";
+import { auth } from "./firebase-config.js";
 import {
   $,
-  addDays,
   escapeHtml,
-  formatDate,
   renderEmpty,
   requireAuth,
+  setLoading,
   showToast,
   wireSignOut
 } from "./app.js";
 import {
-  Timestamp,
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  query,
-  serverTimestamp,
-  where
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-functions.js";
+  addDays,
+  createIssueRequest,
+  findBookByBarcode,
+  getStudentProfile,
+  returnBook
+} from "./firestore-service.js";
 
 wireSignOut();
 const session = await requireAuth(["student", "librarian", "admin"]);
@@ -40,6 +33,7 @@ let mediaStream = null;
 let detector = null;
 let scanTimer = null;
 let currentBook = null;
+let currentStudent = null;
 
 modeSelect.value = canReturn ? new URLSearchParams(location.search).get("mode") || "issue" : "issue";
 modeSelect.disabled = !canReturn;
@@ -51,23 +45,6 @@ modeSelect.addEventListener("change", () => {
   issuePanel.hidden = modeSelect.value !== "issue";
 });
 
-async function findBook(value) {
-  const trimmed = value.trim();
-  if (!trimmed) throw new Error("Enter or scan a barcode.");
-
-  const direct = await getDoc(doc(db, "books", trimmed));
-  if (direct.exists()) return { id: direct.id, ...direct.data() };
-
-  const barcodeQuery = query(collection(db, "books"), where("barcodeValue", "==", trimmed), limit(1));
-  const matches = await getDocs(barcodeQuery);
-  if (!matches.empty) {
-    const snap = matches.docs[0];
-    return { id: snap.id, ...snap.data() };
-  }
-
-  throw new Error("Book not found for this barcode.");
-}
-
 async function handleBarcode(value) {
   try {
     if (modeSelect.value === "return") {
@@ -76,7 +53,7 @@ async function handleBarcode(value) {
       return;
     }
 
-    currentBook = await findBook(value);
+    currentBook = await findBookByBarcode(value);
     renderBookPreview(currentBook);
     openIssueDialog(currentBook);
   } catch (error) {
@@ -104,14 +81,14 @@ async function openIssueDialog(book) {
     return;
   }
 
-  const studentSnap = await getDoc(doc(db, "students", auth.currentUser.uid));
-  if (!studentSnap.exists()) throw new Error("Student profile not found.");
-  const student = studentSnap.data();
+  currentStudent = await getStudentProfile(auth.currentUser.uid);
+  if (!currentStudent) throw new Error("Student profile not found.");
   const issueDate = new Date();
   const dueDate = addDays(issueDate, 45);
 
   $("#requestStudentUid").value = auth.currentUser.uid;
-  $("#requestStudentName").value = student.name || "";
+  $("#requestStudentName").value = currentStudent.name || "";
+  $("#requestStudentId").value = currentStudent.studentId || "";
   $("#requestBookId").value = book.bookId || book.id;
   $("#requestBookTitle").value = book.title || "";
   $("#dialogBookTitle").textContent = book.title || book.bookId || book.id;
@@ -135,28 +112,18 @@ issueForm.addEventListener("submit", async (event) => {
     return;
   }
 
+  setLoading(issueForm, true);
   try {
-    const issueDate = new Date(`${$("#requestIssueDate").value}T00:00:00`);
-    const dueDate = new Date(`${$("#requestDueDate").value}T00:00:00`);
-    const payload = {
-      studentUid: auth.currentUser.uid,
-      studentName: $("#requestStudentName").value,
-      bookId: currentBook.bookId || currentBook.id,
-      bookTitle: currentBook.title,
-      bookImage: currentBook.imageUrl || "",
-      issueDate: Timestamp.fromDate(issueDate),
-      dueDate: Timestamp.fromDate(dueDate),
-      confirmationChecked: true,
-      status: "pending",
-      createdAt: serverTimestamp(),
-      reviewedBy: null,
-      reviewedAt: null
-    };
-    const ref = await addDoc(collection(db, "issueRequests"), payload);
+    const result = await createIssueRequest({
+      student: currentStudent,
+      book: currentBook
+    });
     issueDialog.close();
-    showToast(`Issue request submitted: ${ref.id}`, "success");
+    showToast(`Issue request submitted: ${result.requestId}`, "success");
   } catch (error) {
     showToast(error.message, "error");
+  } finally {
+    setLoading(issueForm, false);
   }
 });
 
@@ -164,10 +131,9 @@ $(".dialog-close", issueDialog).addEventListener("click", () => issueDialog.clos
 
 returnForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  setLoading(returnForm, true);
   try {
-    const returnBook = httpsCallable(functions, "returnBook");
-    const result = await returnBook({ bookId: $("#returnBookId").value.trim() });
-    const data = result.data;
+    const data = await returnBook($("#returnBookId").value.trim());
     $("#returnResult").innerHTML = `
       <div class="success-box">
         <strong>Returned successfully</strong>
@@ -177,6 +143,8 @@ returnForm.addEventListener("submit", async (event) => {
     returnForm.reset();
   } catch (error) {
     renderEmpty($("#returnResult"), error.message);
+  } finally {
+    setLoading(returnForm, false);
   }
 });
 

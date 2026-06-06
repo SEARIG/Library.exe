@@ -1,14 +1,20 @@
-import { db, functions } from "./firebase.js";
+import { db } from "./firebase-config.js";
 import {
   $,
   escapeHtml,
   formatDate,
   renderEmpty,
   requireAuth,
+  setLoading,
   showToast,
   statusBadge,
   wireSignOut
 } from "./app.js";
+import {
+  approveIssue,
+  rejectIssue,
+  returnBook
+} from "./firestore-service.js";
 import {
   collection,
   limit,
@@ -17,14 +23,9 @@ import {
   query,
   where
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-functions.js";
 
 wireSignOut();
 await requireAuth(["librarian", "admin"]);
-
-const approveIssueRequest = httpsCallable(functions, "approveIssueRequest");
-const rejectIssueRequest = httpsCallable(functions, "rejectIssueRequest");
-const returnBook = httpsCallable(functions, "returnBook");
 
 function timeOf(value) {
   if (!value) return 0;
@@ -67,10 +68,10 @@ $("#pendingRequests").addEventListener("click", async (event) => {
   button.disabled = true;
   try {
     if (button.dataset.action === "approve") {
-      await approveIssueRequest({ requestId });
+      await approveIssue(requestId);
       showToast("Issue request approved.", "success");
     } else {
-      await rejectIssueRequest({ requestId, reason: "Rejected by librarian" });
+      await rejectIssue(requestId, "Rejected by librarian");
       showToast("Issue request rejected.", "success");
     }
   } catch (error) {
@@ -103,6 +104,28 @@ onSnapshot(
 );
 
 onSnapshot(
+  query(collection(db, "bookIssues"), where("status", "==", "returned"), limit(25)),
+  (snap) => {
+    const target = $("#returnsList");
+    if (snap.empty) {
+      renderEmpty(target, "No returns recorded yet.");
+      return;
+    }
+    target.innerHTML = snap.docs.sort((a, b) => timeOf(b.data().returnedAt) - timeOf(a.data().returnedAt)).map((item) => {
+      const issue = item.data();
+      return `
+        <article class="list-row">
+          <div>
+            <strong>${escapeHtml(issue.bookId)}</strong>
+            <span>Returned ${formatDate(issue.returnDate)} | Penalty Rs.${Number(issue.penaltyAmount || 0).toFixed(2)}</span>
+          </div>
+          ${statusBadge(issue.status)}
+        </article>`;
+    }).join("");
+  }
+);
+
+onSnapshot(
   query(collection(db, "students"), orderBy("createdAt", "desc"), limit(20)),
   (snap) => {
     const target = $("#recentStudents");
@@ -124,14 +147,38 @@ onSnapshot(
   }
 );
 
+onSnapshot(
+  query(collection(db, "books"), orderBy("updatedAt", "desc"), limit(20)),
+  (snap) => {
+    const target = $("#recentBooks");
+    if (snap.empty) {
+      renderEmpty(target, "No books found.");
+      return;
+    }
+    target.innerHTML = snap.docs.map((item) => {
+      const book = item.data();
+      return `
+        <article class="list-row">
+          <div>
+            <strong>${escapeHtml(book.title)}</strong>
+            <span>${escapeHtml(book.bookId)} | ${escapeHtml(book.shelfLocation)}</span>
+          </div>
+          ${statusBadge(book.status)}
+        </article>`;
+    }).join("");
+  }
+);
+
 $("#quickReturnForm").addEventListener("submit", async (event) => {
   event.preventDefault();
+  setLoading(event.target, true);
   try {
-    const result = await returnBook({ bookId: $("#quickReturnBookId").value.trim() });
-    const data = result.data;
+    const data = await returnBook($("#quickReturnBookId").value.trim());
     showToast(`Returned. Penalty Rs.${Number(data.penaltyAmount || 0).toFixed(2)}.`, "success");
     event.target.reset();
   } catch (error) {
     showToast(error.message, "error");
+  } finally {
+    setLoading(event.target, false);
   }
 });

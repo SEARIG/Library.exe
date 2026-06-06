@@ -72,13 +72,15 @@ exports.approveIssueRequest = onCall(async (request) => {
     }
 
     const studentRef = db.doc(`students/${issueRequest.studentUid}`);
+    const studentUserRef = db.doc(`users/${issueRequest.studentUid}`);
     const bookRef = db.doc(`books/${issueRequest.bookId}`);
-    const [studentSnap, bookSnap] = await Promise.all([
+    const [studentSnap, studentUserSnap, bookSnap] = await Promise.all([
       transaction.get(studentRef),
+      transaction.get(studentUserRef),
       transaction.get(bookRef)
     ]);
 
-    if (!studentSnap.exists || studentSnap.get("active") !== true) {
+    if (!studentSnap.exists || !studentUserSnap.exists || studentUserSnap.get("active") !== true) {
       throw new HttpsError("failed-precondition", "Student profile is missing or inactive.");
     }
     if (!bookSnap.exists) {
@@ -97,7 +99,10 @@ exports.approveIssueRequest = onCall(async (request) => {
       issueId: issueRef.id,
       requestId,
       studentUid: issueRequest.studentUid,
+      studentId: issueRequest.studentId || studentSnap.get("studentId") || "",
       bookId: issueRequest.bookId,
+      bookTitle: issueRequest.bookTitle || bookSnap.get("title") || "",
+      bookImage: issueRequest.bookImage || bookSnap.get("imageUrl") || "",
       issueDate: Timestamp.fromDate(issueDate),
       dueDate: Timestamp.fromDate(dueDate),
       returnDate: null,
@@ -157,9 +162,22 @@ exports.rejectIssueRequest = onCall(async (request) => {
 
 exports.returnBook = onCall(async (request) => {
   const actor = await requireRole(request.auth, ["librarian", "admin"]);
-  const bookId = String(request.data.bookId || "").trim();
-  if (!bookId) {
+  const scannedBookId = String(request.data.bookId || "").trim();
+  if (!scannedBookId) {
     throw new HttpsError("invalid-argument", "bookId is required.");
+  }
+
+  let bookId = scannedBookId;
+  const directBookSnap = await db.doc(`books/${scannedBookId}`).get();
+  if (!directBookSnap.exists) {
+    const barcodeMatches = await db.collection("books")
+      .where("barcodeValue", "==", scannedBookId)
+      .limit(1)
+      .get();
+    if (barcodeMatches.empty) {
+      throw new HttpsError("not-found", "Book record not found for this barcode.");
+    }
+    bookId = barcodeMatches.docs[0].id;
   }
 
   const activeIssues = await db.collection("bookIssues")

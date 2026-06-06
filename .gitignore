@@ -1,0 +1,13 @@
+node_modules/
+functions/node_modules/
+.firebase/
+.firebaserc.local
+firebase-debug.log
+firebase-debug.*.log
+firestore-debug.log
+ui-debug.log
+.env
+.env.*
+.vercel/
+dist/
+build/

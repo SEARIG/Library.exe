@@ -1,14 +1,10 @@
-import { auth, db } from "./firebase.js";
+import { auth } from "./firebase-config.js";
 import { $, redirectForRole, setLoading, showToast } from "./app.js";
+import { createStudentProfile } from "./firestore-service.js";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-import {
-  doc,
-  serverTimestamp,
-  setDoc
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const loginForm = $("#loginForm");
 if (loginForm) {
@@ -39,28 +35,13 @@ if (signupForm) {
       const phone = $("#phone").value.trim();
       const studentId = $("#studentId").value.trim();
       const credential = await createUserWithEmailAndPassword(auth, email, password);
-      const uid = credential.user.uid;
-      const common = {
-        uid,
+      await createStudentProfile(credential.user.uid, {
         name,
         email,
         phone,
-        active: true,
-        createdAt: serverTimestamp()
-      };
-
-      await setDoc(doc(db, "users", uid), {
-        ...common,
-        role: "student"
-      });
-
-      await setDoc(doc(db, "students", uid), {
-        ...common,
         studentId,
-        className: $("#className").value.trim(),
         department: $("#department").value.trim(),
-        rollNumber: $("#rollNumber").value.trim(),
-        idCardBarcode: $("#idCardBarcode").value.trim()
+        course: $("#course").value.trim()
       });
 
       window.location.href = "student-dashboard.html";

@@ -1,4 +1,4 @@
-import { db } from "./firebase.js";
+import { db } from "./firebase-config.js";
 import { $, escapeHtml, formatDate, renderEmpty, requireAuth, statusBadge, wireSignOut } from "./app.js";
 import {
   collection,
@@ -27,10 +27,11 @@ onSnapshot(doc(db, "students", user.uid), (snap) => {
   target.innerHTML = `
     <div class="detail-grid">
       <span>Name</span><strong>${escapeHtml(student.name)}</strong>
+      <span>Email</span><strong>${escapeHtml(student.email)}</strong>
+      <span>Student UID</span><strong>${escapeHtml(student.uid)}</strong>
       <span>Student ID</span><strong>${escapeHtml(student.studentId)}</strong>
       <span>Department</span><strong>${escapeHtml(student.department)}</strong>
-      <span>Class</span><strong>${escapeHtml(student.className)}</strong>
-      <span>Roll No.</span><strong>${escapeHtml(student.rollNumber)}</strong>
+      <span>Course</span><strong>${escapeHtml(student.course)}</strong>
       <span>Phone</span><strong>${escapeHtml(student.phone)}</strong>
     </div>`;
 });
@@ -51,7 +52,7 @@ onSnapshot(
       return `
         <article class="list-row">
           <div>
-            <strong>${escapeHtml(issue.bookId)}</strong>
+            <strong>${escapeHtml(issue.bookTitle || issue.bookId)}</strong>
             <span>Issued ${formatDate(issue.issueDate)} | Due ${formatDate(issue.dueDate)}</span>
           </div>
           ${statusBadge(issue.status)}

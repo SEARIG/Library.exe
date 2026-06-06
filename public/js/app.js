@@ -1,4 +1,4 @@
-import { auth, db } from "./firebase.js";
+import { auth, db } from "./firebase-config.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
@@ -20,17 +20,6 @@ export function formatDate(value) {
   if (!value) return "-";
   const date = value.toDate ? value.toDate() : new Date(value);
   return Number.isNaN(date.getTime()) ? "-" : date.toLocaleDateString();
-}
-
-export function addDays(date, days) {
-  const copy = new Date(date);
-  copy.setDate(copy.getDate() + days);
-  return copy;
-}
-
-export function daysBetween(start, end) {
-  const ms = new Date(end).setHours(0, 0, 0, 0) - new Date(start).setHours(0, 0, 0, 0);
-  return Math.max(0, Math.floor(ms / 86400000));
 }
 
 export function setLoading(form, isLoading) {

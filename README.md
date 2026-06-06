@@ -35,7 +35,7 @@ Responsive Firebase app for student book issue requests, librarian approvals, re
    firebase use --add
    ```
 
-6. Replace the placeholder values in `public/js/firebase-config.js` with your Firebase web app config.
+6. The Firebase web app config is already set in `public/js/firebase-config.js`.
 7. Install Cloud Functions dependencies:
 
    ```bash
@@ -63,6 +63,12 @@ Or serve only the static app:
 ```bash
 firebase serve --only hosting
 ```
+
+## GitHub and Vercel
+
+This repo is ready to push to GitHub. Keep Firebase secrets and local emulator files out of Git with the included `.gitignore`.
+
+For Vercel, import the GitHub repo and use `public` as the output directory. The static app can run on Vercel, but callable Cloud Functions, scheduled reminders, Firestore rules, and Firebase Auth still belong to the Firebase project and must be deployed with Firebase CLI.
 
 ## First Admin
 

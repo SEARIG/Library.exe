@@ -1,4 +1,4 @@
-import { db } from "./firebase.js";
+import { db } from "./firebase-config.js";
 import {
   $,
   escapeHtml,
