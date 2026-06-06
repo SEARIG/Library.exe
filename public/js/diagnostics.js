@@ -29,6 +29,8 @@ function render(data) {
         ${row("Current auth domain", data.authDomain)}
         ${row("Current Firebase SDK version", data.sdkVersion)}
         ${row("API key present", data.apiKeyPresent ? "Yes" : "No")}
+        ${row("API key prefix", data.apiKeyPrefix)}
+        ${row("Placeholder key exists in loaded config", data.loadedConfigHasPlaceholder ? "Yes" : "No")}
         ${row("API key type", data.apiKeyType)}
         ${row("Initialized app project ID", data.appOptionsProjectId)}
         ${row("Initialized app auth domain", data.appOptionsAuthDomain)}
@@ -43,6 +45,8 @@ function render(data) {
 
 try {
   const { app, auth, db } = await import("./firebase-config.js");
+  const apiKey = app?.options?.apiKey || "";
+  const placeholderKey = ["YOUR", "API", "KEY"].join("_");
   render({
     firebaseInitialized: Boolean(app),
     authInitialized: Boolean(auth),
@@ -52,12 +56,14 @@ try {
     projectId: app?.options?.projectId || "unknown",
     authDomain: app?.options?.authDomain || "unknown",
     sdkVersion: "11.10.0",
-    apiKeyPresent: typeof app?.options?.apiKey === "string" && app.options.apiKey.trim().length > 0,
-    apiKeyType: typeof app?.options?.apiKey,
+    apiKeyPresent: typeof apiKey === "string" && apiKey.trim().length > 0,
+    apiKeyPrefix: apiKey ? apiKey.slice(0, 8) : "missing",
+    loadedConfigHasPlaceholder: apiKey.includes(placeholderKey),
+    apiKeyType: typeof apiKey,
     appOptionsProjectId: app?.options?.projectId || "unknown",
     appOptionsAuthDomain: app?.options?.authDomain || "unknown",
-    appOptionsApiKeyPresent: typeof app?.options?.apiKey === "string" && app.options.apiKey.trim().length > 0,
-    appOptionsApiKeyMatchesConfig: app?.options?.apiKey === "AIzaSyDESyc7y76_pSHyqbzKlT8p5zS1h8tYm_0",
+    appOptionsApiKeyPresent: typeof apiKey === "string" && apiKey.trim().length > 0,
+    appOptionsApiKeyMatchesConfig: apiKey === "AIzaSyDESyc7y76_pSHyqbzKlT8p5zS1h8tYm_0",
     appCount: app ? 1 : 0,
     analyticsInitialized: false,
     errorMessage: ""
