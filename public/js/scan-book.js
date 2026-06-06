@@ -2,6 +2,7 @@ import { auth } from "./firebase-config.js";
 import {
   $,
   escapeHtml,
+  logDetailedError,
   renderEmpty,
   requireAuth,
   setLoading,
@@ -57,6 +58,7 @@ async function handleBarcode(value) {
     renderBookPreview(currentBook);
     openIssueDialog(currentBook);
   } catch (error) {
+    logDetailedError(error);
     showToast(error.message, "error");
   }
 }
@@ -121,6 +123,7 @@ issueForm.addEventListener("submit", async (event) => {
     issueDialog.close();
     showToast(`Issue request submitted: ${result.requestId}`, "success");
   } catch (error) {
+    logDetailedError(error);
     showToast(error.message, "error");
   } finally {
     setLoading(issueForm, false);
@@ -142,6 +145,7 @@ returnForm.addEventListener("submit", async (event) => {
       </div>`;
     returnForm.reset();
   } catch (error) {
+    logDetailedError(error);
     renderEmpty($("#returnResult"), error.message);
   } finally {
     setLoading(returnForm, false);
@@ -168,6 +172,7 @@ startCameraBtn.addEventListener("click", async () => {
       }
     }, 800);
   } catch (error) {
+    logDetailedError(error);
     showToast(error.message, "error");
   }
 });

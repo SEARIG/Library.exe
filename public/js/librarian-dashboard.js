@@ -3,6 +3,7 @@ import {
   $,
   escapeHtml,
   formatDate,
+  logDetailedError,
   renderEmpty,
   requireAuth,
   setLoading,
@@ -22,7 +23,7 @@ import {
   orderBy,
   query,
   where
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 wireSignOut();
 await requireAuth(["librarian", "admin"]);
@@ -75,6 +76,7 @@ $("#pendingRequests").addEventListener("click", async (event) => {
       showToast("Issue request rejected.", "success");
     }
   } catch (error) {
+    logDetailedError(error);
     showToast(error.message, "error");
   } finally {
     button.disabled = false;
@@ -177,6 +179,7 @@ $("#quickReturnForm").addEventListener("submit", async (event) => {
     showToast(`Returned. Penalty Rs.${Number(data.penaltyAmount || 0).toFixed(2)}.`, "success");
     event.target.reset();
   } catch (error) {
+    logDetailedError(error);
     showToast(error.message, "error");
   } finally {
     setLoading(event.target, false);

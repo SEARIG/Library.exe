@@ -2,6 +2,7 @@ import { db } from "./firebase-config.js";
 import {
   $,
   escapeHtml,
+  logDetailedError,
   renderEmpty,
   requireAuth,
   showToast,
@@ -16,7 +17,7 @@ import {
   orderBy,
   query,
   updateDoc
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 wireSignOut();
 await requireAuth(["admin"]);
@@ -94,6 +95,7 @@ $("#usersTable").addEventListener("click", async (event) => {
       showToast("Account status updated.", "success");
     }
   } catch (error) {
+    logDetailedError(error);
     showToast(error.message, "error");
   }
 });

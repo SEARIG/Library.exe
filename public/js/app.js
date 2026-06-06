@@ -1,6 +1,6 @@
 import { auth, db } from "./firebase-config.js";
-import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { doc, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-auth.js";
 
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -14,6 +14,14 @@ export function showToast(message, type = "info") {
   showToast.timer = window.setTimeout(() => {
     toast.className = "toast";
   }, 4200);
+}
+
+export function logDetailedError(error) {
+  console.error({
+    code: error?.code,
+    message: error?.message,
+    stack: error?.stack
+  });
 }
 
 export function formatDate(value) {
@@ -56,7 +64,15 @@ export function requireAuth(allowedRoles = []) {
         return;
       }
 
-      const profile = await getUserProfile(user.uid);
+      let profile;
+      try {
+        profile = await getUserProfile(user.uid);
+      } catch (error) {
+        logDetailedError(error);
+        await signOut(auth);
+        window.location.href = "login.html";
+        return;
+      }
       if (!profile || profile.active === false) {
         await signOut(auth);
         window.location.href = "login.html";

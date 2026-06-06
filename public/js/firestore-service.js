@@ -11,8 +11,8 @@ import {
   serverTimestamp,
   setDoc,
   where
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-functions.js";
+} from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { httpsCallable } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-functions.js";
 
 const ISSUE_DAYS = 45;
 const PENALTY_PER_DAY = 5;

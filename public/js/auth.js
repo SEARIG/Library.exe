@@ -1,10 +1,10 @@
 import { auth } from "./firebase-config.js";
-import { $, redirectForRole, setLoading, showToast } from "./app.js";
+import { $, logDetailedError, redirectForRole, setLoading, showToast } from "./app.js";
 import { createStudentProfile } from "./firestore-service.js";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+} from "https://www.gstatic.com/firebasejs/12.13.0/firebase-auth.js";
 
 const loginForm = $("#loginForm");
 if (loginForm) {
@@ -17,6 +17,7 @@ if (loginForm) {
       const credential = await signInWithEmailAndPassword(auth, email, password);
       await redirectForRole(credential.user);
     } catch (error) {
+      logDetailedError(error);
       showToast(error.message, "error");
       setLoading(loginForm, false);
     }
@@ -46,6 +47,7 @@ if (signupForm) {
 
       window.location.href = "student-dashboard.html";
     } catch (error) {
+      logDetailedError(error);
       showToast(error.message, "error");
       setLoading(signupForm, false);
     }

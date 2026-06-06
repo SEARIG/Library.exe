@@ -3,6 +3,7 @@ import {
   $,
   escapeHtml,
   formatDate,
+  logDetailedError,
   renderEmpty,
   requireAuth,
   setLoading,
@@ -18,7 +19,7 @@ import {
   query,
   serverTimestamp,
   setDoc
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 wireSignOut();
 await requireAuth(["librarian", "admin"]);
@@ -52,6 +53,7 @@ form.addEventListener("submit", async (event) => {
     form.reset();
     $("#status").value = "available";
   } catch (error) {
+    logDetailedError(error);
     showToast(error.message, "error");
   } finally {
     setLoading(form, false);
