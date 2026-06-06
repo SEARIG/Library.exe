@@ -112,45 +112,84 @@ async function ensureBarcodeDataUrl() {
   return latestBarcodeDataUrl;
 }
 
+async function fetchGoogleBookDetails(code) {
+  const cleanCode = code.trim().replace(/[-\s]/g, "");
+  const isbnUrl = `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(cleanCode)}`;
+
+  console.log("Fetching Google Books details for:", cleanCode);
+  console.log("Google Books API URL:", isbnUrl);
+  let response = await fetch(isbnUrl);
+  let data = await response.json();
+  console.log("Google Books result:", data);
+
+  if (!data.items || data.items.length === 0) {
+    const generalUrl = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(cleanCode)}`;
+    console.log("Google Books API URL:", generalUrl);
+    response = await fetch(generalUrl);
+    data = await response.json();
+    console.log("Google Books result:", data);
+  }
+
+  if (!data.items || data.items.length === 0) {
+    return null;
+  }
+
+  return data.items[0].volumeInfo;
+}
+
+function getPreferredIsbn(volumeInfo, fallback) {
+  const identifiers = volumeInfo.industryIdentifiers || [];
+  return identifiers.find((item) => item.type === "ISBN_13")?.identifier
+    || identifiers.find((item) => item.type === "ISBN_10")?.identifier
+    || fallback;
+}
+
 async function fetchGoogleBook() {
-  const barcode = $("#publisherBarcode").value.trim();
-  if (!barcode) {
-    showToast("Enter or scan a publisher barcode first.", "error");
+  const rawCode = $("#publisherBarcode").value;
+  const cleanCode = rawCode.trim().replace(/[-\s]/g, "");
+  if (!cleanCode) {
+    showToast("Enter or scan publisher barcode/ISBN first.", "error");
     return;
   }
 
-  const queries = [
-    `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(barcode)}`,
-    `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(barcode)}`
-  ];
+  try {
+    const info = await fetchGoogleBookDetails(cleanCode);
+    if (!info) {
+      $("#bookFetchPreview").innerHTML = `<div class="empty">No Google Books result found. Please fill details manually.</div>`;
+      showToast("No Google Books result found. Please fill details manually.", "error");
+      return;
+    }
 
-  for (const url of queries) {
-    const response = await fetch(url);
-    if (!response.ok) continue;
-    const data = await response.json();
-    const info = data.items?.[0]?.volumeInfo;
-    if (!info) continue;
+    const imageUrl = (info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || "").replace(/^http:\/\//, "https://");
+    const author = (info.authors || []).join(", ");
+    const publisher = info.publisher || "";
+    const title = info.title || "";
+    const isbn = getPreferredIsbn(info, cleanCode);
 
-    $("#bname").value = info.title || $("#bname").value;
-    $("#subject").value = info.categories?.join(", ") || $("#subject").value;
-    $("#author").value = info.authors?.join(", ") || "";
-    $("#publisher").value = info.publisher || "";
-    $("#imageUrl").value = (info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || "").replace(/^http:\/\//, "https://");
+    $("#publisherBarcode").value = cleanCode;
+    $("#isbn").value = isbn;
+    $("#bname").value = title;
+    $("#author").value = author;
+    $("#publisher").value = publisher;
+    $("#imageUrl").value = imageUrl;
+    if (info.categories?.length) {
+      $("#subject").value = info.categories[0];
+    }
+
     $("#bookFetchPreview").innerHTML = `
       <article class="book-preview">
-        <img src="${escapeHtml($("#imageUrl").value || "assets/book-placeholder.svg")}" alt="">
+        <img src="${escapeHtml(imageUrl || "assets/book-placeholder.svg")}" alt="">
         <div>
-          <strong>${escapeHtml($("#bname").value)}</strong>
-          <span>${escapeHtml($("#author").value || "Unknown author")}</span>
-          <span>${escapeHtml($("#publisher").value || "Publisher not found")}</span>
+          <strong>${escapeHtml(title || "Untitled book")}</strong>
+          <span>${escapeHtml(author || "Unknown author")}</span>
+          <span>${escapeHtml(publisher || "Publisher not found")}</span>
         </div>
       </article>`;
-    showToast("Book details fetched.", "success");
-    return;
+    showToast("Book details fetched successfully.", "success");
+  } catch (error) {
+    console.error("Google Books fetch failed:", error);
+    showToast("Google Books fetch failed. Please try again or fill manually.", "error");
   }
-
-  $("#bookFetchPreview").innerHTML = `<div class="empty">No details found. Please fill manually.</div>`;
-  showToast("No details found. Please fill manually.", "error");
 }
 
 async function stopPublisherScanner() {
@@ -196,7 +235,7 @@ async function saveBook(event) {
       category: $("#category").value,
       blegal_num: $("#blegalNum").value.trim(),
       publisherBarcode: $("#publisherBarcode").value.trim(),
-      isbn: $("#publisherBarcode").value.trim(),
+      isbn: ($("#isbn").value || $("#publisherBarcode").value).trim(),
       barcodeValue,
       barcodeDataUrl: "",
       author: $("#author").value.trim(),
@@ -323,6 +362,7 @@ function loadBookIntoForm(id, data) {
   $("#category").value = data.category || "other";
   $("#blegalNum").value = data.blegal_num || "";
   $("#publisherBarcode").value = data.publisherBarcode || data.isbn || "";
+  $("#isbn").value = data.isbn || data.publisherBarcode || "";
   $("#author").value = data.author || "";
   $("#publisher").value = data.publisher || "";
   $("#imageUrl").value = data.imageUrl || "";
@@ -352,10 +392,17 @@ async function printStickerFor(data) {
 }
 
 addBookForm.addEventListener("submit", saveBook);
-$("#fetchGoogleBtn").addEventListener("click", () => fetchGoogleBook().catch((error) => {
-  logDetailedError(error);
-  showToast(error.message, "error");
-}));
+function onDomReady(callback) {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", callback, { once: true });
+  } else {
+    callback();
+  }
+}
+
+onDomReady(() => {
+  $("#fetchGoogleBookBtn").addEventListener("click", fetchGoogleBook);
+});
 $("#scanPublisherBtn").addEventListener("click", () => startPublisherScanner().catch((error) => {
   logDetailedError(error);
   showToast(error.message, "error");

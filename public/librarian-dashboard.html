@@ -43,12 +43,13 @@
             </label>
             <label>BLegal Number / Inside Book Number<input id="blegalNum"></label>
             <label>Publisher Barcode / ISBN<input id="publisherBarcode"></label>
+            <input id="isbn" type="hidden">
             <input id="author" type="hidden">
             <input id="publisher" type="hidden">
             <input id="imageUrl" type="hidden">
             <div class="toolbar">
               <button class="btn btn-muted" id="scanPublisherBtn" type="button">Scan Publisher Barcode</button>
-              <button class="btn btn-muted" id="fetchGoogleBtn" type="button">Fetch Details from Google</button>
+              <button class="btn btn-muted" id="fetchGoogleBookBtn" type="button">Fetch Details from Google</button>
               <button class="btn btn-muted" id="generateBarcodeBtn" type="button">Generate Library Barcode</button>
             </div>
             <video id="publisherScannerVideo" class="scanner-video compact-video" playsinline autoplay muted hidden></video>
