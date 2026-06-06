@@ -72,7 +72,26 @@ For Vercel, import the GitHub repo and use `public` as the output directory. The
 
 ## First Admin
 
-Student signup intentionally creates only `student` accounts. To create the first admin:
+Student signup intentionally creates only `student` accounts. To create the default admin and librarian accounts, use either the local script or the setup page.
+
+Local script:
+
+```bash
+cd functions
+npm install
+cd ..
+node create-default-users.js
+```
+
+Setup page:
+
+```text
+public/setup-users.html
+```
+
+The setup page calls Cloud Functions and does not expose default passwords in frontend JavaScript.
+
+Manual fallback:
 
 1. Sign up normally.
 2. In Firestore, open `users/{uid}` for that account.

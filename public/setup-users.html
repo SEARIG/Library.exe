@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Setup Users | MLSU Library</title>
+    <link rel="stylesheet" href="css/styles.css">
+  </head>
+  <body class="auth-page">
+    <main class="auth-shell">
+      <section class="auth-brand">
+        <h1>Setup Users</h1>
+        <p>Create the default administrator and librarian accounts once through Firebase Cloud Functions.</p>
+      </section>
+      <section class="auth-card">
+        <h2>Default Accounts</h2>
+        <div id="setupStatus" class="auth-message" aria-live="polite"></div>
+        <div class="form-grid">
+          <button id="createAdminBtn" class="btn btn-primary" type="button">Create Default Admin</button>
+          <button id="createLibrarianBtn" class="btn btn-muted" type="button">Create Default Librarian</button>
+          <a class="btn btn-muted" href="login.html">Go to Login</a>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./js/setup-users.js"></script>
+  </body>
+</html>

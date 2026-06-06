@@ -9,6 +9,20 @@ const FieldValue = admin.firestore.FieldValue;
 const Timestamp = admin.firestore.Timestamp;
 const PENALTY_PER_DAY = 5;
 const ISSUE_DAYS = 45;
+const DEFAULT_USERS = {
+  admin: {
+    email: "admin@123.com",
+    password: "1332Admin!",
+    role: "admin",
+    name: "System Administrator"
+  },
+  librarian: {
+    email: "librarian@123.com",
+    password: "1334Librarian!",
+    role: "librarian",
+    name: "Library Staff"
+  }
+};
 
 async function requireRole(auth, roles) {
   if (!auth) {
@@ -48,6 +62,105 @@ function daysBetween(start, end) {
 function sendSms(phoneNumber, message) {
   console.log("SMS placeholder", { phoneNumber, message });
 }
+
+async function getAuthUserByEmail(email) {
+  try {
+    return await admin.auth().getUserByEmail(email);
+  } catch (error) {
+    if (error.code === "auth/user-not-found") return null;
+    throw error;
+  }
+}
+
+async function ensureDefaultUser(key) {
+  const defaults = DEFAULT_USERS[key];
+  if (!defaults) {
+    throw new HttpsError("invalid-argument", "Unknown default user type.");
+  }
+
+  let authUser = await getAuthUserByEmail(defaults.email);
+  let createdAuthUser = false;
+  if (!authUser) {
+    authUser = await admin.auth().createUser({
+      email: defaults.email,
+      password: defaults.password,
+      displayName: defaults.name,
+      emailVerified: true,
+      disabled: false
+    });
+    createdAuthUser = true;
+  }
+
+  const userRef = db.doc(`users/${authUser.uid}`);
+  const userSnap = await userRef.get();
+  if (!userSnap.exists) {
+    await userRef.set({
+      uid: authUser.uid,
+      email: defaults.email,
+      role: defaults.role,
+      name: defaults.name,
+      active: true,
+      createdAt: FieldValue.serverTimestamp()
+    });
+  } else {
+    await userRef.set({
+      uid: authUser.uid,
+      email: defaults.email,
+      role: defaults.role,
+      name: defaults.name,
+      active: true
+    }, { merge: true });
+  }
+
+  return {
+    uid: authUser.uid,
+    email: defaults.email,
+    role: defaults.role,
+    existed: !createdAuthUser && userSnap.exists,
+    authCreated: createdAuthUser,
+    profileCreated: !userSnap.exists
+  };
+}
+
+async function getDefaultUserStatus(key) {
+  const defaults = DEFAULT_USERS[key];
+  const authUser = await getAuthUserByEmail(defaults.email);
+  if (!authUser) {
+    return {
+      email: defaults.email,
+      role: defaults.role,
+      exists: false,
+      authExists: false,
+      profileExists: false
+    };
+  }
+
+  const userSnap = await db.doc(`users/${authUser.uid}`).get();
+  return {
+    uid: authUser.uid,
+    email: defaults.email,
+    role: defaults.role,
+    exists: userSnap.exists,
+    authExists: true,
+    profileExists: userSnap.exists
+  };
+}
+
+exports.getDefaultUsersStatus = onCall(async () => {
+  console.log("Checking default user setup status");
+  return {
+    admin: await getDefaultUserStatus("admin"),
+    librarian: await getDefaultUserStatus("librarian")
+  };
+});
+
+exports.setupDefaultUser = onCall(async (request) => {
+  const type = String(request.data?.type || "").trim().toLowerCase();
+  console.log("Default user setup requested", { type });
+  const result = await ensureDefaultUser(type);
+  console.log("Default user setup completed", result);
+  return result;
+});
 
 exports.approveIssueRequest = onCall(async (request) => {
   const actor = await requireRole(request.auth, ["librarian", "admin"]);
