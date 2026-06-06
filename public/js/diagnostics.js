@@ -42,8 +42,26 @@ function render(data) {
 }
 
 try {
-  const module = await import("./firebase-config.js");
-  render(module.firebaseDiagnostics);
+  const { app, auth, db } = await import("./firebase-config.js");
+  render({
+    firebaseInitialized: Boolean(app),
+    authInitialized: Boolean(auth),
+    firestoreInitialized: Boolean(db),
+    currentDomain: window.location.hostname,
+    currentOrigin: window.location.origin,
+    projectId: app?.options?.projectId || "unknown",
+    authDomain: app?.options?.authDomain || "unknown",
+    sdkVersion: "11.10.0",
+    apiKeyPresent: typeof app?.options?.apiKey === "string" && app.options.apiKey.trim().length > 0,
+    apiKeyType: typeof app?.options?.apiKey,
+    appOptionsProjectId: app?.options?.projectId || "unknown",
+    appOptionsAuthDomain: app?.options?.authDomain || "unknown",
+    appOptionsApiKeyPresent: typeof app?.options?.apiKey === "string" && app.options.apiKey.trim().length > 0,
+    appOptionsApiKeyMatchesConfig: app?.options?.apiKey === "AIzaSyDESyc7y76_pSHyqbzKlT8p5zS1h8tYm_0",
+    appCount: app ? 1 : 0,
+    analyticsInitialized: false,
+    errorMessage: ""
+  });
 } catch (error) {
   logDetailedError(error);
   render({

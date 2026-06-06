@@ -1,4 +1,4 @@
-import { auth, db, functions } from "./firebase-config.js";
+import { app, auth, db } from "./firebase-config.js";
 import {
   Timestamp,
   addDoc,
@@ -11,11 +11,15 @@ import {
   serverTimestamp,
   setDoc,
   where
-} from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { httpsCallable } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-functions.js";
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import {
+  getFunctions,
+  httpsCallable
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js";
 
 const ISSUE_DAYS = 45;
 const PENALTY_PER_DAY = 5;
+const functions = getFunctions(app);
 
 export function addDays(date, days) {
   const copy = new Date(date);

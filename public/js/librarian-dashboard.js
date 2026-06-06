@@ -23,7 +23,7 @@ import {
   orderBy,
   query,
   where
-} from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 
 wireSignOut();
 await requireAuth(["librarian", "admin"]);
