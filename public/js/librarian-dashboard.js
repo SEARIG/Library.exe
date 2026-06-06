@@ -18,21 +18,391 @@ import {
 } from "./firestore-service.js";
 import {
   collection,
+  doc,
+  getDoc,
   limit,
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
+  serverTimestamp,
+  updateDoc,
   where
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 
 wireSignOut();
-await requireAuth(["librarian", "admin"]);
+const session = await requireAuth(["librarian", "admin"]);
+const addBookForm = $("#addBookForm");
+const bookSearch = $("#bookSearch");
+let nextBookId = "1";
+let editingBookId = null;
+let latestBooks = [];
+let latestBarcodeDataUrl = "";
+let publisherStream = null;
+let publisherScanTimer = null;
 
 function timeOf(value) {
   if (!value) return 0;
   const date = value.toDate ? value.toDate() : new Date(value);
   return date.getTime();
 }
+
+function bookTitle(book) {
+  return book.bname || book.title || book.bookName || "";
+}
+
+function bookIdOf(book, fallbackId = "") {
+  return book.b_id || book.bookId || fallbackId;
+}
+
+function barcodeValueFor(bid) {
+  return `BOOK-${bid}`;
+}
+
+function setNextBookId(lastId = 0) {
+  nextBookId = String(Number(lastId || 0) + 1);
+  if (!editingBookId) {
+    $("#autoBId").value = nextBookId;
+    renderBarcode(barcodeValueFor(nextBookId), nextBookId);
+  }
+}
+
+onSnapshot(doc(db, "counters", "books"), (snap) => {
+  setNextBookId(snap.exists() ? snap.data().lastId : 0);
+});
+
+function renderBarcode(value, bid = $("#autoBId").value || nextBookId) {
+  $("#stickerBId").textContent = `B_ID: ${bid || "-"}`;
+  $("#stickerBarcodeValue").textContent = value || "BOOK-";
+  if (!value || !window.JsBarcode) return;
+  window.JsBarcode("#libraryBarcodeSvg", value, {
+    format: "CODE128",
+    width: 2,
+    height: 72,
+    displayValue: true,
+    margin: 8
+  });
+  latestBarcodeDataUrl = "";
+}
+
+function svgToPngDataUrl() {
+  return new Promise((resolve, reject) => {
+    const svg = $("#libraryBarcodeSvg");
+    const xml = new XMLSerializer().serializeToString(svg);
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(360, image.width || 360);
+      canvas.height = Math.max(130, image.height || 130);
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    image.onerror = reject;
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`;
+  });
+}
+
+async function ensureBarcodeDataUrl() {
+  if (!latestBarcodeDataUrl) {
+    latestBarcodeDataUrl = await svgToPngDataUrl();
+  }
+  return latestBarcodeDataUrl;
+}
+
+async function fetchGoogleBook() {
+  const barcode = $("#publisherBarcode").value.trim();
+  if (!barcode) {
+    showToast("Enter or scan a publisher barcode first.", "error");
+    return;
+  }
+
+  const queries = [
+    `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(barcode)}`,
+    `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(barcode)}`
+  ];
+
+  for (const url of queries) {
+    const response = await fetch(url);
+    if (!response.ok) continue;
+    const data = await response.json();
+    const info = data.items?.[0]?.volumeInfo;
+    if (!info) continue;
+
+    $("#bname").value = info.title || $("#bname").value;
+    $("#subject").value = info.categories?.join(", ") || $("#subject").value;
+    $("#author").value = info.authors?.join(", ") || "";
+    $("#publisher").value = info.publisher || "";
+    $("#imageUrl").value = (info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || "").replace(/^http:\/\//, "https://");
+    $("#bookFetchPreview").innerHTML = `
+      <article class="book-preview">
+        <img src="${escapeHtml($("#imageUrl").value || "assets/book-placeholder.svg")}" alt="">
+        <div>
+          <strong>${escapeHtml($("#bname").value)}</strong>
+          <span>${escapeHtml($("#author").value || "Unknown author")}</span>
+          <span>${escapeHtml($("#publisher").value || "Publisher not found")}</span>
+        </div>
+      </article>`;
+    showToast("Book details fetched.", "success");
+    return;
+  }
+
+  $("#bookFetchPreview").innerHTML = `<div class="empty">No details found. Please fill manually.</div>`;
+  showToast("No details found. Please fill manually.", "error");
+}
+
+async function stopPublisherScanner() {
+  window.clearInterval(publisherScanTimer);
+  publisherScanTimer = null;
+  if (publisherStream) {
+    publisherStream.getTracks().forEach((track) => track.stop());
+    publisherStream = null;
+  }
+  $("#publisherScannerVideo").hidden = true;
+}
+
+async function startPublisherScanner() {
+  if (!("BarcodeDetector" in window)) {
+    showToast("Camera barcode detection is not supported here. Enter the ISBN manually.", "error");
+    return;
+  }
+
+  const video = $("#publisherScannerVideo");
+  const detector = new BarcodeDetector({ formats: ["code_128", "code_39", "ean_13", "ean_8", "qr_code"] });
+  publisherStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+  video.srcObject = publisherStream;
+  video.hidden = false;
+  publisherScanTimer = window.setInterval(async () => {
+    const codes = await detector.detect(video);
+    if (!codes.length) return;
+    $("#publisherBarcode").value = codes[0].rawValue;
+    await stopPublisherScanner();
+    showToast("Publisher barcode scanned.", "success");
+  }, 750);
+}
+
+async function saveBook(event) {
+  event.preventDefault();
+  setLoading(addBookForm, true);
+  try {
+    const selectedBid = editingBookId || nextBookId;
+    const barcodeValue = barcodeValueFor(selectedBid);
+    renderBarcode(barcodeValue, selectedBid);
+    const payload = {
+      bname: $("#bname").value.trim(),
+      subject: $("#subject").value.trim(),
+      category: $("#category").value,
+      blegal_num: $("#blegalNum").value.trim(),
+      publisherBarcode: $("#publisherBarcode").value.trim(),
+      isbn: $("#publisherBarcode").value.trim(),
+      barcodeValue,
+      barcodeDataUrl: "",
+      author: $("#author").value.trim(),
+      publisher: $("#publisher").value.trim(),
+      imageUrl: $("#imageUrl").value.trim(),
+      status: "available",
+      issuedTo: null,
+      currentIssueId: null,
+      updatedAt: serverTimestamp()
+    };
+
+    if (!payload.bname) throw new Error("Book Name is required.");
+
+    if (editingBookId) {
+      payload.barcodeDataUrl = await ensureBarcodeDataUrl();
+      await updateDoc(doc(db, "books", editingBookId), payload);
+      showToast("Book updated.", "success");
+    } else {
+      const createdBookId = await runTransaction(db, async (transaction) => {
+        const counterRef = doc(db, "counters", "books");
+        const counterSnap = await transaction.get(counterRef);
+        const lastId = counterSnap.exists() ? Number(counterSnap.data().lastId || 0) : 0;
+        const newId = lastId + 1;
+        const bId = String(newId);
+        const bookRef = doc(db, "books", bId);
+        transaction.set(bookRef, {
+          ...payload,
+          b_id: bId,
+          barcodeValue: barcodeValueFor(bId),
+          createdBy: session.user.uid,
+          createdAt: serverTimestamp()
+        });
+        transaction.set(counterRef, { lastId: newId }, { merge: true });
+        return bId;
+      });
+      renderBarcode(barcodeValueFor(createdBookId), createdBookId);
+      await updateDoc(doc(db, "books", createdBookId), {
+        barcodeDataUrl: await ensureBarcodeDataUrl(),
+        updatedAt: serverTimestamp()
+      });
+      showToast("Book saved with library barcode.", "success");
+    }
+
+    editingBookId = null;
+    addBookForm.reset();
+    $("#category").value = "pyq";
+    $("#bookFetchPreview").innerHTML = `<div class="empty">Fetch details or fill the book manually.</div>`;
+    latestBarcodeDataUrl = "";
+    const counterSnap = await getDoc(doc(db, "counters", "books"));
+    setNextBookId(counterSnap.exists() ? counterSnap.data().lastId : 0);
+  } catch (error) {
+    logDetailedError(error);
+    showToast(error.message, "error");
+  } finally {
+    setLoading(addBookForm, false);
+  }
+}
+
+function renderBooksTable() {
+  const search = bookSearch.value.trim().toLowerCase();
+  const rows = latestBooks.filter(({ data }) => {
+    const haystack = [
+      data.b_id,
+      data.bname,
+      data.subject,
+      data.category,
+      data.blegal_num,
+      data.publisherBarcode,
+      data.barcodeValue
+    ].join(" ").toLowerCase();
+    return !search || haystack.includes(search);
+  });
+  const target = $("#booksTable");
+  if (!rows.length) {
+    renderEmpty(target, "No matching books found.");
+    return;
+  }
+
+  target.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>B_ID</th>
+          <th>Book Name</th>
+          <th>Subject</th>
+          <th>Category</th>
+          <th>BLegal Number</th>
+          <th>Publisher Barcode / ISBN</th>
+          <th>Library Barcode</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(({ id, data }) => `
+          <tr data-book-id="${escapeHtml(id)}">
+            <td>${escapeHtml(data.b_id || id)}</td>
+            <td><strong>${escapeHtml(bookTitle(data))}</strong><span>${escapeHtml(data.author || "")}</span></td>
+            <td>${escapeHtml(data.subject || "")}</td>
+            <td>${escapeHtml(data.category || "")}</td>
+            <td>${escapeHtml(data.blegal_num || "")}</td>
+            <td>${escapeHtml(data.publisherBarcode || data.isbn || "")}</td>
+            <td>${escapeHtml(data.barcodeValue || "")}</td>
+            <td>${statusBadge(data.status)}</td>
+            <td>
+              <div class="row-actions">
+                <button class="btn btn-muted" data-book-action="view">View</button>
+                <button class="btn btn-muted" data-book-action="edit">Edit</button>
+                <button class="btn btn-muted" data-book-action="print">Print Barcode</button>
+                <button class="btn btn-muted" data-book-action="lost">Mark Lost</button>
+                <button class="btn btn-muted" data-book-action="damaged">Mark Damaged</button>
+              </div>
+            </td>
+          </tr>`).join("")}
+      </tbody>
+    </table>`;
+}
+
+function loadBookIntoForm(id, data) {
+  editingBookId = id;
+  $("#autoBId").value = data.b_id || id;
+  $("#bname").value = bookTitle(data);
+  $("#subject").value = data.subject || "";
+  $("#category").value = data.category || "other";
+  $("#blegalNum").value = data.blegal_num || "";
+  $("#publisherBarcode").value = data.publisherBarcode || data.isbn || "";
+  $("#author").value = data.author || "";
+  $("#publisher").value = data.publisher || "";
+  $("#imageUrl").value = data.imageUrl || "";
+  $("#bookFetchPreview").innerHTML = `
+    <article class="book-preview">
+      <img src="${escapeHtml(data.imageUrl || "assets/book-placeholder.svg")}" alt="">
+      <div>
+        <strong>${escapeHtml(bookTitle(data))}</strong>
+        <span>${escapeHtml(data.author || "Unknown author")}</span>
+        <span>${escapeHtml(data.publisher || "")}</span>
+      </div>
+    </article>`;
+  renderBarcode(data.barcodeValue || barcodeValueFor(data.b_id || id), data.b_id || id);
+  showToast("Book loaded for editing.", "success");
+}
+
+async function printStickerFor(data) {
+  renderBarcode(data.barcodeValue || barcodeValueFor(data.b_id), data.b_id);
+  const html = $("#barcodeSticker").outerHTML;
+  const printWindow = window.open("", "_blank", "width=420,height=420");
+  if (!printWindow) {
+    showToast("Popup blocked. Allow popups to print barcode stickers.", "error");
+    return;
+  }
+  printWindow.document.write(`<html><head><title>Barcode</title><link rel="stylesheet" href="css/styles.css"></head><body>${html}<script>window.print(); window.close();</script></body></html>`);
+  printWindow.document.close();
+}
+
+addBookForm.addEventListener("submit", saveBook);
+$("#fetchGoogleBtn").addEventListener("click", () => fetchGoogleBook().catch((error) => {
+  logDetailedError(error);
+  showToast(error.message, "error");
+}));
+$("#scanPublisherBtn").addEventListener("click", () => startPublisherScanner().catch((error) => {
+  logDetailedError(error);
+  showToast(error.message, "error");
+}));
+$("#generateBarcodeBtn").addEventListener("click", () => {
+  const bid = $("#autoBId").value || nextBookId;
+  renderBarcode(barcodeValueFor(bid), bid);
+  showToast("Library barcode generated.", "success");
+});
+$("#downloadBarcodeBtn").addEventListener("click", async () => {
+  const dataUrl = await ensureBarcodeDataUrl();
+  const link = document.createElement("a");
+  link.href = dataUrl;
+  link.download = `${$("#stickerBarcodeValue").textContent || "barcode"}.png`;
+  link.click();
+});
+$("#printBarcodeBtn").addEventListener("click", () => printStickerFor({
+  b_id: $("#autoBId").value,
+  barcodeValue: $("#stickerBarcodeValue").textContent
+}));
+bookSearch.addEventListener("input", renderBooksTable);
+
+$("#booksTable").addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-book-action]");
+  if (!button) return;
+  const id = button.closest("[data-book-id]").dataset.bookId;
+  const found = latestBooks.find((item) => item.id === id);
+  if (!found) return;
+  const data = found.data;
+
+  try {
+    if (button.dataset.bookAction === "view" || button.dataset.bookAction === "edit") {
+      loadBookIntoForm(id, data);
+    } else if (button.dataset.bookAction === "print") {
+      await printStickerFor(data);
+    } else if (button.dataset.bookAction === "lost" || button.dataset.bookAction === "damaged") {
+      await updateDoc(doc(db, "books", id), {
+        status: button.dataset.bookAction,
+        updatedAt: serverTimestamp()
+      });
+      showToast(`Book marked ${button.dataset.bookAction}.`, "success");
+    }
+  } catch (error) {
+    logDetailedError(error);
+    showToast(error.message, "error");
+  }
+});
 
 onSnapshot(
   query(collection(db, "issueRequests"), where("status", "==", "pending")),
@@ -141,7 +511,7 @@ onSnapshot(
         <article class="list-row">
           <div>
             <strong>${escapeHtml(student.name)}</strong>
-            <span>${escapeHtml(student.studentId)} | ${escapeHtml(student.department)}</span>
+            <span>${escapeHtml(student.rollNumber || "")} | ${escapeHtml(student.department || "")} | ${escapeHtml(student.year || "")}</span>
           </div>
           ${statusBadge(student.active ? "active" : "inactive")}
         </article>`;
@@ -150,20 +520,22 @@ onSnapshot(
 );
 
 onSnapshot(
-  query(collection(db, "books"), orderBy("updatedAt", "desc"), limit(20)),
+  query(collection(db, "books"), orderBy("updatedAt", "desc"), limit(50)),
   (snap) => {
+    latestBooks = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
+    renderBooksTable();
     const target = $("#recentBooks");
     if (snap.empty) {
       renderEmpty(target, "No books found.");
       return;
     }
-    target.innerHTML = snap.docs.map((item) => {
-      const book = item.data();
+    target.innerHTML = latestBooks.slice(0, 8).map((item) => {
+      const book = item.data;
       return `
         <article class="list-row">
           <div>
-            <strong>${escapeHtml(book.title)}</strong>
-            <span>${escapeHtml(book.bookId)} | ${escapeHtml(book.shelfLocation)}</span>
+            <strong>${escapeHtml(bookTitle(book))}</strong>
+            <span>${escapeHtml(book.b_id || item.id)} | ${escapeHtml(book.category || "")}</span>
           </div>
           ${statusBadge(book.status)}
         </article>`;

@@ -69,9 +69,9 @@ function renderBookPreview(book) {
     <article class="book-preview">
       <img src="${escapeHtml(book.imageUrl || "assets/book-placeholder.svg")}" alt="">
       <div>
-        <strong>${escapeHtml(book.title)}</strong>
+        <strong>${escapeHtml(book.bname || book.title || book.id)}</strong>
         <span>${escapeHtml(book.author || "Unknown author")}</span>
-        <span>${escapeHtml(book.shelfLocation || "Shelf not set")}</span>
+        <span>${escapeHtml(book.subject || book.shelfLocation || "Subject not set")}</span>
         <span class="badge badge-${escapeHtml(book.status)}">${escapeHtml(book.status)}</span>
       </div>
     </article>`;
@@ -90,10 +90,10 @@ async function openIssueDialog(book) {
 
   $("#requestStudentUid").value = auth.currentUser.uid;
   $("#requestStudentName").value = currentStudent.name || "";
-  $("#requestStudentId").value = currentStudent.studentId || "";
-  $("#requestBookId").value = book.bookId || book.id;
-  $("#requestBookTitle").value = book.title || "";
-  $("#dialogBookTitle").textContent = book.title || book.bookId || book.id;
+  $("#requestRollNumber").value = currentStudent.rollNumber || "";
+  $("#requestBookId").value = book.b_id || book.bookId || book.id;
+  $("#requestBookTitle").value = book.bname || book.title || "";
+  $("#dialogBookTitle").textContent = book.bname || book.title || book.b_id || book.bookId || book.id;
   $("#requestIssueDate").value = issueDate.toISOString().slice(0, 10);
   $("#requestDueDate").value = dueDate.toISOString().slice(0, 10);
   $("#confirmOwnAccount").checked = false;

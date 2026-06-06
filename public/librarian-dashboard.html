@@ -25,6 +25,52 @@
         <p>Review pending issue requests, verify availability, and process returns.</p>
       </section>
       <section class="dashboard-grid">
+        <article class="panel span-5">
+          <h2>Add Book / Generate Barcode</h2>
+          <form id="addBookForm" class="form-grid">
+            <label>Auto B_ID<input id="autoBId" readonly></label>
+            <label>Book Name<input id="bname" required></label>
+            <label>Subject<input id="subject"></label>
+            <label>Category
+              <select id="category" required>
+                <option value="pyq">pyq</option>
+                <option value="qna">qna</option>
+                <option value="textbook">textbook</option>
+                <option value="reference">reference</option>
+                <option value="notes">notes</option>
+                <option value="other">other</option>
+              </select>
+            </label>
+            <label>BLegal Number / Inside Book Number<input id="blegalNum"></label>
+            <label>Publisher Barcode / ISBN<input id="publisherBarcode"></label>
+            <input id="author" type="hidden">
+            <input id="publisher" type="hidden">
+            <input id="imageUrl" type="hidden">
+            <div class="toolbar">
+              <button class="btn btn-muted" id="scanPublisherBtn" type="button">Scan Publisher Barcode</button>
+              <button class="btn btn-muted" id="fetchGoogleBtn" type="button">Fetch Details from Google</button>
+              <button class="btn btn-muted" id="generateBarcodeBtn" type="button">Generate Library Barcode</button>
+            </div>
+            <video id="publisherScannerVideo" class="scanner-video compact-video" playsinline autoplay muted hidden></video>
+            <div id="bookFetchPreview" class="empty">Fetch details or fill the book manually.</div>
+            <div id="barcodeSticker" class="barcode-sticker">
+              <strong>MLSU Library</strong>
+              <span id="stickerBId">B_ID: -</span>
+              <svg id="libraryBarcodeSvg"></svg>
+              <span id="stickerBarcodeValue">BOOK-</span>
+            </div>
+            <div class="toolbar">
+              <button class="btn btn-muted" id="downloadBarcodeBtn" type="button">Download Barcode as PNG</button>
+              <button class="btn btn-muted" id="printBarcodeBtn" type="button">Print Barcode Sticker</button>
+              <button class="btn btn-primary" id="saveBookBtn" type="submit">Save Book</button>
+            </div>
+          </form>
+        </article>
+        <article class="panel span-7">
+          <h2>Book Database</h2>
+          <label>Search Books<input id="bookSearch" placeholder="Search by B_ID, name, subject, category, inside number, publisher barcode, or library barcode"></label>
+          <div id="booksTable" class="table-wrap"></div>
+        </article>
         <article class="panel span-8">
           <h2>Pending Requests</h2>
           <div id="pendingRequests" class="list-stack"></div>
@@ -55,6 +101,7 @@
       </section>
     </main>
     <div id="toast" class="toast"></div>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
     <script type="module" src="./js/librarian-dashboard.js"></script>
   </body>
 </html>

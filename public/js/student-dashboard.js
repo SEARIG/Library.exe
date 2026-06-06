@@ -1,5 +1,5 @@
 import { db } from "./firebase-config.js";
-import { $, escapeHtml, formatDate, renderEmpty, requireAuth, statusBadge, wireSignOut } from "./app.js";
+import { $, escapeHtml, formatDate, renderEmpty, requireAuth, showToast, statusBadge, wireSignOut } from "./app.js";
 import {
   collection,
   doc,
@@ -28,13 +28,30 @@ onSnapshot(doc(db, "students", user.uid), (snap) => {
     <div class="detail-grid">
       <span>Name</span><strong>${escapeHtml(student.name)}</strong>
       <span>Email</span><strong>${escapeHtml(student.email)}</strong>
-      <span>Student UID</span><strong>${escapeHtml(student.uid)}</strong>
-      <span>Student ID</span><strong>${escapeHtml(student.studentId)}</strong>
-      <span>Department</span><strong>${escapeHtml(student.department)}</strong>
-      <span>Course</span><strong>${escapeHtml(student.course)}</strong>
       <span>Phone</span><strong>${escapeHtml(student.phone)}</strong>
+      <span>Roll Number</span><strong>${escapeHtml(student.rollNumber)}</strong>
+      <span>Department</span><strong>${escapeHtml(student.department)}</strong>
+      <span>Year</span><strong>${escapeHtml(student.year)}</strong>
+      <span>Student UID</span>
+      <strong class="uid-box">
+        <span>${escapeHtml(shortUid(student.uid))}</span>
+        <button class="btn btn-muted uid-copy" id="copyUidBtn" type="button">Copy UID</button>
+      </strong>
     </div>`;
+  $("#copyUidBtn")?.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(student.uid);
+      showToast("Student UID copied.", "success");
+    } catch {
+      showToast("Copy is unavailable in this browser. Select the UID manually.", "error");
+    }
+  });
 });
+
+function shortUid(uid = "") {
+  if (uid.length <= 18) return uid;
+  return `${uid.slice(0, 8)}...${uid.slice(-6)}`;
+}
 
 onSnapshot(
   query(collection(db, "bookIssues"), where("studentUid", "==", user.uid)),

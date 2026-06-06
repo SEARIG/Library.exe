@@ -70,7 +70,7 @@ if (signupForm) {
       const password = document.querySelector("#password").value;
       const rollNumber = document.querySelector("#rollNumber").value.trim();
       const department = document.querySelector("#department").value.trim();
-      const className = document.querySelector("#className").value.trim();
+      const year = document.querySelector("#year").value.trim();
 
       const credential = await createUserWithEmailAndPassword(auth, email, password);
       const uid = credential.user.uid;
@@ -92,8 +92,10 @@ if (signupForm) {
         email,
         phone,
         department,
-        className,
-        createdAt: serverTimestamp()
+        year,
+        active: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
       });
 
       showMessage("Signup successful. Redirecting...", "success");

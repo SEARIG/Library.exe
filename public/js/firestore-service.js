@@ -62,9 +62,11 @@ export async function createStudentProfile(uid, profile) {
 
   await setDoc(doc(db, "students", uid), {
     ...common,
-    studentId: profile.studentId,
+    rollNumber: profile.rollNumber,
     department: profile.department,
-    course: profile.course
+    year: profile.year,
+    active: true,
+    updatedAt: serverTimestamp()
   });
 }
 
@@ -104,9 +106,9 @@ export async function createIssueRequest({ student, book }) {
   const ref = await addDoc(collection(db, "issueRequests"), {
     studentUid: student.uid,
     studentName: student.name,
-    studentId: student.studentId,
-    bookId: book.bookId || book.id,
-    bookTitle: book.title,
+    rollNumber: student.rollNumber || "",
+    bookId: book.b_id || book.bookId || book.id,
+    bookTitle: book.bname || book.title || "",
     bookImage: book.imageUrl || "",
     issueDate: Timestamp.fromDate(issueDate),
     dueDate: Timestamp.fromDate(dueDate),

@@ -49,13 +49,19 @@ service cloud.firestore {
     }
 
     match /books/{bookId} {
-      allow read: if signedIn();
+      allow read: if signedIn() && (isLibrarian() || resource.data.status == "available");
       allow create: if isLibrarian()
-        && request.resource.data.bookId == bookId
+        && (request.resource.data.b_id == bookId || request.resource.data.bookId == bookId)
         && request.resource.data.status in ["available", "issued", "lost", "damaged"];
       allow update: if isLibrarian()
-        && request.resource.data.bookId == bookId
+        && (request.resource.data.b_id == bookId || request.resource.data.bookId == bookId)
         && request.resource.data.status in ["available", "issued", "lost", "damaged"];
+      allow delete: if isAdmin();
+    }
+
+    match /counters/{counterId} {
+      allow read: if isLibrarian();
+      allow create, update: if isLibrarian() && counterId == "books";
       allow delete: if isAdmin();
     }
 
