@@ -234,13 +234,80 @@ function cleanGoogleBookCode(rawCode) {
 function updateGoogleFetchDebug(details) {
   const debugBox = document.getElementById("googleFetchDebug");
   if (!debugBox) return;
+  const attempts = details.attempts || [details];
   debugBox.innerHTML = `
-    <strong>Google Books Debug</strong>
-    <span>Cleaned code: ${escapeHtml(details.cleanCode || "-")}</span>
-    <span>API URL tried: ${escapeHtml(details.url || "-")}</span>
-    <span>Response status: ${escapeHtml(details.status ?? "-")}</span>
-    <span>Result count: ${escapeHtml(details.resultCount ?? "-")}</span>
-    <span>Error: ${escapeHtml(details.error || "-")}</span>`;
+    <strong>Online Metadata Debug</strong>
+    <span>ISBN scanned: ${escapeHtml(details.cleanCode || "-")}</span>
+    ${attempts.map((attempt) => `
+      <span>Source tried: ${escapeHtml(attempt.source || "-")}</span>
+      <span>API URL tried: ${escapeHtml(attempt.url || "-")}</span>
+      <span>Response status: ${escapeHtml(attempt.status ?? "-")}</span>
+      <span>Results found: ${escapeHtml(attempt.resultCount ?? "-")}</span>
+      <span>Error: ${escapeHtml(attempt.error || "-")}</span>
+    `).join("")}`;
+}
+
+function normalizeGoogleBook(info, cleanCode) {
+  const identifiers = info.industryIdentifiers || [];
+  const isbn13 = identifiers.find((item) => item.type === "ISBN_13")?.identifier || "";
+  const isbn10 = identifiers.find((item) => item.type === "ISBN_10")?.identifier || "";
+  return {
+    title: info.title || "",
+    authors: Array.isArray(info.authors) ? info.authors.join(", ") : "",
+    publisher: info.publisher || "",
+    categories: Array.isArray(info.categories) ? info.categories.join(", ") : "",
+    imageUrl: info.imageLinks?.thumbnail
+      ? info.imageLinks.thumbnail.replace("http://", "https://")
+      : "",
+    isbn13,
+    isbn10,
+    isbn: isbn13 || isbn10 || cleanCode,
+    source: "Google Books"
+  };
+}
+
+async function fetchOpenLibraryAuthorName(authorRef) {
+  if (!authorRef?.key) return "";
+  try {
+    const response = await fetch(`https://openlibrary.org${authorRef.key}.json`, {
+      method: "GET",
+      headers: { "Accept": "application/json" }
+    });
+    if (!response.ok) return "";
+    const data = await response.json();
+    return data.name || "";
+  } catch {
+    return "";
+  }
+}
+
+async function normalizeOpenLibraryIsbn(data, cleanCode) {
+  const authorNames = await Promise.all((data.authors || []).slice(0, 4).map(fetchOpenLibraryAuthorName));
+  return {
+    title: data.title || "",
+    authors: authorNames.filter(Boolean).join(", "),
+    publisher: Array.isArray(data.publishers) ? data.publishers.join(", ") : "",
+    categories: Array.isArray(data.subjects) ? data.subjects.slice(0, 3).join(", ") : "",
+    imageUrl: data.covers?.[0] ? `https://covers.openlibrary.org/b/id/${data.covers[0]}-M.jpg` : "",
+    isbn13: Array.isArray(data.isbn_13) ? data.isbn_13[0] : "",
+    isbn10: Array.isArray(data.isbn_10) ? data.isbn_10[0] : "",
+    isbn: (Array.isArray(data.isbn_13) && data.isbn_13[0]) || (Array.isArray(data.isbn_10) && data.isbn_10[0]) || cleanCode,
+    source: "Open Library ISBN"
+  };
+}
+
+function normalizeOpenLibrarySearch(doc, cleanCode) {
+  return {
+    title: doc.title || "",
+    authors: Array.isArray(doc.author_name) ? doc.author_name.join(", ") : "",
+    publisher: Array.isArray(doc.publisher) ? doc.publisher[0] || "" : "",
+    categories: Array.isArray(doc.subject) ? doc.subject.slice(0, 3).join(", ") : "",
+    imageUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : "",
+    isbn13: Array.isArray(doc.isbn) ? doc.isbn.find((item) => String(item).length === 13) || "" : "",
+    isbn10: Array.isArray(doc.isbn) ? doc.isbn.find((item) => String(item).length === 10) || "" : "",
+    isbn: cleanCode,
+    source: "Open Library Search"
+  };
 }
 
 async function fetchGoogleBookDetails(rawCode) {
@@ -250,48 +317,71 @@ async function fetchGoogleBookDetails(rawCode) {
     throw new Error("Enter or scan ISBN/publisher barcode first.");
   }
 
-  const urls = [
-    `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(cleanCode)}`,
-    `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(cleanCode)}`
+  const attempts = [];
+  const lookups = [
+    {
+      source: "Google Books",
+      url: `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(cleanCode)}`,
+      getCount: (data) => data.items?.length || 0,
+      getResult: (data) => data.items?.[0]?.volumeInfo ? normalizeGoogleBook(data.items[0].volumeInfo, cleanCode) : null
+    },
+    {
+      source: "Open Library ISBN",
+      url: `https://openlibrary.org/isbn/${encodeURIComponent(cleanCode)}.json`,
+      getCount: (data) => data.title ? 1 : 0,
+      getResult: async (data) => data.title ? normalizeOpenLibraryIsbn(data, cleanCode) : null
+    },
+    {
+      source: "Open Library Search",
+      url: `https://openlibrary.org/search.json?isbn=${encodeURIComponent(cleanCode)}`,
+      getCount: (data) => data.docs?.length || 0,
+      getResult: (data) => data.docs?.[0] ? normalizeOpenLibrarySearch(data.docs[0], cleanCode) : null
+    }
   ];
 
-  for (const url of urls) {
-    console.log("Trying Google Books URL:", url);
+  for (const lookup of lookups) {
+    console.log("Trying metadata URL:", lookup.url);
 
-    const response = await fetch(url, {
+    const response = await fetch(lookup.url, {
       method: "GET",
       headers: {
         "Accept": "application/json"
       }
     });
 
-    console.log("Google Books response status:", response.status);
+    console.log("Metadata response status:", response.status);
 
     if (!response.ok) {
       const text = await response.text();
-      console.error("Google Books API error response:", text);
-      updateGoogleFetchDebug({
-        cleanCode,
-        url,
+      console.error("Metadata API error response:", text);
+      attempts.push({
+        source: lookup.source,
+        url: lookup.url,
         status: response.status,
         resultCount: 0,
         error: text
       });
+      updateGoogleFetchDebug({ cleanCode, attempts });
       continue;
     }
 
     const data = await response.json();
-    console.log("Google Books data:", data);
-    updateGoogleFetchDebug({
-      cleanCode,
-      url,
+    console.log("Metadata data:", data);
+    const resultCount = lookup.getCount(data);
+    attempts.push({
+      source: lookup.source,
+      url: lookup.url,
       status: response.status,
-      resultCount: data.items?.length || 0,
+      resultCount,
       error: ""
     });
+    updateGoogleFetchDebug({ cleanCode, attempts });
 
-    if (data.items && data.items.length > 0) {
-      return data.items[0].volumeInfo;
+    if (resultCount > 0) {
+      const result = await lookup.getResult(data);
+      if (result && (result.title || result.publisher || result.authors)) {
+        return result;
+      }
     }
   }
 
@@ -306,25 +396,14 @@ async function fetchGoogleBook(event) {
   try {
     const info = await fetchGoogleBookDetails(barcodeInput?.value);
     if (!info) {
-      $("#bookFetchPreview").innerHTML = `<div class="empty">No Google Books result found. Please fill manually.</div>`;
+      $("#bookFetchPreview").innerHTML = `<div class="empty">No online metadata found. Please enter details manually.</div>`;
       if (!/^\d{10}(\d{3})?$/.test(cleanCode)) {
         showToast("This barcode may not be an ISBN. Google Books can only fetch details from ISBN/publisher barcode. Please type manually.", "error");
       } else {
-        showToast("No Google Books result found. Please fill manually.", "error");
+        showToast("No online metadata found. Please enter details manually.", "error");
       }
       return;
     }
-
-    const title = info.title || "";
-    const authors = Array.isArray(info.authors) ? info.authors.join(", ") : "";
-    const publisher = info.publisher || "";
-    const categories = Array.isArray(info.categories) ? info.categories.join(", ") : "";
-    const imageUrl = info.imageLinks?.thumbnail
-      ? info.imageLinks.thumbnail.replace("http://", "https://")
-      : "";
-    const identifiers = info.industryIdentifiers || [];
-    const isbn13 = identifiers.find((item) => item.type === "ISBN_13")?.identifier || "";
-    const isbn10 = identifiers.find((item) => item.type === "ISBN_10")?.identifier || "";
 
     const bnameEl = document.getElementById("bnameInput");
     const subjectEl = document.getElementById("subjectInput");
@@ -334,26 +413,27 @@ async function fetchGoogleBook(event) {
     const imageUrlEl = document.getElementById("imageUrlInput");
     const publisherBarcodeEl = document.getElementById("publisherBarcodeInput");
 
-    if (bnameEl && title) bnameEl.value = title;
-    if (subjectEl && categories) subjectEl.value = categories;
-    if (authorEl) authorEl.value = authors;
-    if (publisherEl) publisherEl.value = publisher;
-    if (isbnEl) isbnEl.value = isbn13 || isbn10 || cleanCode;
-    if (imageUrlEl) imageUrlEl.value = imageUrl;
+    if (bnameEl && info.title) bnameEl.value = info.title;
+    if (subjectEl && info.categories) subjectEl.value = info.categories;
+    if (authorEl) authorEl.value = info.authors;
+    if (publisherEl) publisherEl.value = info.publisher;
+    if (isbnEl) isbnEl.value = info.isbn || info.isbn13 || info.isbn10 || cleanCode;
+    if (imageUrlEl) imageUrlEl.value = info.imageUrl;
     if (publisherBarcodeEl) publisherBarcodeEl.value = cleanCode;
 
     $("#bookFetchPreview").innerHTML = `
       <article class="book-preview">
-        <img src="${escapeHtml(imageUrl || "assets/book-placeholder.svg")}" alt="">
+        <img src="${escapeHtml(info.imageUrl || "assets/book-placeholder.svg")}" alt="">
         <div>
-          <strong>${escapeHtml(title || "Untitled book")}</strong>
-          <span>${escapeHtml(authors || "Unknown author")}</span>
-          <span>${escapeHtml(publisher || "Publisher not found")}</span>
+          <strong>${escapeHtml(info.title || "Untitled book")}</strong>
+          <span>${escapeHtml(info.authors || "Unknown author")}</span>
+          <span>${escapeHtml(info.publisher || "Publisher not found")}</span>
+          <span>${escapeHtml(info.source || "Online metadata")}</span>
         </div>
       </article>`;
     showToast("Book details fetched successfully.", "success");
   } catch (error) {
-    console.error("Google Books fetch failed:", error);
+    console.error("Online metadata fetch failed:", error);
     updateGoogleFetchDebug({
       cleanCode,
       url: "-",
@@ -361,7 +441,7 @@ async function fetchGoogleBook(event) {
       resultCount: "-",
       error: error.message
     });
-    showToast(error.message || "Google Books fetch failed. Please try again or fill manually.", "error");
+    showToast(error.message || "Online metadata fetch failed. Please try again or fill manually.", "error");
   }
 }
 
