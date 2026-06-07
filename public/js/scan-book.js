@@ -1,4 +1,4 @@
-import { auth } from "./firebase-config.js";
+import { auth, db } from "./firebase-config.js";
 import {
   $,
   escapeHtml,
@@ -16,6 +16,11 @@ import {
   getStudentProfile,
   returnBook
 } from "./firestore-service.js";
+import { sendEmailNotification } from "./notifications.js";
+import {
+  doc,
+  getDoc
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 
 wireSignOut();
 const session = await requireAuth(["student", "librarian", "admin"]);
@@ -149,6 +154,21 @@ returnForm.addEventListener("submit", async (event) => {
   setLoading(returnForm, true);
   try {
     const data = await returnBook($("#returnBookId").value.trim());
+    if (data.studentUid) {
+      const studentSnap = await getDoc(doc(db, "students", data.studentUid));
+      const student = studentSnap.exists() ? studentSnap.data() : {};
+      sendEmailNotification("returned", {
+        studentName: student.name || data.studentName || "Student",
+        studentEmail: student.email || "",
+        bookTitle: data.bookTitle,
+        issueDate: data.issueDate,
+        dueDate: data.dueDate,
+        returnDate: data.returnDate,
+        penaltyAmount: data.penaltyAmount
+      }).catch((error) => {
+        console.error("Return email notification failed:", error);
+      });
+    }
     $("#returnResult").innerHTML = `
       <div class="success-box">
         <strong>Book returned successfully.</strong>

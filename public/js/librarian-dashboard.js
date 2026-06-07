@@ -15,6 +15,10 @@ import {
   returnBook
 } from "./firestore-service.js";
 import {
+  runReminderCheck,
+  sendEmailNotification
+} from "./notifications.js";
+import {
   collection,
   doc,
   getDoc,
@@ -68,6 +72,7 @@ function barcodeValueFor(bid) {
 
 async function approveRequest(requestId) {
   console.log("Selected requestId:", requestId);
+  let notificationPayload = null;
   await runTransaction(db, async (transaction) => {
     const requestRef = doc(db, "issueRequests", requestId);
     const requestSnap = await transaction.get(requestRef);
@@ -150,7 +155,23 @@ async function approveRequest(requestId) {
     transaction.update(bookRef, bookUpdate);
     console.log("Updating issue request:", { requestId, requestUpdate });
     transaction.update(requestRef, requestUpdate);
+    notificationPayload = {
+      studentUid: requestData.studentUid,
+      studentName: requestData.studentName || "",
+      bookTitle: issuePayload.bookTitle,
+      issueDate: requestData.issueDate,
+      dueDate: requestData.dueDate
+    };
   });
+
+  if (notificationPayload?.studentUid) {
+    const studentSnap = await getDoc(doc(db, "students", notificationPayload.studentUid));
+    const student = studentSnap.exists() ? studentSnap.data() : {};
+    notificationPayload.studentEmail = student.email || "";
+    notificationPayload.studentName = notificationPayload.studentName || student.name || "Student";
+  }
+
+  return notificationPayload;
 }
 
 async function rejectRequest(requestId) {
@@ -877,7 +898,10 @@ $("#pendingRequests").addEventListener("click", async (event) => {
   button.disabled = true;
   try {
     if (button.dataset.action === "approve") {
-      await approveRequest(requestId);
+      const notificationPayload = await approveRequest(requestId);
+      sendEmailNotification("issued", notificationPayload).catch((error) => {
+        console.error("Issue email notification failed:", error);
+      });
       showToast("Issue request approved.", "success");
     } else {
       await rejectRequest(requestId);
@@ -997,6 +1021,21 @@ $("#quickReturnForm").addEventListener("submit", async (event) => {
   try {
     const data = await returnBook($("#quickReturnBookId").value.trim());
     console.log("Return completed:", data);
+    if (data.studentUid) {
+      const studentSnap = await getDoc(doc(db, "students", data.studentUid));
+      const student = studentSnap.exists() ? studentSnap.data() : {};
+      sendEmailNotification("returned", {
+        studentName: student.name || data.studentName || "Student",
+        studentEmail: student.email || "",
+        bookTitle: data.bookTitle,
+        issueDate: data.issueDate,
+        dueDate: data.dueDate,
+        returnDate: data.returnDate,
+        penaltyAmount: data.penaltyAmount
+      }).catch((error) => {
+        console.error("Return email notification failed:", error);
+      });
+    }
     showToast("Book returned successfully.", "success");
     event.target.reset();
   } catch (error) {
@@ -1014,3 +1053,56 @@ $("#startQuickReturnScannerBtn").addEventListener("click", () => startQuickRetur
   showToast(error.message, "error");
 }));
 $("#stopQuickReturnScannerBtn").addEventListener("click", () => stopQuickReturnScanner());
+
+function renderNotificationResult(result) {
+  $("#notificationResult").innerHTML = `
+    <div class="success-box">
+      <strong>Reminder check complete</strong>
+      <span>Checked: ${result.checked}</span>
+      <span>Emails sent: ${result.sent}</span>
+      <span>Skipped: ${result.skipped}</span>
+    </div>`;
+}
+
+$("#runReminderCheckBtn").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const result = await runReminderCheck();
+    renderNotificationResult(result);
+    showToast("Reminder check complete.", "success");
+  } catch (error) {
+    logDetailedError(error);
+    $("#notificationResult").innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+    showToast(error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$("#sendTestEmailBtn").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const result = await sendEmailNotification("issued", {
+      studentName: session.profile.name || "MLSU User",
+      studentEmail: session.profile.email || session.user.email,
+      bookTitle: "Test Book",
+      dueDate: new Date()
+    });
+    $("#notificationResult").innerHTML = `
+      <div class="success-box">
+        <strong>Test email ${result.sent ? "sent" : "skipped"}</strong>
+        <span>Checked: 1</span>
+        <span>Emails sent: ${result.sent ? 1 : 0}</span>
+        <span>Skipped: ${result.sent ? 0 : 1}</span>
+      </div>`;
+    showToast(result.sent ? "Test email sent." : "EmailJS is not configured yet.", result.sent ? "success" : "error");
+  } catch (error) {
+    logDetailedError(error);
+    $("#notificationResult").innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+    showToast(error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+});

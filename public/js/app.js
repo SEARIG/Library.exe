@@ -1,4 +1,5 @@
 import { auth, db } from "./firebase-config.js";
+import "./push-notifications.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 

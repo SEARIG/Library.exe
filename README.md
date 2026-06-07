@@ -1,6 +1,6 @@
 # MLSU Library Management Web App
 
-Responsive Firebase app for student book issue requests, librarian approvals, returns, penalties, and scheduled SMS reminder placeholders.
+Responsive Firebase app for student book issue requests, librarian approvals, returns, penalties, EmailJS notifications, and PWA notification preparation.
 
 ## Stack
 
@@ -8,6 +8,7 @@ Responsive Firebase app for student book issue requests, librarian approvals, re
 - Cloud Firestore
 - Firebase Hosting
 - Firebase Cloud Functions
+- EmailJS browser email notifications
 - HTML, CSS, JavaScript
 
 ## Project Structure
@@ -106,11 +107,106 @@ After the first admin exists, use `admin-dashboard.html` to promote librarians o
 2. Student opens `scan-book.html`, scans or enters a book barcode, reviews the auto-filled popup, confirms ownership, and submits an `issueRequests` record.
 3. Librarian opens `librarian-dashboard.html`, approves or rejects pending requests.
 4. Approval runs in a Cloud Function transaction, creates `bookIssues/{issueId}`, updates the book to `issued`, and marks the request `approved`.
-5. Librarian scans or enters the book barcode for returns. The Cloud Function calculates late days and creates a penalty when the issue exceeds 45 days.
+5. Librarian scans or enters the book barcode for returns. The return flow calculates late days and clears the active issue state.
+6. EmailJS can notify students when books are issued, returned, or need reminders.
 
-## SMS Reminder Placeholder
+## Email Notifications
 
-`sendIssueReminders` runs daily at 09:00 and calls `sendSms(phoneNumber, message)` for day 15, day 30, and day 45 reminders. Replace the placeholder with your SMS provider SDK or HTTP API.
+The app uses [EmailJS](https://www.emailjs.com/) for free frontend-triggered email notifications. No private keys should be stored in frontend code.
+
+Notification helper:
+
+```text
+public/js/notifications.js
+```
+
+Reusable function:
+
+```js
+sendEmailNotification(type, payload)
+```
+
+Supported types:
+
+- `issued`
+- `returned`
+- `reminder15`
+- `reminder30`
+- `reminder45`
+
+Payload shape:
+
+```js
+{
+  studentName,
+  studentEmail,
+  bookTitle,
+  issueDate,
+  dueDate,
+  returnDate,
+  penaltyAmount
+}
+```
+
+### EmailJS Setup
+
+1. Create an EmailJS account.
+2. Connect Gmail or another supported email service.
+3. Create one template that accepts these variables:
+   - `to_email`
+   - `subject`
+   - `message`
+   - `studentName`
+   - `studentEmail`
+   - `bookTitle`
+   - `issueDate`
+   - `dueDate`
+   - `returnDate`
+   - `penaltyAmount`
+4. Copy your EmailJS service ID, template ID, and public key.
+5. Open `public/js/notifications.js`.
+6. Replace:
+
+   ```js
+   const EMAILJS_SERVICE_ID = "EMAILJS_SERVICE_ID";
+   const EMAILJS_TEMPLATE_ID = "EMAILJS_TEMPLATE_ID";
+   const EMAILJS_PUBLIC_KEY = "EMAILJS_PUBLIC_KEY";
+   ```
+
+EmailJS public keys are intended for browser use, but do not put private provider/API secrets in frontend JavaScript.
+
+### Reminder Check
+
+Scheduled reminders cannot run reliably from a static frontend, so the app includes a staff-triggered reminder tool for now.
+
+Admin and librarian dashboards include:
+
+- `Run Reminder Check`
+- `Send Test Email`
+
+`Run Reminder Check` reads active `bookIssues`, calculates days since `issueDate`, sends the matching email, and updates Firestore flags:
+
+- `reminder15Sent`
+- `reminder30Sent`
+- `reminder45Sent`
+
+This prevents duplicate reminder emails.
+
+## PWA Push Notification Preparation
+
+The app includes PWA preparation files:
+
+- `public/manifest.json`
+- `public/service-worker.js`
+- `public/js/push-notifications.js`
+
+Push notifications are not fully implemented yet. Future path:
+
+1. Add Firebase Cloud Messaging.
+2. Request notification permission after a user action.
+3. Create a Firebase VAPID key.
+4. Store user FCM tokens in Firestore.
+5. Send push notifications from a trusted backend or Cloud Function.
 
 ## Security Notes
 

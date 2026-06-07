@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Librarian Dashboard | MLSU Library</title>
     <link rel="stylesheet" href="css/style.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0f8b9d">
   </head>
   <body class="protected-page">
     <header class="app-header">
@@ -78,6 +80,14 @@
         <article class="panel span-8">
           <h2>Pending Requests</h2>
           <div id="pendingRequests" class="list-stack"></div>
+        </article>
+        <article class="panel span-4">
+          <h2>Notification Tools</h2>
+          <div class="toolbar">
+            <button class="btn btn-muted" id="runReminderCheckBtn" type="button">Run Reminder Check</button>
+            <button class="btn btn-muted" id="sendTestEmailBtn" type="button">Send Test Email</button>
+          </div>
+          <div id="notificationResult" class="empty">No notification check has been run yet.</div>
         </article>
         <article class="panel span-4">
           <h2>Quick Return</h2>

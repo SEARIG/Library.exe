@@ -247,6 +247,12 @@ export async function returnBook(bookId) {
         issueId,
         bookId: bookDocId,
         barcodeValue: scannedValue,
+        studentUid: issue.studentUid || "",
+        studentName: issue.studentName || "",
+        bookTitle: issue.bookTitle || issue.bookId || bookDocId,
+        issueDate: issue.issueDate || null,
+        dueDate: issue.dueDate || null,
+        returnDate,
         daysUsed,
         lateDays,
         penaltyAmount

@@ -13,15 +13,20 @@ import {
 import {
   collection,
   doc,
+  getDoc,
   limit,
   onSnapshot,
   orderBy,
   query,
   updateDoc
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import {
+  runReminderCheck,
+  sendEmailNotification
+} from "./notifications.js";
 
 wireSignOut();
-await requireAuth(["admin"]);
+const session = await requireAuth(["admin"]);
 
 const metrics = {
   users: $("#metricUsers"),
@@ -126,4 +131,59 @@ onSnapshot(query(collection(db, "issueRequests"), orderBy("createdAt", "desc"), 
         ${statusBadge(request.status)}
       </article>`;
   }).join("");
+});
+
+function renderNotificationResult(result) {
+  $("#notificationResult").innerHTML = `
+    <div class="success-box">
+      <strong>Reminder check complete</strong>
+      <span>Checked: ${result.checked}</span>
+      <span>Emails sent: ${result.sent}</span>
+      <span>Skipped: ${result.skipped}</span>
+    </div>`;
+}
+
+$("#runReminderCheckBtn").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const result = await runReminderCheck();
+    renderNotificationResult(result);
+    showToast("Reminder check complete.", "success");
+  } catch (error) {
+    logDetailedError(error);
+    $("#notificationResult").innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+    showToast(error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$("#sendTestEmailBtn").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const profileSnap = await getDoc(doc(db, "users", session.user.uid));
+    const profile = profileSnap.exists() ? profileSnap.data() : session.profile;
+    const result = await sendEmailNotification("issued", {
+      studentName: profile.name || "MLSU User",
+      studentEmail: profile.email || session.user.email,
+      bookTitle: "Test Book",
+      dueDate: new Date()
+    });
+    $("#notificationResult").innerHTML = `
+      <div class="success-box">
+        <strong>Test email ${result.sent ? "sent" : "skipped"}</strong>
+        <span>Checked: 1</span>
+        <span>Emails sent: ${result.sent ? 1 : 0}</span>
+        <span>Skipped: ${result.sent ? 0 : 1}</span>
+      </div>`;
+    showToast(result.sent ? "Test email sent." : "EmailJS is not configured yet.", result.sent ? "success" : "error");
+  } catch (error) {
+    logDetailedError(error);
+    $("#notificationResult").innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+    showToast(error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
 });
