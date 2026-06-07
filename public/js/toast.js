@@ -32,7 +32,7 @@ function friendlyMessage(message) {
     return "You do not have permission to perform this action.";
   }
   if (lower.includes("emailjs") && lower.includes("not configured")) {
-    return "Email notifications are not configured yet.";
+    return "EmailJS is not configured. Add Public Key, Service ID, and Template ID.";
   }
   return text;
 }

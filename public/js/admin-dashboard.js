@@ -40,11 +40,7 @@ const metrics = {
   penalties: $("#metricPenalties")
 };
 const testEmailButton = $("#sendTestEmailBtn");
-
-if (testEmailButton && !isEmailNotificationsConfigured()) {
-  testEmailButton.disabled = true;
-  testEmailButton.title = EMAILJS_SETUP_MESSAGE;
-}
+if (testEmailButton) testEmailButton.title = EMAILJS_SETUP_MESSAGE;
 
 onSnapshot(collection(db, "users"), (snap) => {
   metrics.users.textContent = snap.size;
@@ -171,13 +167,20 @@ $("#sendTestEmailBtn").addEventListener("click", async (event) => {
   const button = event.currentTarget;
   button.disabled = true;
   try {
+    if (!isEmailNotificationsConfigured()) {
+      $("#notificationResult").innerHTML = `<div class="empty">${escapeHtml(EMAILJS_SETUP_MESSAGE)}</div>`;
+      showToast(EMAILJS_SETUP_MESSAGE, "warning");
+      return;
+    }
     const profileSnap = await getDoc(doc(db, "users", session.user.uid));
     const profile = profileSnap.exists() ? profileSnap.data() : session.profile;
-    const result = await sendEmailNotification("issued", {
+    const result = await sendEmailNotification("test", {
       studentName: profile.name || "MLSU User",
       studentEmail: profile.email || session.user.email,
       bookTitle: "Test Book",
-      dueDate: new Date()
+      issueDate: "Today",
+      dueDate: "Test Due Date",
+      penaltyAmount: 0
     });
     $("#notificationResult").innerHTML = `
       <div class="success-box">
@@ -186,10 +189,10 @@ $("#sendTestEmailBtn").addEventListener("click", async (event) => {
         <span>Emails sent: ${result.sent ? 1 : 0}</span>
         <span>Skipped: ${result.sent ? 0 : 1}</span>
       </div>`;
-    showToast(result.sent ? "Test email sent." : EMAILJS_SETUP_MESSAGE, result.sent ? "success" : "error");
+    showToast("Test email sent successfully.", "success");
   } catch (error) {
     logDetailedError(error);
-    const message = error.message?.includes("EMAILJS") ? EMAILJS_SETUP_MESSAGE : error.message;
+    const message = error.message?.toLowerCase().includes("emailjs") ? EMAILJS_SETUP_MESSAGE : error.message;
     $("#notificationResult").innerHTML = `<div class="empty">${escapeHtml(message)}</div>`;
     showToast(message, "error");
   } finally {

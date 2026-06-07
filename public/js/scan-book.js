@@ -160,17 +160,19 @@ returnForm.addEventListener("submit", async (event) => {
     if (data.studentUid) {
       const studentSnap = await getDoc(doc(db, "students", data.studentUid));
       const student = studentSnap.exists() ? studentSnap.data() : {};
-      sendEmailNotification("returned", {
-        studentName: student.name || data.studentName || "Student",
-        studentEmail: student.email || "",
-        bookTitle: data.bookTitle,
-        issueDate: data.issueDate,
-        dueDate: data.dueDate,
-        returnDate: data.returnDate,
-        penaltyAmount: data.penaltyAmount
-      }).catch((error) => {
+      try {
+        await sendEmailNotification("returned", {
+          studentName: student.name || data.studentName || "Student",
+          studentEmail: data.studentEmail || student.email || "",
+          bookTitle: data.bookTitle,
+          issueDate: data.issueDate,
+          dueDate: data.dueDate,
+          returnDate: data.returnDate,
+          penaltyAmount: data.penaltyAmount
+        });
+      } catch (error) {
         console.error("Return email notification failed:", error);
-      });
+      }
     }
     $("#returnResult").innerHTML = `
       <div class="success-box">

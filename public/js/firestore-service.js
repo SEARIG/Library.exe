@@ -239,6 +239,7 @@ export async function returnBook(bookId) {
         status: "available",
         issuedTo: null,
         issuedToName: null,
+        issuedToEmail: null,
         currentIssueId: null,
         updatedAt: serverTimestamp()
       });
@@ -249,6 +250,7 @@ export async function returnBook(bookId) {
         barcodeValue: scannedValue,
         studentUid: issue.studentUid || "",
         studentName: issue.studentName || "",
+        studentEmail: issue.studentEmail || "",
         bookTitle: issue.bookTitle || issue.bookId || bookDocId,
         issueDate: issue.issueDate || null,
         dueDate: issue.dueDate || null,

@@ -52,11 +52,7 @@ let quickReturnScanTimer = null;
 const showBookDebug = new URLSearchParams(window.location.search).get("debug") === "true"
   || localStorage.debugBooks === "true";
 const testEmailButton = $("#sendTestEmailBtn");
-
-if (testEmailButton && !isEmailNotificationsConfigured()) {
-  testEmailButton.disabled = true;
-  testEmailButton.title = EMAILJS_SETUP_MESSAGE;
-}
+if (testEmailButton) testEmailButton.title = EMAILJS_SETUP_MESSAGE;
 
 function timeOf(value) {
   if (!value) return 0;
@@ -101,6 +97,34 @@ function localBookForRequest(request = {}) {
   return latestBooks.find((item) => item.id === bookDocId || item.data.b_id === bookDocId)?.data || null;
 }
 
+function localBookForIssue(issue = {}) {
+  const bookDocId = issue.b_id || issue.bookId;
+  return latestBooks.find((item) => item.id === bookDocId || item.data.b_id === bookDocId)?.data || null;
+}
+
+async function resolveIssueStudent(issue = {}) {
+  if (issue.studentName) return {
+    name: issue.studentName,
+    email: issue.studentEmail || ""
+  };
+  const book = localBookForIssue(issue);
+  if (book?.issuedToName) return {
+    name: book.issuedToName,
+    email: book.issuedToEmail || ""
+  };
+  if (issue.studentUid) {
+    const studentSnap = await getDoc(doc(db, "students", issue.studentUid));
+    if (studentSnap.exists()) {
+      const student = studentSnap.data();
+      return {
+        name: student.name || "Unknown student",
+        email: student.email || ""
+      };
+    }
+  }
+  return { name: "Unknown student", email: "" };
+}
+
 async function approveRequest(requestId) {
   console.log("Selected requestId:", requestId);
   let notificationPayload = null;
@@ -129,7 +153,11 @@ async function approveRequest(requestId) {
     }
 
     const bookRef = doc(db, "books", bookDocId);
-    const bookSnap = await transaction.get(bookRef);
+    const studentRef = doc(db, "students", requestData.studentUid);
+    const [bookSnap, studentSnap] = await Promise.all([
+      transaction.get(bookRef),
+      transaction.get(studentRef)
+    ]);
     if (!bookSnap.exists()) {
       throw new Error(`Book ${bookDocId} not found.`);
     }
@@ -149,11 +177,17 @@ async function approveRequest(requestId) {
 
     const issueRef = doc(collection(db, "bookIssues"));
     const issueId = issueRef.id;
+    const studentData = studentSnap.exists() ? studentSnap.data() : {};
+    const studentName = requestData.studentName || studentData.name || "Unknown student";
+    const studentEmail = requestData.studentEmail || studentData.email || "";
+    const studentPhone = requestData.studentPhone || studentData.phone || "";
     const issuePayload = {
       issueId,
       requestId,
       studentUid: requestData.studentUid,
-      studentName: requestData.studentName || "",
+      studentName,
+      studentEmail,
+      studentPhone,
       b_id: bookDocId,
       bookId: bookDocId,
       bookBarcodeValue: requestData.bookBarcodeValue || bookData.barcodeValue || "",
@@ -177,7 +211,8 @@ async function approveRequest(requestId) {
     const bookUpdate = {
       status: "issued",
       issuedTo: requestData.studentUid,
-      issuedToName: requestData.studentName || "",
+      issuedToName: studentName,
+      issuedToEmail: studentEmail,
       currentIssueId: issueId,
       updatedAt: serverTimestamp()
     };
@@ -196,7 +231,8 @@ async function approveRequest(requestId) {
     transaction.update(requestRef, requestUpdate);
     notificationPayload = {
       studentUid: requestData.studentUid,
-      studentName: requestData.studentName || "",
+      studentName,
+      studentEmail,
       bookTitle: issuePayload.bookTitle,
       issueDate: requestData.issueDate,
       dueDate: requestData.dueDate
@@ -211,7 +247,7 @@ async function approveRequest(requestId) {
   if (notificationPayload?.studentUid) {
     const studentSnap = await getDoc(doc(db, "students", notificationPayload.studentUid));
     const student = studentSnap.exists() ? studentSnap.data() : {};
-    notificationPayload.studentEmail = student.email || "";
+    notificationPayload.studentEmail = notificationPayload.studentEmail || student.email || "";
     notificationPayload.studentName = notificationPayload.studentName || student.name || "Student";
   }
 
@@ -790,7 +826,13 @@ function renderBooksTable() {
             <td>${escapeHtml(data.blegal_num || "")}</td>
             <td>${escapeHtml(data.publisherBarcode || data.isbn || "")}</td>
             <td>${escapeHtml(data.barcodeValue || "")}</td>
-            <td>${statusBadge(data.status)}</td>
+            <td>
+              ${statusBadge(data.status)}
+              ${data.status === "issued" ? `
+                <span>Issued to: ${escapeHtml(data.issuedToName || "Unknown student")}</span>
+                <span>Email: ${escapeHtml(data.issuedToEmail || "")}</span>
+              ` : ""}
+            </td>
             <td>
               <div class="row-actions">
                 <button class="btn btn-muted" data-book-action="view">View</button>
@@ -909,6 +951,7 @@ $("#booksTable").addEventListener("click", async (event) => {
         status: "available",
         issuedTo: null,
         issuedToName: null,
+        issuedToEmail: null,
         currentIssueId: null,
         updatedAt: serverTimestamp()
       });
@@ -979,10 +1022,13 @@ $("#pendingRequests").addEventListener("click", async (event) => {
         showToast("This book is already issued or unavailable.", "warning");
         return;
       }
-      sendEmailNotification("issued", result.notificationPayload).catch((error) => {
+      try {
+        await sendEmailNotification("issued", result.notificationPayload);
+        showToast("Book issued successfully. Email notification sent.", "success");
+      } catch (error) {
         console.error("Issue email notification failed:", error);
-      });
-      showToast("Book issued successfully.", "success");
+        showToast("Book issued successfully, but email could not be sent.", "warning");
+      }
     } else {
       await rejectRequest(requestId);
       showToast("Issue request rejected.", "success");
@@ -1011,25 +1057,31 @@ $("#pendingRequests").addEventListener("click", async (event) => {
 
 onSnapshot(
   query(collection(db, "bookIssues"), where("status", "==", "issued"), limit(25)),
-  (snap) => {
+  async (snap) => {
     const target = $("#activeIssues");
     if (snap.empty) {
       renderEmpty(target, "No active issues.");
       return;
     }
-    target.innerHTML = snap.docs.sort((a, b) => timeOf(a.data().dueDate) - timeOf(b.data().dueDate)).map((item) => {
+    const cards = await Promise.all(snap.docs.sort((a, b) => timeOf(a.data().dueDate) - timeOf(b.data().dueDate)).map(async (item) => {
       const issue = item.data();
+      const student = await resolveIssueStudent(issue);
       return `
         <article class="list-row">
           <div>
-            <strong>${escapeHtml(issue.bookTitle || issue.bookId || issue.b_id || "Issued book")}</strong>
-            <span>B_ID: ${escapeHtml(issue.b_id || issue.bookId || "")} | Barcode: ${escapeHtml(issue.bookBarcodeValue || "")}</span>
-            <span>Student: ${escapeHtml(issue.studentName || "Unknown student")} | UID: ${escapeHtml(shortUid(issue.studentUid))}</span>
-            <span>Issued ${formatDate(issue.issueDate)} | Due ${formatDate(issue.dueDate)}</span>
+            <strong>Book: ${escapeHtml(issue.bookTitle || issue.bookId || issue.b_id || "Issued book")}</strong>
+            <span>Issued To: ${escapeHtml(student.name)}</span>
+            <span>Student Email: ${escapeHtml(issue.studentEmail || student.email || "")}</span>
+            <span>UID: ${escapeHtml(shortUid(issue.studentUid))}</span>
+            <span>B_ID: ${escapeHtml(issue.b_id || issue.bookId || "")}</span>
+            <span>Barcode: ${escapeHtml(issue.bookBarcodeValue || "")}</span>
+            <span>Issue Date: ${formatDate(issue.issueDate)}</span>
+            <span>Due Date: ${formatDate(issue.dueDate)}</span>
           </div>
           ${statusBadge(issue.status)}
         </article>`;
-    }).join("");
+    }));
+    target.innerHTML = cards.join("");
   }
 );
 
@@ -1115,7 +1167,7 @@ $("#quickReturnForm").addEventListener("submit", async (event) => {
       const student = studentSnap.exists() ? studentSnap.data() : {};
       sendEmailNotification("returned", {
         studentName: student.name || data.studentName || "Student",
-        studentEmail: student.email || "",
+        studentEmail: data.studentEmail || student.email || "",
         bookTitle: data.bookTitle,
         issueDate: data.issueDate,
         dueDate: data.dueDate,
@@ -1175,11 +1227,18 @@ $("#sendTestEmailBtn").addEventListener("click", async (event) => {
   const button = event.currentTarget;
   button.disabled = true;
   try {
-    const result = await sendEmailNotification("issued", {
+    if (!isEmailNotificationsConfigured()) {
+      $("#notificationResult").innerHTML = `<div class="empty">${escapeHtml(EMAILJS_SETUP_MESSAGE)}</div>`;
+      showToast(EMAILJS_SETUP_MESSAGE, "warning");
+      return;
+    }
+    const result = await sendEmailNotification("test", {
       studentName: session.profile.name || "MLSU User",
       studentEmail: session.profile.email || session.user.email,
       bookTitle: "Test Book",
-      dueDate: new Date()
+      issueDate: "Today",
+      dueDate: "Test Due Date",
+      penaltyAmount: 0
     });
     $("#notificationResult").innerHTML = `
       <div class="success-box">
@@ -1188,10 +1247,10 @@ $("#sendTestEmailBtn").addEventListener("click", async (event) => {
         <span>Emails sent: ${result.sent ? 1 : 0}</span>
         <span>Skipped: ${result.sent ? 0 : 1}</span>
       </div>`;
-    showToast(result.sent ? "Test email sent." : EMAILJS_SETUP_MESSAGE, result.sent ? "success" : "error");
+    showToast("Test email sent successfully.", "success");
   } catch (error) {
     logDetailedError(error);
-    const message = error.message?.includes("EMAILJS") ? EMAILJS_SETUP_MESSAGE : error.message;
+    const message = error.message?.toLowerCase().includes("emailjs") ? EMAILJS_SETUP_MESSAGE : error.message;
     $("#notificationResult").innerHTML = `<div class="empty">${escapeHtml(message)}</div>`;
     showToast(message, "error");
   } finally {

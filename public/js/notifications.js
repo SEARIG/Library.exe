@@ -9,63 +9,30 @@ import {
   updateDoc,
   where
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import { showToast } from "./toast.js";
 
-const EMAILJS_SERVICE_ID = "EMAILJS_SERVICE_ID";
-const EMAILJS_TEMPLATE_ID = "EMAILJS_TEMPLATE_ID";
-const EMAILJS_PUBLIC_KEY = "EMAILJS_PUBLIC_KEY";
-const EMAILJS_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js";
-
-const templates = {
-  issued: {
-    subject: "Book Issued - MLSU Library",
-    message: ({ studentName, bookTitle, dueDate }) => `Hello ${studentName},
-Your book ${bookTitle} has been issued successfully.
-Return before ${dueDate}.
-- MLSU Library`
-  },
-  returned: {
-    subject: "Book Returned - MLSU Library",
-    message: ({ studentName, bookTitle, penaltyAmount }) => `Hello ${studentName},
-Your book ${bookTitle} has been returned successfully.
-Penalty: Rs.${penaltyAmount || 0}.
-- MLSU Library`
-  },
-  reminder15: {
-    subject: "Library Book Reminder",
-    message: ({ studentName, bookTitle, dueDate }) => `Hello ${studentName},
-Your issued book ${bookTitle} is still active.
-Please return it before ${dueDate}.
-- MLSU Library`
-  },
-  reminder30: {
-    subject: "Library Book Due Soon",
-    message: ({ studentName, bookTitle, dueDate }) => `Hello ${studentName},
-Your book ${bookTitle} is due soon.
-Return before ${dueDate}.
-- MLSU Library`
-  },
-  reminder45: {
-    subject: "Library Book Overdue",
-    message: ({ studentName, bookTitle }) => `Hello ${studentName},
-Your book ${bookTitle} is overdue.
-Penalty Rs.5/day is now active.
-- MLSU Library`
-  }
+const EMAILJS_CONFIG = {
+  publicKey: "PASTE_EMAILJS_PUBLIC_KEY_HERE",
+  serviceId: "PASTE_EMAILJS_SERVICE_ID_HERE",
+  templateId: "PASTE_EMAILJS_TEMPLATE_ID_HERE"
 };
 
-function isConfigured() {
-  return ![
-    EMAILJS_SERVICE_ID,
-    EMAILJS_TEMPLATE_ID,
-    EMAILJS_PUBLIC_KEY
-  ].some((value) => value.startsWith("EMAILJS_"));
+export const EMAILJS_SETUP_MESSAGE = "EmailJS is not configured. Add Public Key, Service ID, and Template ID.";
+
+export function isEmailJsConfigured() {
+  return Boolean(
+    EMAILJS_CONFIG.publicKey
+    && EMAILJS_CONFIG.serviceId
+    && EMAILJS_CONFIG.templateId
+    && !EMAILJS_CONFIG.publicKey.includes("PASTE_")
+    && !EMAILJS_CONFIG.serviceId.includes("PASTE_")
+    && !EMAILJS_CONFIG.templateId.includes("PASTE_")
+  );
 }
 
 export function isEmailNotificationsConfigured() {
-  return isConfigured();
+  return isEmailJsConfigured();
 }
-
-export const EMAILJS_SETUP_MESSAGE = "Email notifications are not configured yet. Please add EmailJS Service ID, Template ID, and Public Key.";
 
 function toDate(value) {
   if (!value) return null;
@@ -75,7 +42,7 @@ function toDate(value) {
 
 function formatDate(value) {
   const date = toDate(value);
-  return date ? date.toLocaleDateString("en-GB") : "";
+  return date ? date.toLocaleDateString("en-GB") : String(value || "");
 }
 
 function daysBetween(start, end = new Date()) {
@@ -87,75 +54,51 @@ function daysBetween(start, end = new Date()) {
   return Math.max(0, Math.floor((endDate - startDate) / 86400000));
 }
 
-function loadEmailJs() {
-  if (window.emailjs) return Promise.resolve(window.emailjs);
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[src="${EMAILJS_SCRIPT_URL}"]`);
-    if (existing) {
-      existing.addEventListener("load", () => resolve(window.emailjs), { once: true });
-      existing.addEventListener("error", reject, { once: true });
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = EMAILJS_SCRIPT_URL;
-    script.async = true;
-    script.onload = () => resolve(window.emailjs);
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-}
-
 export async function sendEmailNotification(type, payload = {}) {
-  const template = templates[type];
-  if (!template) {
-    throw new Error(`Unknown notification type: ${type}`);
+  console.log("EmailJS config valid:", isEmailJsConfigured());
+
+  if (!window.emailjs) {
+    const error = new Error("EmailJS SDK not loaded.");
+    console.error("EmailJS error:", error);
+    throw error;
   }
 
-  if (!payload.studentEmail) {
-    console.warn("Email notification skipped: missing studentEmail", { type, payload });
-    return { skipped: true, reason: "missing-email" };
+  if (!isEmailJsConfigured()) {
+    showToast(EMAILJS_SETUP_MESSAGE, "warning");
+    const error = new Error("EmailJS is not configured.");
+    console.error("EmailJS error:", error);
+    throw error;
   }
 
-  const normalizedPayload = {
-    studentName: payload.studentName || "Student",
-    studentEmail: payload.studentEmail,
-    bookTitle: payload.bookTitle || "your book",
-    issueDate: formatDate(payload.issueDate) || payload.issueDate || "",
-    dueDate: formatDate(payload.dueDate) || payload.dueDate || "",
-    returnDate: formatDate(payload.returnDate) || payload.returnDate || "",
-    penaltyAmount: payload.penaltyAmount ?? 0
+  const params = {
+    notification_type: type,
+    student_name: payload.studentName || "Student",
+    student_email: payload.studentEmail || payload.email || "",
+    book_title: payload.bookTitle || payload.book || "",
+    issue_date: formatDate(payload.issueDate),
+    due_date: formatDate(payload.dueDate),
+    return_date: formatDate(payload.returnDate),
+    penalty_amount: payload.penaltyAmount || 0
   };
 
-  const subject = template.subject;
-  const message = template.message(normalizedPayload);
+  console.log("Sending EmailJS params:", params);
 
-  if (!isConfigured()) {
-    console.warn("EmailJS is not configured. Email notification skipped.", {
-      type,
-      subject,
-      to: normalizedPayload.studentEmail
+  try {
+    window.emailjs.init({
+      publicKey: EMAILJS_CONFIG.publicKey
     });
-    return { skipped: true, reason: "emailjs-not-configured" };
+
+    const result = await window.emailjs.send(
+      EMAILJS_CONFIG.serviceId,
+      EMAILJS_CONFIG.templateId,
+      params
+    );
+
+    return { sent: true, result };
+  } catch (error) {
+    console.error("EmailJS error:", error);
+    throw error;
   }
-
-  const emailjs = await loadEmailJs();
-  emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
-
-  const result = await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-    to_email: normalizedPayload.studentEmail,
-    studentName: normalizedPayload.studentName,
-    studentEmail: normalizedPayload.studentEmail,
-    bookTitle: normalizedPayload.bookTitle,
-    issueDate: normalizedPayload.issueDate,
-    dueDate: normalizedPayload.dueDate,
-    returnDate: normalizedPayload.returnDate,
-    penaltyAmount: normalizedPayload.penaltyAmount,
-    subject,
-    message
-  });
-
-  console.log("Email notification sent:", { type, to: normalizedPayload.studentEmail, result });
-  return { sent: true, result };
 }
 
 async function getStudent(uid) {
@@ -175,7 +118,8 @@ export async function runReminderCheck() {
   for (const issueDoc of issuesSnap.docs) {
     const issue = issueDoc.data();
     const student = await getStudent(issue.studentUid);
-    if (!student?.email) {
+    const studentEmail = issue.studentEmail || student?.email || "";
+    if (!studentEmail) {
       result.skipped += 1;
       continue;
     }
@@ -190,22 +134,20 @@ export async function runReminderCheck() {
 
     for (const reminder of reminders) {
       if (daysPassed >= reminder.day && issue[reminder.flag] !== true) {
-        const sendResult = await sendEmailNotification(reminder.type, {
-          studentName: student.name || issue.studentName || "Student",
-          studentEmail: student.email,
+        await sendEmailNotification(reminder.type, {
+          studentName: issue.studentName || student?.name || "Student",
+          studentEmail,
           bookTitle: issue.bookTitle || issue.bookId || "your book",
           issueDate: issue.issueDate,
           dueDate: issue.dueDate
         });
 
-        if (sendResult.sent) {
-          await updateDoc(doc(db, "bookIssues", issueDoc.id), {
-            [reminder.flag]: true,
-            [`${reminder.flag}At`]: serverTimestamp()
-          });
-          result.sent += 1;
-          sentForIssue += 1;
-        }
+        await updateDoc(doc(db, "bookIssues", issueDoc.id), {
+          [reminder.flag]: true,
+          [`${reminder.flag}At`]: serverTimestamp()
+        });
+        result.sent += 1;
+        sentForIssue += 1;
       }
     }
 

@@ -153,25 +153,40 @@ Payload shape:
 1. Create an EmailJS account.
 2. Connect Gmail or another supported email service.
 3. Create one template that accepts these variables:
-   - `to_email`
-   - `subject`
-   - `message`
-   - `studentName`
-   - `studentEmail`
-   - `bookTitle`
-   - `issueDate`
-   - `dueDate`
-   - `returnDate`
-   - `penaltyAmount`
+   - `notification_type`
+   - `student_name`
+   - `student_email`
+   - `book_title`
+   - `issue_date`
+   - `due_date`
+   - `return_date`
+   - `penalty_amount`
 4. Copy your EmailJS service ID, template ID, and public key.
 5. Open `public/js/notifications.js`.
 6. Replace:
 
    ```js
-   const EMAILJS_SERVICE_ID = "EMAILJS_SERVICE_ID";
-   const EMAILJS_TEMPLATE_ID = "EMAILJS_TEMPLATE_ID";
-   const EMAILJS_PUBLIC_KEY = "EMAILJS_PUBLIC_KEY";
+   const EMAILJS_CONFIG = {
+     publicKey: "PASTE_EMAILJS_PUBLIC_KEY_HERE",
+     serviceId: "PASTE_EMAILJS_SERVICE_ID_HERE",
+     templateId: "PASTE_EMAILJS_TEMPLATE_ID_HERE"
+   };
    ```
+
+Suggested template content:
+
+```text
+Hello {{student_name}},
+
+Notification: {{notification_type}}
+Book: {{book_title}}
+Issue date: {{issue_date}}
+Due date: {{due_date}}
+Return date: {{return_date}}
+Penalty: Rs.{{penalty_amount}}
+
+- MLSU Library
+```
 
 EmailJS public keys are intended for browser use, but do not put private provider/API secrets in frontend JavaScript.
 
