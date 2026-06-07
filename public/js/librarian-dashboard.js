@@ -1,4 +1,4 @@
-import { db } from "./firebase-config.js";
+import { auth, db } from "./firebase-config.js";
 import {
   $,
   escapeHtml,
@@ -12,8 +12,6 @@ import {
   wireSignOut
 } from "./app.js";
 import {
-  approveIssue,
-  rejectIssue,
   returnBook
 } from "./firestore-service.js";
 import {
@@ -57,6 +55,120 @@ function bookIdOf(book, fallbackId = "") {
 
 function barcodeValueFor(bid) {
   return `BOOK-${bid}`;
+}
+
+async function approveRequest(requestId) {
+  console.log("Selected requestId:", requestId);
+  await runTransaction(db, async (transaction) => {
+    const requestRef = doc(db, "issueRequests", requestId);
+    const requestSnap = await transaction.get(requestRef);
+    if (!requestSnap.exists()) {
+      throw new Error("Issue request not found.");
+    }
+
+    const requestData = requestSnap.data();
+    console.log("Issue request data:", requestData);
+    console.log("Book ID fields:", {
+      b_id: requestData.b_id,
+      bookId: requestData.bookId,
+      bookBarcodeValue: requestData.bookBarcodeValue
+    });
+
+    if (requestData.status !== "pending") {
+      throw new Error(`Issue request is already ${requestData.status}.`);
+    }
+
+    const bookDocId = requestData.b_id || requestData.bookId;
+    if (!bookDocId) {
+      throw new Error("Missing book id in issue request.");
+    }
+
+    const bookRef = doc(db, "books", bookDocId);
+    const bookSnap = await transaction.get(bookRef);
+    if (!bookSnap.exists()) {
+      throw new Error(`Book ${bookDocId} not found.`);
+    }
+
+    const bookData = bookSnap.data();
+    if (bookData.status !== "available") {
+      throw new Error("This book is not available.");
+    }
+
+    const issueRef = doc(collection(db, "bookIssues"));
+    const issueId = issueRef.id;
+    const issuePayload = {
+      issueId,
+      requestId,
+      studentUid: requestData.studentUid,
+      studentName: requestData.studentName || "",
+      b_id: bookDocId,
+      bookId: bookDocId,
+      bookBarcodeValue: requestData.bookBarcodeValue || bookData.barcodeValue || "",
+      bookTitle: requestData.bookTitle || requestData.bname || bookData.bname || "",
+      subject: requestData.subject || bookData.subject || "",
+      category: requestData.category || bookData.category || "",
+      blegal_num: requestData.blegal_num || bookData.blegal_num || "",
+      issueDate: requestData.issueDate,
+      dueDate: requestData.dueDate,
+      returnDate: null,
+      status: "issued",
+      penaltyPerDay: 5,
+      penaltyAmount: 0,
+      approvedBy: auth.currentUser.uid,
+      approvedAt: serverTimestamp(),
+      createdAt: serverTimestamp()
+    };
+    const bookUpdate = {
+      status: "issued",
+      issuedTo: requestData.studentUid,
+      currentIssueId: issueId,
+      updatedAt: serverTimestamp()
+    };
+    const requestUpdate = {
+      status: "approved",
+      reviewedBy: auth.currentUser.uid,
+      reviewedAt: serverTimestamp(),
+      issueId
+    };
+
+    console.log("Creating bookIssues payload:", issuePayload);
+    transaction.set(issueRef, issuePayload);
+    console.log("Updating book document:", { bookDocId, bookUpdate });
+    transaction.update(bookRef, bookUpdate);
+    console.log("Updating issue request:", { requestId, requestUpdate });
+    transaction.update(requestRef, requestUpdate);
+  });
+}
+
+async function rejectRequest(requestId) {
+  console.log("Selected requestId:", requestId);
+  await runTransaction(db, async (transaction) => {
+    const requestRef = doc(db, "issueRequests", requestId);
+    const requestSnap = await transaction.get(requestRef);
+    if (!requestSnap.exists()) {
+      throw new Error("Issue request not found.");
+    }
+
+    const requestData = requestSnap.data();
+    console.log("Issue request data:", requestData);
+    console.log("Book ID fields:", {
+      b_id: requestData.b_id,
+      bookId: requestData.bookId,
+      bookBarcodeValue: requestData.bookBarcodeValue
+    });
+
+    if (requestData.status !== "pending") {
+      throw new Error(`Issue request is already ${requestData.status}.`);
+    }
+
+    const requestUpdate = {
+      status: "rejected",
+      reviewedBy: auth.currentUser.uid,
+      reviewedAt: serverTimestamp()
+    };
+    console.log("Updating issue request:", { requestId, requestUpdate });
+    transaction.update(requestRef, requestUpdate);
+  });
 }
 
 function setNextBookId(lastId = 0) {
@@ -486,15 +598,23 @@ $("#pendingRequests").addEventListener("click", async (event) => {
   button.disabled = true;
   try {
     if (button.dataset.action === "approve") {
-      await approveIssue(requestId);
+      await approveRequest(requestId);
       showToast("Issue request approved.", "success");
     } else {
-      await rejectIssue(requestId, "Rejected by librarian");
+      await rejectRequest(requestId);
       showToast("Issue request rejected.", "success");
     }
   } catch (error) {
-    logDetailedError(error);
-    showToast(error.message, "error");
+    if (button.dataset.action === "approve") {
+      console.error("Approve failed full error:", error);
+      console.error("Approve failed code:", error.code);
+      console.error("Approve failed message:", error.message);
+    } else {
+      console.error("Reject failed full error:", error);
+      console.error("Reject failed code:", error.code);
+      console.error("Reject failed message:", error.message);
+    }
+    showToast(`${error.code || "error"}: ${error.message}`, "error");
   } finally {
     button.disabled = false;
   }

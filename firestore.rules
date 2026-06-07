@@ -46,7 +46,7 @@ service cloud.firestore {
       allow read: if isStudent(uid) || isLibrarian();
       allow create: if isStudent(uid)
         && request.resource.data.uid == uid;
-      allow update: if isLibrarian()
+      allow update: if isStaff()
         || (isStudent(uid)
           && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["uid", "createdAt"]));
       allow delete: if isAdmin();
@@ -78,7 +78,7 @@ service cloud.firestore {
         && request.resource.data.status == "pending"
         && request.resource.data.reviewedBy == null
         && request.resource.data.reviewedAt == null;
-      allow update: if isLibrarian()
+      allow update: if isStaff()
         || (signedIn()
           && resource.data.studentUid == request.auth.uid
           && resource.data.status == "pending"
@@ -88,8 +88,11 @@ service cloud.firestore {
     }
 
     match /bookIssues/{issueId} {
-      allow read: if signedIn() && (resource.data.studentUid == request.auth.uid || isLibrarian());
-      allow create, update, delete: if false;
+      allow read: if signedIn()
+        && (resource.data.studentUid == request.auth.uid || isStaff());
+      allow create: if isStaff();
+      allow update: if isStaff();
+      allow delete: if isAdmin();
     }
 
     match /penalties/{penaltyId} {
