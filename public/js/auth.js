@@ -1,4 +1,5 @@
 import { auth, db } from "./firebase-config.js";
+import { showToast } from "./toast.js";
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -109,10 +110,12 @@ if (signupForm) {
       });
 
       showMessage("Signup successful. Redirecting...", "success");
+      showToast("Signup successful. Redirecting...", "success");
       window.location.href = "student-dashboard.html";
     } catch (error) {
       logError(error);
       showMessage(error.message || "Signup failed. Please try again.");
+      showToast(error.message || "Signup failed. Please try again.", "error");
     } finally {
       setLoading(signupForm, false);
     }
@@ -134,6 +137,7 @@ if (loginForm) {
     } catch (error) {
       logError(error);
       showMessage(error.message || "Login failed. Please check your credentials.");
+      showToast(error.message || "Login failed. Please check your credentials.", "error");
     } finally {
       setLoading(loginForm, false);
     }
@@ -148,6 +152,7 @@ if (logoutButton) {
     } catch (error) {
       logError(error);
       showMessage(error.message || "Logout failed.");
+      showToast(error.message || "Logout failed.", "error");
     }
   });
 }

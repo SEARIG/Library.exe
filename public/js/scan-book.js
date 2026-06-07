@@ -1,6 +1,7 @@
 import { auth, db } from "./firebase-config.js";
 import {
   $,
+  confirmAction,
   escapeHtml,
   logDetailedError,
   renderEmpty,
@@ -138,7 +139,7 @@ issueForm.addEventListener("submit", async (event) => {
       book: currentBook
     });
     issueDialog.close();
-    showToast(`Issue request submitted: ${result.requestId}`, "success");
+    showToast("Book issue request sent successfully.", "success");
   } catch (error) {
     logDetailedError(error);
     showToast(error.message, "error");
@@ -151,6 +152,8 @@ $(".dialog-close", issueDialog).addEventListener("click", () => issueDialog.clos
 
 returnForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  const confirmed = await confirmAction("Confirm book return?");
+  if (!confirmed) return;
   setLoading(returnForm, true);
   try {
     const data = await returnBook($("#returnBookId").value.trim());
@@ -173,9 +176,11 @@ returnForm.addEventListener("submit", async (event) => {
       <div class="success-box">
         <strong>Book returned successfully.</strong>
         <span>Days used: ${data.daysUsed}</span>
-        <span>Penalty: Rs.${Number(data.penaltyAmount || 0).toFixed(2)}</span>
+        <span>Penalty: ₹${Number(data.penaltyAmount || 0).toFixed(2)}</span>
       </div>`;
-    showToast("Book returned successfully.", "success");
+    showToast(data.penaltyAmount > 0
+      ? `Book returned with ₹${Number(data.penaltyAmount).toFixed(2)} penalty.`
+      : "Book returned with no penalty.", "success");
     returnForm.reset();
   } catch (error) {
     console.error("Return scan failed full error:", error);

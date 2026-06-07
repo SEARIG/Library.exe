@@ -22,9 +22,12 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 
 wireSignOut();
-await requireAuth(["librarian", "admin"]);
+const session = await requireAuth(["student", "librarian", "admin"]);
 
 const form = $("#bookForm");
+if (session.profile.role === "student") {
+  form.closest(".panel").hidden = true;
+}
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const bookId = $("#bookId").value.trim();
@@ -49,7 +52,7 @@ form.addEventListener("submit", async (event) => {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     }, { merge: true });
-    showToast("Book saved.", "success");
+    showToast("Book saved successfully.", "success");
     form.reset();
     $("#status").value = "available";
   } catch (error) {

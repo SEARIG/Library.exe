@@ -1,13 +1,18 @@
 import { auth, db } from "./firebase-config.js";
 import "./push-notifications.js";
+import { renderNavbar, renderNavbarSkeleton } from "./navbar.js";
+import { showToast } from "./toast.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+export { showToast } from "./toast.js";
+export { confirmAction } from "./toast.js";
 
 function ensureAuthLoadingScreen() {
   if (!document.body.classList.contains("protected-page")) return null;
+  renderNavbarSkeleton();
   let screen = $("#authLoadingScreen");
   if (!screen) {
     screen = document.createElement("div");
@@ -22,17 +27,6 @@ function ensureAuthLoadingScreen() {
 function revealProtectedContent() {
   document.body.classList.add("auth-ready");
   $("#authLoadingScreen")?.remove();
-}
-
-export function showToast(message, type = "info") {
-  const toast = $("#toast");
-  if (!toast) return;
-  toast.textContent = message;
-  toast.className = `toast show ${type}`;
-  window.clearTimeout(showToast.timer);
-  showToast.timer = window.setTimeout(() => {
-    toast.className = "toast";
-  }, 4200);
 }
 
 export function logDetailedError(error) {
@@ -108,6 +102,7 @@ export function requireAuth(allowedRoles = []) {
       const roleTarget = $("#currentUserRole");
       if (nameTarget) nameTarget.textContent = profile.name || user.email;
       if (roleTarget) roleTarget.textContent = profile.role;
+      renderNavbar(profile.role, { ...profile, email: user.email });
       revealProtectedContent();
       resolve({ user, profile });
     });

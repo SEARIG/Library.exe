@@ -1,6 +1,7 @@
 import { auth, db } from "./firebase-config.js";
 import {
   $,
+  confirmAction,
   escapeHtml,
   formatDate,
   logDetailedError,
@@ -510,11 +511,11 @@ async function fetchGoogleBook(event) {
   try {
     const info = await fetchGoogleBookDetails(barcodeInput?.value);
     if (!info) {
-      $("#bookFetchPreview").innerHTML = `<div class="empty">No online metadata found. Please enter details manually.</div>`;
+      $("#bookFetchPreview").innerHTML = `<div class="empty">No online data found. Please fill manually.</div>`;
       if (!/^\d{10}(\d{3})?$/.test(cleanCode)) {
         showToast("This barcode may not be an ISBN. Google Books can only fetch details from ISBN/publisher barcode. Please type manually.", "error");
       } else {
-        showToast("No online metadata found. Please enter details manually.", "error");
+        showToast("No online data found. Please fill manually.", "warning");
       }
       return;
     }
@@ -660,7 +661,7 @@ async function saveBook(event) {
     if (editingBookId) {
       payload.barcodeDataUrl = await ensureBarcodeDataUrl();
       await updateDoc(doc(db, "books", editingBookId), payload);
-      showToast("Book updated.", "success");
+      showToast("Book saved successfully.", "success");
     } else {
       const createdBookId = await runTransaction(db, async (transaction) => {
         const counterRef = doc(db, "counters", "books");
@@ -684,7 +685,7 @@ async function saveBook(event) {
         barcodeDataUrl: await ensureBarcodeDataUrl(),
         updatedAt: serverTimestamp()
       });
-      showToast("Book saved with library barcode.", "success");
+      showToast("Book saved successfully.", "success");
     }
 
     editingBookId = null;
@@ -903,6 +904,10 @@ $("#pendingRequests").addEventListener("click", async (event) => {
   if (!button) return;
   const card = button.closest("[data-request-id]");
   const requestId = card.dataset.requestId;
+  const confirmed = await confirmAction(button.dataset.action === "approve"
+    ? "Approve this book issue?"
+    : "Reject this issue request?");
+  if (!confirmed) return;
   button.disabled = true;
   try {
     if (button.dataset.action === "approve") {
@@ -910,7 +915,7 @@ $("#pendingRequests").addEventListener("click", async (event) => {
       sendEmailNotification("issued", notificationPayload).catch((error) => {
         console.error("Issue email notification failed:", error);
       });
-      showToast("Issue request approved.", "success");
+      showToast("Book issued successfully.", "success");
     } else {
       await rejectRequest(requestId);
       showToast("Issue request rejected.", "success");
@@ -1025,6 +1030,8 @@ onSnapshot(
 
 $("#quickReturnForm").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const confirmed = await confirmAction("Confirm book return?");
+  if (!confirmed) return;
   setLoading(event.target, true);
   try {
     const data = await returnBook($("#quickReturnBookId").value.trim());
@@ -1044,7 +1051,9 @@ $("#quickReturnForm").addEventListener("submit", async (event) => {
         console.error("Return email notification failed:", error);
       });
     }
-    showToast("Book returned successfully.", "success");
+    showToast(data.penaltyAmount > 0
+      ? `Book returned with ₹${Number(data.penaltyAmount).toFixed(2)} penalty.`
+      : "Book returned with no penalty.", "success");
     event.target.reset();
   } catch (error) {
     console.error("Quick return failed full error:", error);
