@@ -12,12 +12,13 @@ import {
 import { showToast } from "./toast.js";
 
 const EMAILJS_CONFIG = {
-  publicKey: "PASTE_EMAILJS_PUBLIC_KEY_HERE",
-  serviceId: "PASTE_EMAILJS_SERVICE_ID_HERE",
-  templateId: "PASTE_EMAILJS_TEMPLATE_ID_HERE"
+  publicKey: "otUu_kwRgzrvjTdRJ",
+  serviceId: "service_mlsu123",
+  templateId: "template_592zvwg"
 };
 
 export const EMAILJS_SETUP_MESSAGE = "EmailJS is not configured. Add Public Key, Service ID, and Template ID.";
+let emailJsInitialized = false;
 
 export function isEmailJsConfigured() {
   return Boolean(
@@ -28,6 +29,15 @@ export function isEmailJsConfigured() {
     && !EMAILJS_CONFIG.serviceId.includes("PASTE_")
     && !EMAILJS_CONFIG.templateId.includes("PASTE_")
   );
+}
+
+function initializeEmailJs() {
+  if (emailJsInitialized) return;
+  window.emailjs.init({
+    publicKey: EMAILJS_CONFIG.publicKey
+  });
+  emailJsInitialized = true;
+  console.log("EmailJS initialized");
 }
 
 export function isEmailNotificationsConfigured() {
@@ -56,17 +66,18 @@ function daysBetween(start, end = new Date()) {
 
 export async function sendEmailNotification(type, payload = {}) {
   console.log("EmailJS config valid:", isEmailJsConfigured());
+  console.log("Sending email:", payload);
 
   if (!window.emailjs) {
     const error = new Error("EmailJS SDK not loaded.");
-    console.error("EmailJS error:", error);
+    console.error("EmailJS failed:", error);
     throw error;
   }
 
   if (!isEmailJsConfigured()) {
     showToast(EMAILJS_SETUP_MESSAGE, "warning");
     const error = new Error("EmailJS is not configured.");
-    console.error("EmailJS error:", error);
+    console.error("EmailJS failed:", error);
     throw error;
   }
 
@@ -84,9 +95,7 @@ export async function sendEmailNotification(type, payload = {}) {
   console.log("Sending EmailJS params:", params);
 
   try {
-    window.emailjs.init({
-      publicKey: EMAILJS_CONFIG.publicKey
-    });
+    initializeEmailJs();
 
     const result = await window.emailjs.send(
       EMAILJS_CONFIG.serviceId,
@@ -94,9 +103,10 @@ export async function sendEmailNotification(type, payload = {}) {
       params
     );
 
+    console.log("Email sent successfully");
     return { sent: true, result };
   } catch (error) {
-    console.error("EmailJS error:", error);
+    console.error("EmailJS failed:", error);
     throw error;
   }
 }
@@ -108,11 +118,26 @@ async function getStudent(uid) {
 }
 
 export async function runReminderCheck() {
+  try {
+    const response = await fetch("/api/reminder-check", {
+      method: "GET",
+      headers: { "Accept": "application/json" }
+    });
+
+    if (response.ok) {
+      return response.json();
+    }
+    console.warn("Backend reminder endpoint failed, using browser fallback.", await response.text());
+  } catch (error) {
+    console.warn("Backend reminder endpoint unavailable, using browser fallback.", error);
+  }
+
   const issuesSnap = await getDocs(query(collection(db, "bookIssues"), where("status", "==", "issued")));
   const result = {
     checked: issuesSnap.size,
     sent: 0,
-    skipped: 0
+    skipped: 0,
+    overdue: 0
   };
 
   for (const issueDoc of issuesSnap.docs) {
@@ -124,17 +149,26 @@ export async function runReminderCheck() {
       continue;
     }
 
-    const daysPassed = daysBetween(issue.issueDate);
+    const dueDate = toDate(issue.dueDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (dueDate && dueDate < today) result.overdue += 1;
     let sentForIssue = 0;
     const reminders = [
-      { day: 15, flag: "reminder15Sent", type: "reminder15" },
-      { day: 30, flag: "reminder30Sent", type: "reminder30" },
-      { day: 45, flag: "reminder45Sent", type: "reminder45" }
+      { daysLeft: 15, flag: "reminder15DaysLeftSent" },
+      { daysLeft: 7, flag: "reminder7DaysLeftSent" },
+      { daysLeft: 3, flag: "reminder3DaysLeftSent" },
+      { daysLeft: 1, flag: "reminder1DayLeftSent" },
+      { daysLeft: -1, flag: "overdueReminderSent" }
     ];
 
     for (const reminder of reminders) {
-      if (daysPassed >= reminder.day && issue[reminder.flag] !== true) {
-        await sendEmailNotification(reminder.type, {
+      const daysRemaining = dueDate ? Math.ceil((dueDate - today) / 86400000) : null;
+      const shouldSend = reminder.daysLeft === -1
+        ? daysRemaining !== null && daysRemaining < 0
+        : daysRemaining === reminder.daysLeft;
+      if (shouldSend && issue[reminder.flag] !== true) {
+        await sendEmailNotification("Book Return Reminder", {
           studentName: issue.studentName || student?.name || "Student",
           studentEmail,
           bookTitle: issue.bookTitle || issue.bookId || "your book",

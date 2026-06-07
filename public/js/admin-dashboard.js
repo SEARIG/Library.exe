@@ -143,6 +143,7 @@ function renderNotificationResult(result) {
       <strong>Reminder check complete</strong>
       <span>Checked: ${result.checked}</span>
       <span>Emails sent: ${result.sent}</span>
+      <span>Overdue books: ${result.overdue || 0}</span>
       <span>Skipped: ${result.skipped}</span>
     </div>`;
 }
@@ -174,12 +175,14 @@ $("#sendTestEmailBtn").addEventListener("click", async (event) => {
     }
     const profileSnap = await getDoc(doc(db, "users", session.user.uid));
     const profile = profileSnap.exists() ? profileSnap.data() : session.profile;
-    const result = await sendEmailNotification("test", {
+    const today = new Date();
+    const result = await sendEmailNotification("Test Notification", {
       studentName: profile.name || "MLSU User",
       studentEmail: profile.email || session.user.email,
-      bookTitle: "Test Book",
-      issueDate: "Today",
-      dueDate: "Test Due Date",
+      bookTitle: "EmailJS Test",
+      issueDate: today,
+      dueDate: today,
+      returnDate: "-",
       penaltyAmount: 0
     });
     $("#notificationResult").innerHTML = `

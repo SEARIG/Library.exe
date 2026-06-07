@@ -109,6 +109,7 @@ After the first admin exists, use `admin-dashboard.html` to promote librarians o
 4. Approval runs in a Cloud Function transaction, creates `bookIssues/{issueId}`, updates the book to `issued`, and marks the request `approved`.
 5. Librarian scans or enters the book barcode for returns. The return flow calculates late days and clears the active issue state.
 6. EmailJS can notify students when books are issued, returned, or need reminders.
+7. The Vercel API endpoint `api/reminder-check.js` can run due-date reminder checks from the Notification Tools cards.
 
 ## Email Notifications
 
@@ -163,13 +164,13 @@ Payload shape:
    - `penalty_amount`
 4. Copy your EmailJS service ID, template ID, and public key.
 5. Open `public/js/notifications.js`.
-6. Replace:
+6. The app is currently configured with:
 
    ```js
    const EMAILJS_CONFIG = {
-     publicKey: "PASTE_EMAILJS_PUBLIC_KEY_HERE",
-     serviceId: "PASTE_EMAILJS_SERVICE_ID_HERE",
-     templateId: "PASTE_EMAILJS_TEMPLATE_ID_HERE"
+     publicKey: "otUu_kwRgzrvjTdRJ",
+     serviceId: "service_mlsu123",
+     templateId: "template_592zvwg"
    };
    ```
 
@@ -199,13 +200,40 @@ Admin and librarian dashboards include:
 - `Run Reminder Check`
 - `Send Test Email`
 
-`Run Reminder Check` reads active `bookIssues`, calculates days since `issueDate`, sends the matching email, and updates Firestore flags:
+`Run Reminder Check` reads active `bookIssues`, calculates days remaining until `dueDate`, sends the matching email at 15, 7, 3, and 1 day left or overdue, and updates Firestore flags:
 
-- `reminder15Sent`
-- `reminder30Sent`
-- `reminder45Sent`
+- `reminder15DaysLeftSent`
+- `reminder7DaysLeftSent`
+- `reminder3DaysLeftSent`
+- `reminder1DayLeftSent`
+- `overdueReminderSent`
 
 This prevents duplicate reminder emails.
+
+For Vercel backend reminders, add these environment variables:
+
+```text
+FIREBASE_PROJECT_ID=mlsu-library-system
+FIREBASE_CLIENT_EMAIL=your_service_account_client_email
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_KEY\n-----END PRIVATE KEY-----\n"
+```
+
+The reminder endpoint is:
+
+```text
+/api/reminder-check
+```
+
+It returns:
+
+```js
+{
+  checked,
+  sent,
+  skipped,
+  overdue
+}
+```
 
 ## PWA Push Notification Preparation
 

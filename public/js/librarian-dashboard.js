@@ -204,6 +204,11 @@ async function approveRequest(requestId) {
       reminder15Sent: false,
       reminder30Sent: false,
       reminder45Sent: false,
+      reminder15DaysLeftSent: false,
+      reminder7DaysLeftSent: false,
+      reminder3DaysLeftSent: false,
+      reminder1DayLeftSent: false,
+      overdueReminderSent: false,
       approvedBy: auth.currentUser.uid,
       approvedAt: serverTimestamp(),
       createdAt: serverTimestamp()
@@ -1023,11 +1028,15 @@ $("#pendingRequests").addEventListener("click", async (event) => {
         return;
       }
       try {
-        await sendEmailNotification("issued", result.notificationPayload);
-        showToast("Book issued successfully. Email notification sent.", "success");
+        await sendEmailNotification("Book Issued", {
+          ...result.notificationPayload,
+          returnDate: "-",
+          penaltyAmount: 0
+        });
+        showToast("Book issued successfully. Email sent.", "success");
       } catch (error) {
         console.error("Issue email notification failed:", error);
-        showToast("Book issued successfully, but email could not be sent.", "warning");
+        showToast("Book issued successfully but email failed.", "warning");
       }
     } else {
       await rejectRequest(requestId);
@@ -1165,7 +1174,7 @@ $("#quickReturnForm").addEventListener("submit", async (event) => {
     if (data.studentUid) {
       const studentSnap = await getDoc(doc(db, "students", data.studentUid));
       const student = studentSnap.exists() ? studentSnap.data() : {};
-      sendEmailNotification("returned", {
+      const returnPayload = {
         studentName: student.name || data.studentName || "Student",
         studentEmail: data.studentEmail || student.email || "",
         bookTitle: data.bookTitle,
@@ -1173,13 +1182,23 @@ $("#quickReturnForm").addEventListener("submit", async (event) => {
         dueDate: data.dueDate,
         returnDate: data.returnDate,
         penaltyAmount: data.penaltyAmount
-      }).catch((error) => {
+      };
+      try {
+        await sendEmailNotification("Book Returned", returnPayload);
+        if (Number(data.penaltyAmount || 0) > 0) {
+          await sendEmailNotification("Penalty Notice", returnPayload);
+        }
+        showToast("Return processed. Email sent.", "success");
+      } catch (error) {
         console.error("Return email notification failed:", error);
-      });
+        showToast("Return processed but email failed.", "warning");
+      }
+    } else {
+      showToast("Book returned successfully.", "success");
     }
-    showToast(data.penaltyAmount > 0
-      ? `Book returned with ₹${Number(data.penaltyAmount).toFixed(2)} penalty.`
-      : "Book returned with no penalty.", "success");
+    if (Number(data.penaltyAmount || 0) > 0) {
+      showToast(`Book returned with Rs.${Number(data.penaltyAmount).toFixed(2)} penalty.`, "success");
+    }
     event.target.reset();
   } catch (error) {
     console.error("Quick return failed full error:", error);
@@ -1190,7 +1209,6 @@ $("#quickReturnForm").addEventListener("submit", async (event) => {
     setLoading(event.target, false);
   }
 });
-
 $("#startQuickReturnScannerBtn").addEventListener("click", () => startQuickReturnScanner().catch((error) => {
   logDetailedError(error);
   showToast(error.message, "error");
@@ -1203,6 +1221,7 @@ function renderNotificationResult(result) {
       <strong>Reminder check complete</strong>
       <span>Checked: ${result.checked}</span>
       <span>Emails sent: ${result.sent}</span>
+      <span>Overdue books: ${result.overdue || 0}</span>
       <span>Skipped: ${result.skipped}</span>
     </div>`;
 }
@@ -1232,12 +1251,14 @@ $("#sendTestEmailBtn").addEventListener("click", async (event) => {
       showToast(EMAILJS_SETUP_MESSAGE, "warning");
       return;
     }
-    const result = await sendEmailNotification("test", {
+    const today = new Date();
+    const result = await sendEmailNotification("Test Notification", {
       studentName: session.profile.name || "MLSU User",
       studentEmail: session.profile.email || session.user.email,
-      bookTitle: "Test Book",
-      issueDate: "Today",
-      dueDate: "Test Due Date",
+      bookTitle: "EmailJS Test",
+      issueDate: today,
+      dueDate: today,
+      returnDate: "-",
       penaltyAmount: 0
     });
     $("#notificationResult").innerHTML = `
@@ -1257,3 +1278,4 @@ $("#sendTestEmailBtn").addEventListener("click", async (event) => {
     button.disabled = false;
   }
 });
+

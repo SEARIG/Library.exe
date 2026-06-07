@@ -161,7 +161,7 @@ returnForm.addEventListener("submit", async (event) => {
       const studentSnap = await getDoc(doc(db, "students", data.studentUid));
       const student = studentSnap.exists() ? studentSnap.data() : {};
       try {
-        await sendEmailNotification("returned", {
+        const returnPayload = {
           studentName: student.name || data.studentName || "Student",
           studentEmail: data.studentEmail || student.email || "",
           bookTitle: data.bookTitle,
@@ -169,9 +169,15 @@ returnForm.addEventListener("submit", async (event) => {
           dueDate: data.dueDate,
           returnDate: data.returnDate,
           penaltyAmount: data.penaltyAmount
-        });
+        };
+        await sendEmailNotification("Book Returned", returnPayload);
+        if (Number(data.penaltyAmount || 0) > 0) {
+          await sendEmailNotification("Penalty Notice", returnPayload);
+        }
+        showToast("Return processed. Email sent.", "success");
       } catch (error) {
         console.error("Return email notification failed:", error);
+        showToast("Return processed but email failed.", "warning");
       }
     }
     $("#returnResult").innerHTML = `
