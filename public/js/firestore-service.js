@@ -7,6 +7,7 @@ import {
   getDocs,
   limit,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   where
@@ -163,7 +164,98 @@ export async function rejectIssue(requestId, reason = "Rejected by librarian") {
 }
 
 export async function returnBook(bookId) {
-  const returnBookCallable = httpsCallable(functions, "returnBook");
-  const result = await returnBookCallable({ bookId });
-  return result.data;
+  const scannedValue = String(bookId || "").trim().replace(/\s+/g, "");
+  console.log("Return scanned library barcode:", scannedValue);
+  if (!scannedValue) throw new Error("Scan or enter the library barcode.");
+
+  const barcodeQuery = query(collection(db, "books"), where("barcodeValue", "==", scannedValue), limit(1));
+  const matches = await getDocs(barcodeQuery);
+  console.log("Return barcode query result:", {
+    empty: matches.empty,
+    size: matches.size
+  });
+
+  if (matches.empty) {
+    throw new Error("Book not found. Please scan the library barcode sticker.");
+  }
+
+  const bookSnap = matches.docs[0];
+  const bookDocId = bookSnap.id;
+  const bookData = bookSnap.data();
+  const issueId = bookData.currentIssueId;
+  console.log("Return book document:", {
+    bookDocId,
+    barcodeValue: bookData.barcodeValue,
+    currentIssueId: issueId,
+    status: bookData.status
+  });
+
+  if (!issueId) {
+    throw new Error("No active issue found for this book.");
+  }
+
+  const bookRef = doc(db, "books", bookDocId);
+  const issueRef = doc(db, "bookIssues", issueId);
+  const returnDate = new Date();
+
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const [freshBookSnap, issueSnap] = await Promise.all([
+        transaction.get(bookRef),
+        transaction.get(issueRef)
+      ]);
+
+      if (!freshBookSnap.exists()) {
+        throw new Error("Book record not found.");
+      }
+      if (!issueSnap.exists()) {
+        throw new Error("Active issue record not found.");
+      }
+
+      const freshBook = freshBookSnap.data();
+      const issue = issueSnap.data();
+      console.log("Return active issue data:", issue);
+
+      if (freshBook.status !== "issued") {
+        throw new Error("This book is not currently issued.");
+      }
+      if (issue.status !== "issued") {
+        throw new Error("This issue is already closed.");
+      }
+
+      const issueDate = issue.issueDate?.toDate ? issue.issueDate.toDate() : new Date(issue.issueDate);
+      const daysUsed = Number.isNaN(issueDate.getTime()) ? 0 : daysBetween(issueDate, returnDate);
+      const lateDays = Math.max(0, daysUsed - ISSUE_DAYS);
+      const penaltyAmount = lateDays * (issue.penaltyPerDay || PENALTY_PER_DAY);
+
+      transaction.update(issueRef, {
+        status: "returned",
+        returnDate: serverTimestamp(),
+        returnedAt: serverTimestamp(),
+        penaltyAmount
+      });
+
+      transaction.update(bookRef, {
+        status: "available",
+        issuedTo: null,
+        issuedToName: null,
+        currentIssueId: null,
+        updatedAt: serverTimestamp()
+      });
+
+      return {
+        issueId,
+        bookId: bookDocId,
+        barcodeValue: scannedValue,
+        daysUsed,
+        lateDays,
+        penaltyAmount
+      };
+    });
+  } catch (error) {
+    console.error("Return book failed full error:", error);
+    console.error("Return book failed code:", error.code);
+    console.error("Return book failed message:", error.message);
+    throw error;
+  }
 }

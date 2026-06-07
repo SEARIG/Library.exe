@@ -38,6 +38,8 @@ let latestBooks = [];
 let latestBarcodeDataUrl = "";
 let publisherStream = null;
 let publisherScanTimer = null;
+let quickReturnStream = null;
+let quickReturnScanTimer = null;
 const showBookDebug = new URLSearchParams(window.location.search).get("debug") === "true"
   || localStorage.debugBooks === "true";
 
@@ -121,6 +123,9 @@ async function approveRequest(requestId) {
       status: "issued",
       penaltyPerDay: 5,
       penaltyAmount: 0,
+      reminder15Sent: false,
+      reminder30Sent: false,
+      reminder45Sent: false,
       approvedBy: auth.currentUser.uid,
       approvedAt: serverTimestamp(),
       createdAt: serverTimestamp()
@@ -128,6 +133,7 @@ async function approveRequest(requestId) {
     const bookUpdate = {
       status: "issued",
       issuedTo: requestData.studentUid,
+      issuedToName: requestData.studentName || "",
       currentIssueId: issueId,
       updatedAt: serverTimestamp()
     };
@@ -558,6 +564,42 @@ async function startPublisherScanner() {
   }, 750);
 }
 
+async function stopQuickReturnScanner() {
+  window.clearInterval(quickReturnScanTimer);
+  quickReturnScanTimer = null;
+  if (quickReturnStream) {
+    quickReturnStream.getTracks().forEach((track) => track.stop());
+    quickReturnStream = null;
+  }
+  $("#quickReturnScannerVideo").hidden = true;
+  $("#startQuickReturnScannerBtn").hidden = false;
+  $("#stopQuickReturnScannerBtn").hidden = true;
+}
+
+async function startQuickReturnScanner() {
+  if (!("BarcodeDetector" in window)) {
+    showToast("Camera barcode detection is not supported here. Enter BOOK-1 manually.", "error");
+    return;
+  }
+
+  const video = $("#quickReturnScannerVideo");
+  const detector = new BarcodeDetector({ formats: ["code_128", "code_39", "ean_13", "ean_8", "qr_code"] });
+  quickReturnStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+  video.srcObject = quickReturnStream;
+  video.hidden = false;
+  $("#startQuickReturnScannerBtn").hidden = true;
+  $("#stopQuickReturnScannerBtn").hidden = false;
+  quickReturnScanTimer = window.setInterval(async () => {
+    const codes = await detector.detect(video);
+    if (!codes.length) return;
+    const scannedValue = String(codes[0].rawValue || "").trim().replace(/\s+/g, "");
+    console.log("Quick return scanned barcode:", scannedValue);
+    $("#quickReturnBookId").value = scannedValue;
+    await stopQuickReturnScanner();
+    showToast("Library barcode scanned for return.", "success");
+  }, 750);
+}
+
 async function saveBook(event) {
   event.preventDefault();
   setLoading(addBookForm, true);
@@ -954,12 +996,21 @@ $("#quickReturnForm").addEventListener("submit", async (event) => {
   setLoading(event.target, true);
   try {
     const data = await returnBook($("#quickReturnBookId").value.trim());
-    showToast(`Returned. Penalty Rs.${Number(data.penaltyAmount || 0).toFixed(2)}.`, "success");
+    console.log("Return completed:", data);
+    showToast("Book returned successfully.", "success");
     event.target.reset();
   } catch (error) {
-    logDetailedError(error);
-    showToast(error.message, "error");
+    console.error("Quick return failed full error:", error);
+    console.error("Quick return failed code:", error.code);
+    console.error("Quick return failed message:", error.message);
+    showToast(`${error.code || "error"}: ${error.message}`, "error");
   } finally {
     setLoading(event.target, false);
   }
 });
+
+$("#startQuickReturnScannerBtn").addEventListener("click", () => startQuickReturnScanner().catch((error) => {
+  logDetailedError(error);
+  showToast(error.message, "error");
+}));
+$("#stopQuickReturnScannerBtn").addEventListener("click", () => stopQuickReturnScanner());

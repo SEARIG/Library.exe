@@ -6,7 +6,7 @@
     <title>Librarian Dashboard | MLSU Library</title>
     <link rel="stylesheet" href="css/style.css">
   </head>
-  <body>
+  <body class="protected-page">
     <header class="app-header">
       <div class="header-inner">
         <a class="brand" href="librarian-dashboard.html">MLSU Library</a>
@@ -81,9 +81,14 @@
         </article>
         <article class="panel span-4">
           <h2>Quick Return</h2>
+          <div class="toolbar">
+            <button class="btn btn-muted" id="startQuickReturnScannerBtn" type="button">Scan Library Barcode</button>
+            <button class="btn btn-danger" id="stopQuickReturnScannerBtn" type="button" hidden>Stop Scanner</button>
+          </div>
+          <video id="quickReturnScannerVideo" class="scanner-video compact-video" playsinline autoplay muted hidden></video>
           <form id="quickReturnForm" class="form-grid">
-            <label>Book Barcode<input id="quickReturnBookId" required></label>
-            <button class="btn btn-primary" type="submit">Return</button>
+            <label>Library Barcode<input id="quickReturnBookId" placeholder="BOOK-1" required></label>
+            <button class="btn btn-primary" type="submit">Return Book</button>
           </form>
         </article>
         <article class="panel span-6">

@@ -151,14 +151,18 @@ returnForm.addEventListener("submit", async (event) => {
     const data = await returnBook($("#returnBookId").value.trim());
     $("#returnResult").innerHTML = `
       <div class="success-box">
-        <strong>Returned successfully</strong>
+        <strong>Book returned successfully.</strong>
         <span>Days used: ${data.daysUsed}</span>
         <span>Penalty: Rs.${Number(data.penaltyAmount || 0).toFixed(2)}</span>
       </div>`;
+    showToast("Book returned successfully.", "success");
     returnForm.reset();
   } catch (error) {
-    logDetailedError(error);
-    renderEmpty($("#returnResult"), error.message);
+    console.error("Return scan failed full error:", error);
+    console.error("Return scan failed code:", error.code);
+    console.error("Return scan failed message:", error.message);
+    renderEmpty($("#returnResult"), `${error.code || "error"}: ${error.message}`);
+    showToast(`${error.code || "error"}: ${error.message}`, "error");
   } finally {
     setLoading(returnForm, false);
   }

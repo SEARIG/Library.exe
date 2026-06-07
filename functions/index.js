@@ -1,5 +1,6 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
 
 admin.initializeApp();
@@ -60,7 +61,15 @@ function daysBetween(start, end) {
 }
 
 function sendSms(phoneNumber, message) {
+  // TODO: Wire a provider adapter without exposing credentials in frontend code.
+  // Provider options: Fast2SMS, MSG91, Twilio.
   console.log("SMS placeholder", { phoneNumber, message });
+}
+
+function formatSmsDate(value) {
+  const date = toDate(value);
+  if (!date) return "";
+  return date.toLocaleDateString("en-GB");
 }
 
 async function getAuthUserByEmail(email) {
@@ -212,8 +221,11 @@ exports.approveIssueRequest = onCall(async (request) => {
       issueId: issueRef.id,
       requestId,
       studentUid: issueRequest.studentUid,
+      studentName: issueRequest.studentName || studentSnap.get("name") || "",
       rollNumber: issueRequest.rollNumber || studentSnap.get("rollNumber") || "",
-      bookId: issueRequest.bookId,
+      b_id: issueRequest.b_id || issueRequest.bookId,
+      bookId: issueRequest.b_id || issueRequest.bookId,
+      bookBarcodeValue: issueRequest.bookBarcodeValue || bookSnap.get("barcodeValue") || "",
       bookTitle: issueRequest.bookTitle || bookSnap.get("bname") || bookSnap.get("title") || "",
       bookImage: issueRequest.bookImage || bookSnap.get("imageUrl") || "",
       issueDate: Timestamp.fromDate(issueDate),
@@ -222,6 +234,9 @@ exports.approveIssueRequest = onCall(async (request) => {
       status: "issued",
       penaltyPerDay: PENALTY_PER_DAY,
       penaltyAmount: 0,
+      reminder15Sent: false,
+      reminder30Sent: false,
+      reminder45Sent: false,
       approvedBy: actor.uid,
       approvedAt: now,
       returnedBy: null,
@@ -231,6 +246,7 @@ exports.approveIssueRequest = onCall(async (request) => {
     transaction.update(bookRef, {
       status: "issued",
       issuedTo: issueRequest.studentUid,
+      issuedToName: issueRequest.studentName || studentSnap.get("name") || "",
       currentIssueId: issueRef.id,
       updatedAt: now
     });
@@ -238,7 +254,8 @@ exports.approveIssueRequest = onCall(async (request) => {
     transaction.update(requestRef, {
       status: "approved",
       reviewedBy: actor.uid,
-      reviewedAt: now
+      reviewedAt: now,
+      issueId: issueRef.id
     });
 
     return { issueId: issueRef.id };
@@ -275,35 +292,31 @@ exports.rejectIssueRequest = onCall(async (request) => {
 
 exports.returnBook = onCall(async (request) => {
   const actor = await requireRole(request.auth, ["librarian", "admin"]);
-  const scannedBookId = String(request.data.bookId || "").trim();
-  if (!scannedBookId) {
-    throw new HttpsError("invalid-argument", "bookId is required.");
+  const scannedBarcode = String(request.data.bookId || request.data.barcodeValue || "").trim().replace(/\s+/g, "");
+  console.log("Return requested", { scannedBarcode, actor: actor.uid });
+  if (!scannedBarcode) {
+    throw new HttpsError("invalid-argument", "Library barcode is required.");
   }
 
-  let bookId = scannedBookId;
-  const directBookSnap = await db.doc(`books/${scannedBookId}`).get();
-  if (!directBookSnap.exists) {
-    const barcodeMatches = await db.collection("books")
-      .where("barcodeValue", "==", scannedBookId)
-      .limit(1)
-      .get();
-    if (barcodeMatches.empty) {
-      throw new HttpsError("not-found", "Book record not found for this barcode.");
-    }
-    bookId = barcodeMatches.docs[0].id;
-  }
-
-  const activeIssues = await db.collection("bookIssues")
-    .where("bookId", "==", bookId)
-    .where("status", "==", "issued")
+  const barcodeMatches = await db.collection("books")
+    .where("barcodeValue", "==", scannedBarcode)
     .limit(1)
     .get();
+  console.log("Return barcode query", { empty: barcodeMatches.empty, size: barcodeMatches.size });
 
-  if (activeIssues.empty) {
+  if (barcodeMatches.empty) {
+    throw new HttpsError("not-found", "Book record not found for this library barcode.");
+  }
+
+  const bookId = barcodeMatches.docs[0].id;
+  const bookData = barcodeMatches.docs[0].data();
+  const currentIssueId = bookData.currentIssueId;
+  console.log("Return matched book", { bookId, currentIssueId, status: bookData.status });
+  if (!currentIssueId) {
     throw new HttpsError("not-found", "No active issue found for this book.");
   }
 
-  const issueRef = activeIssues.docs[0].ref;
+  const issueRef = db.doc(`bookIssues/${currentIssueId}`);
   const bookRef = db.doc(`books/${bookId}`);
   const returnDate = new Date();
 
@@ -338,6 +351,7 @@ exports.returnBook = onCall(async (request) => {
     transaction.update(bookRef, {
       status: "available",
       issuedTo: null,
+      issuedToName: null,
       currentIssueId: null,
       updatedAt: now
     });
@@ -363,6 +377,19 @@ exports.returnBook = onCall(async (request) => {
   return result;
 });
 
+exports.sendIssueApprovalSms = onDocumentCreated("bookIssues/{issueId}", async (event) => {
+  const issue = event.data?.data();
+  if (!issue || issue.status !== "issued") return;
+
+  const studentSnap = await db.doc(`students/${issue.studentUid}`).get();
+  if (!studentSnap.exists) return;
+
+  sendSms(
+    studentSnap.get("phone"),
+    `Book issued successfully.\nReturn by ${formatSmsDate(issue.dueDate)}`
+  );
+});
+
 exports.sendIssueReminders = onSchedule("every day 09:00", async () => {
   const issuedSnap = await db.collection("bookIssues").where("status", "==", "issued").get();
   const today = new Date();
@@ -371,15 +398,29 @@ exports.sendIssueReminders = onSchedule("every day 09:00", async () => {
     const issue = issueDoc.data();
     const issueDate = toDate(issue.issueDate);
     const day = daysBetween(issueDate, today);
-    if (![15, 30, 45].includes(day)) return;
+    const reminderMap = {
+      15: "reminder15Sent",
+      30: "reminder30Sent",
+      45: "reminder45Sent"
+    };
+    const flag = reminderMap[day];
+    if (!flag || issue[flag] === true) return;
 
     const studentSnap = await db.doc(`students/${issue.studentUid}`).get();
     if (!studentSnap.exists) return;
 
-    const label = day === 45 ? "final reminder" : `day ${day} reminder`;
+    const message = day === 45
+      ? "Book overdue. ₹5/day penalty active."
+      : `MLSU Library reminder: return ${issue.bookTitle || issue.bookId} by ${formatSmsDate(issue.dueDate)}.`;
+
     sendSms(
       studentSnap.get("phone"),
-      `MLSU Library ${label}: book ${issue.bookId} is due on ${toDate(issue.dueDate).toDateString()}. Penalty starts after 45 days at Rs.5/day.`
+      message
     );
+
+    await issueDoc.ref.update({
+      [flag]: true,
+      [`${flag}At`]: FieldValue.serverTimestamp()
+    });
   }));
 });

@@ -6,7 +6,7 @@
     <title>Scan Book | MLSU Library</title>
     <link rel="stylesheet" href="css/style.css">
   </head>
-  <body>
+  <body class="protected-page">
     <header class="app-header">
       <div class="header-inner">
         <a class="brand" href="student-dashboard.html">MLSU Library</a>
@@ -38,7 +38,7 @@
           </div>
           <video id="scannerVideo" class="scanner-video" playsinline autoplay muted hidden></video>
           <form id="manualBarcodeForm" class="form-grid">
-            <label>Manual Barcode<input id="manualBarcode" placeholder="Scan or type book barcode"></label>
+            <label>Manual Library Barcode<input id="manualBarcode" placeholder="BOOK-1"></label>
             <button class="btn btn-muted" type="submit">Use Barcode</button>
           </form>
         </article>
@@ -51,8 +51,8 @@
         <article id="returnPanel" class="panel" hidden>
           <h2>Return Book</h2>
           <form id="returnBookForm" class="form-grid">
-            <label>Book Barcode<input id="returnBookId" required></label>
-            <button class="btn btn-primary" type="submit">Mark Returned</button>
+            <label>Library Barcode<input id="returnBookId" placeholder="BOOK-1" required></label>
+            <button class="btn btn-primary" type="submit">Return Book</button>
           </form>
           <div id="returnResult" class="list-stack"></div>
         </article>

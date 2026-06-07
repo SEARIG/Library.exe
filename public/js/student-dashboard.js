@@ -17,6 +17,21 @@ function timeOf(value) {
   return date.getTime();
 }
 
+function dateFrom(value) {
+  if (!value) return null;
+  const date = value.toDate ? value.toDate() : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function daysRemaining(value) {
+  const dueDate = dateFrom(value);
+  if (!dueDate) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  dueDate.setHours(0, 0, 0, 0);
+  return Math.ceil((dueDate - today) / 86400000);
+}
+
 onSnapshot(doc(db, "students", user.uid), (snap) => {
   const target = $("#profilePanel");
   const student = snap.data();
@@ -66,13 +81,18 @@ onSnapshot(
     }
     target.innerHTML = issued.map((item) => {
       const issue = item.data();
+      const remaining = daysRemaining(issue.dueDate);
+      const isOverdue = remaining !== null && remaining < 0;
       return `
         <article class="list-row">
           <div>
             <strong>${escapeHtml(issue.bookTitle || issue.bookId)}</strong>
-            <span>Issued ${formatDate(issue.issueDate)} | Due ${formatDate(issue.dueDate)}</span>
+            <span>Barcode: ${escapeHtml(issue.bookBarcodeValue || "")}</span>
+            <span>Issue Date: ${formatDate(issue.issueDate)}</span>
+            <span>Due Date: ${formatDate(issue.dueDate)}</span>
+            <span>${isOverdue ? `${Math.abs(remaining)} day(s) overdue` : `${remaining ?? "-"} day(s) remaining`}</span>
           </div>
-          ${statusBadge(issue.status)}
+          ${isOverdue ? statusBadge("overdue") : statusBadge(issue.status)}
         </article>`;
     }).join("");
   }

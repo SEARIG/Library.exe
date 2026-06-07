@@ -5,6 +5,24 @@ import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
+function ensureAuthLoadingScreen() {
+  if (!document.body.classList.contains("protected-page")) return null;
+  let screen = $("#authLoadingScreen");
+  if (!screen) {
+    screen = document.createElement("div");
+    screen.id = "authLoadingScreen";
+    screen.className = "auth-loading-screen";
+    screen.textContent = "Loading dashboard...";
+    document.body.prepend(screen);
+  }
+  return screen;
+}
+
+function revealProtectedContent() {
+  document.body.classList.add("auth-ready");
+  $("#authLoadingScreen")?.remove();
+}
+
 export function showToast(message, type = "info") {
   const toast = $("#toast");
   if (!toast) return;
@@ -57,6 +75,7 @@ export async function redirectForRole(user) {
 }
 
 export function requireAuth(allowedRoles = []) {
+  ensureAuthLoadingScreen();
   return new Promise((resolve) => {
     onAuthStateChanged(auth, async (user) => {
       if (!user) {
@@ -88,6 +107,7 @@ export function requireAuth(allowedRoles = []) {
       const roleTarget = $("#currentUserRole");
       if (nameTarget) nameTarget.textContent = profile.name || user.email;
       if (roleTarget) roleTarget.textContent = profile.role;
+      revealProtectedContent();
       resolve({ user, profile });
     });
   });
