@@ -47,6 +47,11 @@ function timeOf(value) {
   return date.getTime();
 }
 
+function shortUid(uid = "") {
+  const value = String(uid || "");
+  return value.length > 12 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value;
+}
+
 function bookTitle(book) {
   return book.bname || book.title || book.bookName || "";
 }
@@ -723,7 +728,7 @@ async function printStickerFor(data) {
     showToast("Popup blocked. Allow popups to print barcode stickers.", "error");
     return;
   }
-  printWindow.document.write(`<html><head><title>Barcode</title><link rel="stylesheet" href="css/styles.css"></head><body>${html}<script>window.print(); window.close();</script></body></html>`);
+  printWindow.document.write(`<html><head><title>Barcode</title><link rel="stylesheet" href="css/style.css"></head><body>${html}<script>window.print(); window.close();</script></body></html>`);
   printWindow.document.close();
 }
 
@@ -865,8 +870,10 @@ onSnapshot(
       return `
         <article class="list-row">
           <div>
-            <strong>${escapeHtml(issue.bookId)}</strong>
-            <span>Student ${escapeHtml(issue.studentUid)} | Due ${formatDate(issue.dueDate)}</span>
+            <strong>${escapeHtml(issue.bookTitle || issue.bookId || issue.b_id || "Issued book")}</strong>
+            <span>B_ID: ${escapeHtml(issue.b_id || issue.bookId || "")} | Barcode: ${escapeHtml(issue.bookBarcodeValue || "")}</span>
+            <span>Student: ${escapeHtml(issue.studentName || "Unknown student")} | UID: ${escapeHtml(shortUid(issue.studentUid))}</span>
+            <span>Issued ${formatDate(issue.issueDate)} | Due ${formatDate(issue.dueDate)}</span>
           </div>
           ${statusBadge(issue.status)}
         </article>`;

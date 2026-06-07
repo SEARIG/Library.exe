@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Login | MLSU Library</title>
-    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/style.css">
   </head>
   <body class="auth-page">
     <main class="auth-shell">
@@ -17,7 +17,12 @@
         <div id="authMessage" class="auth-message" aria-live="polite"></div>
         <form id="loginForm" class="form-grid">
           <label>Email<input id="email" type="email" autocomplete="email" required></label>
-          <label>Password<input id="password" type="password" autocomplete="current-password" required></label>
+          <label>Password
+            <div class="password-field">
+              <input id="password" type="password" autocomplete="current-password" required>
+              <button class="btn btn-muted password-toggle" type="button" data-target="password">Show</button>
+            </div>
+          </label>
           <button class="btn btn-primary" type="submit">Login</button>
         </form>
         <p class="link-line">New student? <a href="signup.html">Create an account</a></p>

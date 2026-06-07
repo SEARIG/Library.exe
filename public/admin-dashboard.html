@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Admin Dashboard | MLSU Library</title>
-    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/style.css">
   </head>
   <body>
     <header class="app-header">
@@ -25,15 +25,22 @@
         <p>Manage roles, account access, books, requests, and issue activity.</p>
       </section>
       <section class="admin-metrics">
-        <article class="metric"><span>Users</span><strong id="metricUsers">0</strong></article>
+        <article class="metric"><span>Students</span><strong id="metricStudents">0</strong></article>
+        <article class="metric"><span>Librarians</span><strong id="metricLibrarians">0</strong></article>
         <article class="metric"><span>Books</span><strong id="metricBooks">0</strong></article>
+        <article class="metric"><span>Issues</span><strong id="metricIssued">0</strong></article>
+        <article class="metric"><span>Penalties</span><strong id="metricPenalties">0</strong></article>
         <article class="metric"><span>Pending</span><strong id="metricPending">0</strong></article>
-        <article class="metric"><span>Issued</span><strong id="metricIssued">0</strong></article>
+        <article class="metric"><span>Total Users</span><strong id="metricUsers">0</strong></article>
       </section>
       <section class="dashboard-grid">
-        <article class="panel span-12">
+        <article class="panel span-8">
           <h2>User Access</h2>
           <div id="usersTable" class="table-wrap"></div>
+        </article>
+        <article class="panel span-4">
+          <h2>Recent Activity</h2>
+          <div id="recentActivity" class="list-stack"></div>
         </article>
       </section>
     </main>

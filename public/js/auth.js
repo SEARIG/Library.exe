@@ -17,6 +17,16 @@ const signupForm = document.querySelector("#signupForm");
 const logoutButton = document.querySelector("#logoutBtn, #signOutBtn");
 const messageBox = document.querySelector("#authMessage");
 
+document.querySelectorAll(".password-toggle").forEach((button) => {
+  button.addEventListener("click", () => {
+    const input = document.getElementById(button.dataset.target);
+    if (!input) return;
+    const shouldShow = input.type === "password";
+    input.type = shouldShow ? "text" : "password";
+    button.textContent = shouldShow ? "Hide" : "Show";
+  });
+});
+
 function showMessage(message, type = "error") {
   if (messageBox) {
     messageBox.textContent = message;

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Student Signup | MLSU Library</title>
-    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/style.css">
   </head>
   <body class="auth-page">
     <main class="auth-shell">
@@ -22,7 +22,12 @@
           <label>Department<input id="department" required></label>
           <label>Year<input id="year" required></label>
           <label>Roll Number<input id="rollNumber" required></label>
-          <label>Password<input id="password" type="password" autocomplete="new-password" minlength="6" required></label>
+          <label>Password
+            <div class="password-field">
+              <input id="password" type="password" autocomplete="new-password" minlength="6" required>
+              <button class="btn btn-muted password-toggle" type="button" data-target="password">Show</button>
+            </div>
+          </label>
           <button class="btn btn-primary" type="submit">Create Student Account</button>
         </form>
         <p class="link-line">Already registered? <a href="login.html">Login</a></p>

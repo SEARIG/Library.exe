@@ -2,6 +2,7 @@ import { db } from "./firebase-config.js";
 import {
   $,
   escapeHtml,
+  formatDate,
   logDetailedError,
   renderEmpty,
   requireAuth,
@@ -24,19 +25,27 @@ await requireAuth(["admin"]);
 
 const metrics = {
   users: $("#metricUsers"),
+  students: $("#metricStudents"),
+  librarians: $("#metricLibrarians"),
   books: $("#metricBooks"),
   pending: $("#metricPending"),
-  issued: $("#metricIssued")
+  issued: $("#metricIssued"),
+  penalties: $("#metricPenalties")
 };
 
-onSnapshot(collection(db, "users"), (snap) => metrics.users.textContent = snap.size);
+onSnapshot(collection(db, "users"), (snap) => {
+  metrics.users.textContent = snap.size;
+  metrics.students.textContent = snap.docs.filter((item) => item.data().role === "student").length;
+  metrics.librarians.textContent = snap.docs.filter((item) => item.data().role === "librarian").length;
+});
 onSnapshot(collection(db, "books"), (snap) => metrics.books.textContent = snap.size);
 onSnapshot(collection(db, "issueRequests"), (snap) => {
   metrics.pending.textContent = snap.docs.filter((item) => item.data().status === "pending").length;
 });
 onSnapshot(collection(db, "bookIssues"), (snap) => {
-  metrics.issued.textContent = snap.docs.filter((item) => item.data().status === "issued").length;
+  metrics.issued.textContent = snap.size;
 });
+onSnapshot(collection(db, "penalties"), (snap) => metrics.penalties.textContent = snap.size);
 
 onSnapshot(query(collection(db, "users"), orderBy("createdAt", "desc"), limit(50)), (snap) => {
   const target = $("#usersTable");
@@ -98,4 +107,23 @@ $("#usersTable").addEventListener("click", async (event) => {
     logDetailedError(error);
     showToast(error.message, "error");
   }
+});
+
+onSnapshot(query(collection(db, "issueRequests"), orderBy("createdAt", "desc"), limit(8)), (snap) => {
+  const target = $("#recentActivity");
+  if (snap.empty) {
+    renderEmpty(target, "No recent activity yet.");
+    return;
+  }
+  target.innerHTML = snap.docs.map((item) => {
+    const request = item.data();
+    return `
+      <article class="list-row">
+        <div>
+          <strong>${escapeHtml(request.bookTitle || request.bookId || "Issue request")}</strong>
+          <span>${escapeHtml(request.studentName || "Student")} | ${formatDate(request.createdAt)}</span>
+        </div>
+        ${statusBadge(request.status)}
+      </article>`;
+  }).join("");
 });
