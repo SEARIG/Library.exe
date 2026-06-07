@@ -41,6 +41,7 @@ const addBookForm = $("#addBookForm");
 const bookSearch = $("#bookSearch");
 let nextBookId = "1";
 let editingBookId = null;
+let editingExistingBook = null;
 let latestBooks = [];
 let latestPendingRequests = [];
 let latestBarcodeDataUrl = "";
@@ -78,6 +79,21 @@ function bookIdOf(book, fallbackId = "") {
 
 function barcodeValueFor(bid) {
   return `BOOK-${bid}`;
+}
+
+function collectBookMetadata() {
+  return {
+    bname: $("#bnameInput").value.trim(),
+    subject: $("#subjectInput").value.trim(),
+    category: $("#category").value,
+    blegal_num: $("#blegalNum").value.trim(),
+    publisherBarcode: $("#publisherBarcodeInput").value.trim(),
+    isbn: ($("#isbnInput").value || $("#publisherBarcodeInput").value).trim(),
+    author: $("#authorInput").value.trim(),
+    publisher: $("#publisherInput").value.trim(),
+    imageUrl: $("#imageUrlInput").value.trim(),
+    updatedAt: serverTimestamp()
+  };
 }
 
 function localBookForRequest(request = {}) {
@@ -656,32 +672,34 @@ async function saveBook(event) {
     const selectedBid = editingBookId || nextBookId;
     const barcodeValue = barcodeValueFor(selectedBid);
     renderBarcode(barcodeValue, selectedBid);
-    const payload = {
-      bname: $("#bnameInput").value.trim(),
-      subject: $("#subjectInput").value.trim(),
-      category: $("#category").value,
-      blegal_num: $("#blegalNum").value.trim(),
-      publisherBarcode: $("#publisherBarcodeInput").value.trim(),
-      isbn: ($("#isbnInput").value || $("#publisherBarcodeInput").value).trim(),
-      barcodeValue,
-      barcodeDataUrl: "",
-      author: $("#authorInput").value.trim(),
-      publisher: $("#publisherInput").value.trim(),
-      imageUrl: $("#imageUrlInput").value.trim(),
-      metadataSource: $("#metadataSourceInput").value.trim(),
-      status: "available",
-      issuedTo: null,
-      currentIssueId: null,
-      updatedAt: serverTimestamp()
-    };
+    const metadataUpdate = collectBookMetadata();
 
-    if (!payload.bname) throw new Error("Book Name is required.");
+    if (!metadataUpdate.bname) throw new Error("Book Name is required.");
 
     if (editingBookId) {
-      payload.barcodeDataUrl = await ensureBarcodeDataUrl();
-      await updateDoc(doc(db, "books", editingBookId), payload);
-      showToast("Book saved successfully.", "success");
+      console.log("Saving existing book metadata only:", editingBookId);
+      const currentSnap = await getDoc(doc(db, "books", editingBookId));
+      if (!currentSnap.exists()) {
+        throw new Error("Book record not found.");
+      }
+      const currentBook = currentSnap.data();
+      console.log("Preserving status:", currentBook.status);
+      if (currentBook.status !== "available") {
+        showToast("Book is currently issued/lost/damaged. Only metadata will be updated. Availability will not change.", "warning");
+      }
+      await updateDoc(doc(db, "books", editingBookId), metadataUpdate);
+      showToast("Book details saved. Availability was not changed.", "success");
     } else {
+      const payload = {
+        ...metadataUpdate,
+        metadataSource: $("#metadataSourceInput").value.trim(),
+        barcodeValue,
+        barcodeDataUrl: "",
+        status: "available",
+        issuedTo: null,
+        issuedToName: null,
+        currentIssueId: null
+      };
       const createdBookId = await runTransaction(db, async (transaction) => {
         const counterRef = doc(db, "counters", "books");
         const counterSnap = await transaction.get(counterRef);
@@ -708,8 +726,11 @@ async function saveBook(event) {
     }
 
     editingBookId = null;
+    editingExistingBook = null;
     addBookForm.reset();
     $("#category").value = "pyq";
+    $("#saveBookBtn").textContent = "Save Book";
+    $("#bookSaveModeHelp").textContent = "Availability is controlled only by issue, return, lost, and found actions.";
     $("#bookFetchPreview").innerHTML = `<div class="empty">Fetch details or fill the book manually.</div>`;
     $("#metadataSourceInput").value = "";
     setMetadataSourceBadge("");
@@ -788,6 +809,7 @@ function renderBooksTable() {
 
 function loadBookIntoForm(id, data) {
   editingBookId = id;
+  editingExistingBook = { id, ...data };
   $("#autoBId").value = data.b_id || id;
   $("#bnameInput").value = bookTitle(data);
   $("#subjectInput").value = data.subject || "";
@@ -810,6 +832,8 @@ function loadBookIntoForm(id, data) {
       </div>
     </article>`;
   renderBarcode(data.barcodeValue || barcodeValueFor(data.b_id || id), data.b_id || id);
+  $("#saveBookBtn").textContent = "Save Book Details";
+  $("#bookSaveModeHelp").textContent = "Availability is controlled only by issue, return, lost, and found actions.";
   showToast("Book loaded for editing.", "success");
 }
 
