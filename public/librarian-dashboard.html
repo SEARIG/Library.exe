@@ -29,8 +29,8 @@
           <h2>Add Book / Generate Barcode</h2>
           <form id="addBookForm" class="form-grid">
             <label>Auto B_ID<input id="autoBId" readonly></label>
-            <label>Book Name<input id="bname" required></label>
-            <label>Subject<input id="subject"></label>
+            <label>Book Name<input id="bnameInput" required></label>
+            <label>Subject<input id="subjectInput"></label>
             <label>Category
               <select id="category" required>
                 <option value="pyq">pyq</option>
@@ -42,11 +42,11 @@
               </select>
             </label>
             <label>BLegal Number / Inside Book Number<input id="blegalNum"></label>
-            <label>Publisher Barcode / ISBN<input id="publisherBarcode"></label>
-            <input id="isbn" type="hidden">
-            <input id="author" type="hidden">
-            <input id="publisher" type="hidden">
-            <input id="imageUrl" type="hidden">
+            <label>Publisher Barcode / ISBN<input id="publisherBarcodeInput"></label>
+            <input id="isbnInput" type="hidden">
+            <input id="authorInput" type="hidden">
+            <input id="publisherInput" type="hidden">
+            <input id="imageUrlInput" type="hidden">
             <div class="toolbar">
               <button class="btn btn-muted" id="scanPublisherBtn" type="button">Scan Publisher Barcode</button>
               <button class="btn btn-muted" id="fetchGoogleBookBtn" type="button">Fetch Details from Google</button>
@@ -54,6 +54,7 @@
             </div>
             <video id="publisherScannerVideo" class="scanner-video compact-video" playsinline autoplay muted hidden></video>
             <div id="bookFetchPreview" class="empty">Fetch details or fill the book manually.</div>
+            <div id="googleFetchDebug" class="empty">Google Books debug details will appear here.</div>
             <div id="barcodeSticker" class="barcode-sticker">
               <strong>MLSU Library</strong>
               <span id="stickerBId">B_ID: -</span>

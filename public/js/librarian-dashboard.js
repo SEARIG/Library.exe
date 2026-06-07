@@ -224,83 +224,144 @@ async function ensureBarcodeDataUrl() {
   return latestBarcodeDataUrl;
 }
 
-async function fetchGoogleBookDetails(code) {
-  const cleanCode = code.trim().replace(/[-\s]/g, "");
-  const isbnUrl = `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(cleanCode)}`;
-
-  console.log("Fetching Google Books details for:", cleanCode);
-  console.log("Google Books API URL:", isbnUrl);
-  let response = await fetch(isbnUrl);
-  let data = await response.json();
-  console.log("Google Books result:", data);
-
-  if (!data.items || data.items.length === 0) {
-    const generalUrl = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(cleanCode)}`;
-    console.log("Google Books API URL:", generalUrl);
-    response = await fetch(generalUrl);
-    data = await response.json();
-    console.log("Google Books result:", data);
-  }
-
-  if (!data.items || data.items.length === 0) {
-    return null;
-  }
-
-  return data.items[0].volumeInfo;
+function cleanGoogleBookCode(rawCode) {
+  return String(rawCode || "")
+    .trim()
+    .replace(/[-\s]/g, "")
+    .replace(/[^A-Za-z0-9]/g, "");
 }
 
-function getPreferredIsbn(volumeInfo, fallback) {
-  const identifiers = volumeInfo.industryIdentifiers || [];
-  return identifiers.find((item) => item.type === "ISBN_13")?.identifier
-    || identifiers.find((item) => item.type === "ISBN_10")?.identifier
-    || fallback;
+function updateGoogleFetchDebug(details) {
+  const debugBox = document.getElementById("googleFetchDebug");
+  if (!debugBox) return;
+  debugBox.innerHTML = `
+    <strong>Google Books Debug</strong>
+    <span>Cleaned code: ${escapeHtml(details.cleanCode || "-")}</span>
+    <span>API URL tried: ${escapeHtml(details.url || "-")}</span>
+    <span>Response status: ${escapeHtml(details.status ?? "-")}</span>
+    <span>Result count: ${escapeHtml(details.resultCount ?? "-")}</span>
+    <span>Error: ${escapeHtml(details.error || "-")}</span>`;
 }
 
-async function fetchGoogleBook() {
-  const rawCode = $("#publisherBarcode").value;
-  const cleanCode = rawCode.trim().replace(/[-\s]/g, "");
+async function fetchGoogleBookDetails(rawCode) {
+  const cleanCode = cleanGoogleBookCode(rawCode);
+
   if (!cleanCode) {
-    showToast("Enter or scan publisher barcode/ISBN first.", "error");
-    return;
+    throw new Error("Enter or scan ISBN/publisher barcode first.");
   }
+
+  const urls = [
+    `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(cleanCode)}`,
+    `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(cleanCode)}`
+  ];
+
+  for (const url of urls) {
+    console.log("Trying Google Books URL:", url);
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Accept": "application/json"
+      }
+    });
+
+    console.log("Google Books response status:", response.status);
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error("Google Books API error response:", text);
+      updateGoogleFetchDebug({
+        cleanCode,
+        url,
+        status: response.status,
+        resultCount: 0,
+        error: text
+      });
+      continue;
+    }
+
+    const data = await response.json();
+    console.log("Google Books data:", data);
+    updateGoogleFetchDebug({
+      cleanCode,
+      url,
+      status: response.status,
+      resultCount: data.items?.length || 0,
+      error: ""
+    });
+
+    if (data.items && data.items.length > 0) {
+      return data.items[0].volumeInfo;
+    }
+  }
+
+  return null;
+}
+
+async function fetchGoogleBook(event) {
+  event?.preventDefault();
+  const barcodeInput = document.getElementById("publisherBarcodeInput");
+  const cleanCode = cleanGoogleBookCode(barcodeInput?.value);
 
   try {
-    const info = await fetchGoogleBookDetails(cleanCode);
+    const info = await fetchGoogleBookDetails(barcodeInput?.value);
     if (!info) {
-      $("#bookFetchPreview").innerHTML = `<div class="empty">No Google Books result found. Please fill details manually.</div>`;
-      showToast("No Google Books result found. Please fill details manually.", "error");
+      $("#bookFetchPreview").innerHTML = `<div class="empty">No Google Books result found. Please fill manually.</div>`;
+      if (!/^\d{10}(\d{3})?$/.test(cleanCode)) {
+        showToast("This barcode may not be an ISBN. Google Books can only fetch details from ISBN/publisher barcode. Please type manually.", "error");
+      } else {
+        showToast("No Google Books result found. Please fill manually.", "error");
+      }
       return;
     }
 
-    const imageUrl = (info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || "").replace(/^http:\/\//, "https://");
-    const author = (info.authors || []).join(", ");
-    const publisher = info.publisher || "";
     const title = info.title || "";
-    const isbn = getPreferredIsbn(info, cleanCode);
+    const authors = Array.isArray(info.authors) ? info.authors.join(", ") : "";
+    const publisher = info.publisher || "";
+    const categories = Array.isArray(info.categories) ? info.categories.join(", ") : "";
+    const imageUrl = info.imageLinks?.thumbnail
+      ? info.imageLinks.thumbnail.replace("http://", "https://")
+      : "";
+    const identifiers = info.industryIdentifiers || [];
+    const isbn13 = identifiers.find((item) => item.type === "ISBN_13")?.identifier || "";
+    const isbn10 = identifiers.find((item) => item.type === "ISBN_10")?.identifier || "";
 
-    $("#publisherBarcode").value = cleanCode;
-    $("#isbn").value = isbn;
-    $("#bname").value = title;
-    $("#author").value = author;
-    $("#publisher").value = publisher;
-    $("#imageUrl").value = imageUrl;
-    if (info.categories?.length) {
-      $("#subject").value = info.categories[0];
-    }
+    const bnameEl = document.getElementById("bnameInput");
+    const subjectEl = document.getElementById("subjectInput");
+    const authorEl = document.getElementById("authorInput");
+    const publisherEl = document.getElementById("publisherInput");
+    const isbnEl = document.getElementById("isbnInput");
+    const imageUrlEl = document.getElementById("imageUrlInput");
+    const publisherBarcodeEl = document.getElementById("publisherBarcodeInput");
+
+    if (bnameEl && title) bnameEl.value = title;
+    if (subjectEl && categories) subjectEl.value = categories;
+    if (authorEl) authorEl.value = authors;
+    if (publisherEl) publisherEl.value = publisher;
+    if (isbnEl) isbnEl.value = isbn13 || isbn10 || cleanCode;
+    if (imageUrlEl) imageUrlEl.value = imageUrl;
+    if (publisherBarcodeEl) publisherBarcodeEl.value = cleanCode;
 
     $("#bookFetchPreview").innerHTML = `
       <article class="book-preview">
         <img src="${escapeHtml(imageUrl || "assets/book-placeholder.svg")}" alt="">
         <div>
           <strong>${escapeHtml(title || "Untitled book")}</strong>
-          <span>${escapeHtml(author || "Unknown author")}</span>
+          <span>${escapeHtml(authors || "Unknown author")}</span>
           <span>${escapeHtml(publisher || "Publisher not found")}</span>
         </div>
       </article>`;
     showToast("Book details fetched successfully.", "success");
   } catch (error) {
     console.error("Google Books fetch failed:", error);
-    showToast("Google Books fetch failed. Please try again or fill manually.", "error");
+    updateGoogleFetchDebug({
+      cleanCode,
+      url: "-",
+      status: "-",
+      resultCount: "-",
+      error: error.message
+    });
+    showToast(error.message || "Google Books fetch failed. Please try again or fill manually.", "error");
   }
 }
 
@@ -328,7 +389,7 @@ async function startPublisherScanner() {
   publisherScanTimer = window.setInterval(async () => {
     const codes = await detector.detect(video);
     if (!codes.length) return;
-    $("#publisherBarcode").value = codes[0].rawValue;
+    $("#publisherBarcodeInput").value = codes[0].rawValue;
     await stopPublisherScanner();
     showToast("Publisher barcode scanned.", "success");
   }, 750);
@@ -342,17 +403,17 @@ async function saveBook(event) {
     const barcodeValue = barcodeValueFor(selectedBid);
     renderBarcode(barcodeValue, selectedBid);
     const payload = {
-      bname: $("#bname").value.trim(),
-      subject: $("#subject").value.trim(),
+      bname: $("#bnameInput").value.trim(),
+      subject: $("#subjectInput").value.trim(),
       category: $("#category").value,
       blegal_num: $("#blegalNum").value.trim(),
-      publisherBarcode: $("#publisherBarcode").value.trim(),
-      isbn: ($("#isbn").value || $("#publisherBarcode").value).trim(),
+      publisherBarcode: $("#publisherBarcodeInput").value.trim(),
+      isbn: ($("#isbnInput").value || $("#publisherBarcodeInput").value).trim(),
       barcodeValue,
       barcodeDataUrl: "",
-      author: $("#author").value.trim(),
-      publisher: $("#publisher").value.trim(),
-      imageUrl: $("#imageUrl").value.trim(),
+      author: $("#authorInput").value.trim(),
+      publisher: $("#publisherInput").value.trim(),
+      imageUrl: $("#imageUrlInput").value.trim(),
       status: "available",
       issuedTo: null,
       currentIssueId: null,
@@ -469,15 +530,15 @@ function renderBooksTable() {
 function loadBookIntoForm(id, data) {
   editingBookId = id;
   $("#autoBId").value = data.b_id || id;
-  $("#bname").value = bookTitle(data);
-  $("#subject").value = data.subject || "";
+  $("#bnameInput").value = bookTitle(data);
+  $("#subjectInput").value = data.subject || "";
   $("#category").value = data.category || "other";
   $("#blegalNum").value = data.blegal_num || "";
-  $("#publisherBarcode").value = data.publisherBarcode || data.isbn || "";
-  $("#isbn").value = data.isbn || data.publisherBarcode || "";
-  $("#author").value = data.author || "";
-  $("#publisher").value = data.publisher || "";
-  $("#imageUrl").value = data.imageUrl || "";
+  $("#publisherBarcodeInput").value = data.publisherBarcode || data.isbn || "";
+  $("#isbnInput").value = data.isbn || data.publisherBarcode || "";
+  $("#authorInput").value = data.author || "";
+  $("#publisherInput").value = data.publisher || "";
+  $("#imageUrlInput").value = data.imageUrl || "";
   $("#bookFetchPreview").innerHTML = `
     <article class="book-preview">
       <img src="${escapeHtml(data.imageUrl || "assets/book-placeholder.svg")}" alt="">
@@ -513,7 +574,15 @@ function onDomReady(callback) {
 }
 
 onDomReady(() => {
-  $("#fetchGoogleBookBtn").addEventListener("click", fetchGoogleBook);
+  const fetchBtn = document.getElementById("fetchGoogleBookBtn");
+  const barcodeInput = document.getElementById("publisherBarcodeInput");
+
+  if (!fetchBtn || !barcodeInput) {
+    console.error("Google fetch button/input missing", { fetchBtn, barcodeInput });
+    return;
+  }
+
+  fetchBtn.addEventListener("click", fetchGoogleBook);
 });
 $("#scanPublisherBtn").addEventListener("click", () => startPublisherScanner().catch((error) => {
   logDetailedError(error);
