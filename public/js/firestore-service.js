@@ -1,7 +1,6 @@
 import { app, auth, db } from "./firebase-config.js";
 import {
   Timestamp,
-  addDoc,
   collection,
   doc,
   getDoc,
@@ -76,39 +75,53 @@ export async function getStudentProfile(uid) {
 }
 
 export async function findBookByBarcode(value) {
-  const barcode = String(value || "").trim();
+  const barcode = String(value || "").trim().replace(/\s+/g, "");
+  console.log("Scanned barcode value:", barcode);
   if (!barcode) throw new Error("Enter or scan a barcode.");
-
-  const direct = await getDoc(doc(db, "books", barcode));
-  if (direct.exists()) return { id: direct.id, ...direct.data() };
 
   const barcodeQuery = query(collection(db, "books"), where("barcodeValue", "==", barcode), limit(1));
   const matches = await getDocs(barcodeQuery);
+  console.log("Library barcode query result:", {
+    empty: matches.empty,
+    size: matches.size
+  });
   if (!matches.empty) {
     const snap = matches.docs[0];
+    console.log("Found book document id:", snap.id);
     return { id: snap.id, ...snap.data() };
   }
 
-  throw new Error("Book not found for this barcode.");
+  throw new Error("Book not found. Please scan the library barcode sticker.");
 }
 
 export async function createIssueRequest({ student, book }) {
   if (!auth.currentUser) throw new Error("Login is required.");
+  console.log("Current user uid:", auth.currentUser.uid);
   if (auth.currentUser.uid !== student.uid) {
     throw new Error("You can create issue requests only for your own account.");
   }
   if (book.status !== "available") {
-    throw new Error("This book is not available for issue.");
+    throw new Error("This book is not available.");
+  }
+  if (!book.b_id || !book.barcodeValue) {
+    throw new Error("Invalid library book record. Please scan the library barcode sticker.");
   }
 
   const issueDate = new Date();
   const dueDate = addDays(issueDate, ISSUE_DAYS);
-  const ref = await addDoc(collection(db, "issueRequests"), {
+  const ref = doc(collection(db, "issueRequests"));
+  const payload = {
+    requestId: ref.id,
     studentUid: student.uid,
     studentName: student.name,
     rollNumber: student.rollNumber || "",
-    bookId: book.b_id || book.bookId || book.id,
-    bookTitle: book.bname || book.title || "",
+    bookId: book.b_id,
+    b_id: book.b_id,
+    bookBarcodeValue: book.barcodeValue,
+    bookTitle: book.bname || "",
+    subject: book.subject || "",
+    category: book.category || "",
+    blegal_num: book.blegal_num || "",
     bookImage: book.imageUrl || "",
     issueDate: Timestamp.fromDate(issueDate),
     dueDate: Timestamp.fromDate(dueDate),
@@ -117,7 +130,18 @@ export async function createIssueRequest({ student, book }) {
     createdAt: serverTimestamp(),
     reviewedBy: null,
     reviewedAt: null
-  });
+  };
+  console.log("Issue request payload:", payload);
+
+  try {
+    await setDoc(ref, payload);
+  } catch (error) {
+    console.error("Issue request Firestore error:", {
+      code: error?.code,
+      message: error?.message
+    });
+    throw error;
+  }
 
   return {
     requestId: ref.id,

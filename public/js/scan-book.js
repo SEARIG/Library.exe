@@ -48,15 +48,17 @@ modeSelect.addEventListener("change", () => {
 
 async function handleBarcode(value) {
   try {
+    const scannedValue = String(value || "").trim().replace(/\s+/g, "");
+    console.log("Scanned barcode value:", scannedValue);
     if (modeSelect.value === "return") {
-      $("#returnBookId").value = value.trim();
+      $("#returnBookId").value = scannedValue;
       showToast("Barcode captured for return.", "success");
       return;
     }
 
-    currentBook = await findBookByBarcode(value);
+    currentBook = await findBookByBarcode(scannedValue);
     renderBookPreview(currentBook);
-    openIssueDialog(currentBook);
+    await openIssueDialog(currentBook);
   } catch (error) {
     logDetailedError(error);
     showToast(error.message, "error");
@@ -70,8 +72,9 @@ function renderBookPreview(book) {
       <img src="${escapeHtml(book.imageUrl || "assets/book-placeholder.svg")}" alt="">
       <div>
         <strong>${escapeHtml(book.bname || book.title || book.id)}</strong>
-        <span>${escapeHtml(book.author || "Unknown author")}</span>
-        <span>${escapeHtml(book.subject || book.shelfLocation || "Subject not set")}</span>
+        <span>B_ID: ${escapeHtml(book.b_id || book.id)}</span>
+        <span>${escapeHtml(book.subject || "Subject not set")} | ${escapeHtml(book.category || "Uncategorized")}</span>
+        <span>${escapeHtml(book.barcodeValue || "")}</span>
         <span class="badge badge-${escapeHtml(book.status)}">${escapeHtml(book.status)}</span>
       </div>
     </article>`;
@@ -79,7 +82,7 @@ function renderBookPreview(book) {
 
 async function openIssueDialog(book) {
   if (book.status !== "available") {
-    showToast("This book is not available for issue.", "error");
+    showToast("This book is not available.", "error");
     return;
   }
 
@@ -88,17 +91,26 @@ async function openIssueDialog(book) {
   const issueDate = new Date();
   const dueDate = addDays(issueDate, 45);
 
-  $("#requestStudentUid").value = auth.currentUser.uid;
+  $("#requestStudentUid").value = shortUid(auth.currentUser.uid);
   $("#requestStudentName").value = currentStudent.name || "";
   $("#requestRollNumber").value = currentStudent.rollNumber || "";
-  $("#requestBookId").value = book.b_id || book.bookId || book.id;
-  $("#requestBookTitle").value = book.bname || book.title || "";
-  $("#dialogBookTitle").textContent = book.bname || book.title || book.b_id || book.bookId || book.id;
+  $("#requestBookId").value = book.b_id || "";
+  $("#requestBookTitle").value = book.bname || "";
+  $("#requestSubject").value = book.subject || "";
+  $("#requestCategory").value = book.category || "";
+  $("#requestBLegalNum").value = book.blegal_num || "";
+  $("#requestBarcodeValue").value = book.barcodeValue || "";
+  $("#dialogBookTitle").textContent = book.bname || book.b_id || book.id;
   $("#requestIssueDate").value = issueDate.toISOString().slice(0, 10);
   $("#requestDueDate").value = dueDate.toISOString().slice(0, 10);
   $("#confirmOwnAccount").checked = false;
   $("#issueBookImage").src = book.imageUrl || "assets/book-placeholder.svg";
   issueDialog.showModal();
+}
+
+function shortUid(uid = "") {
+  if (uid.length <= 18) return uid;
+  return `${uid.slice(0, 8)}...${uid.slice(-6)}`;
 }
 
 manualForm.addEventListener("submit", async (event) => {

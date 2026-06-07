@@ -22,6 +22,10 @@ service cloud.firestore {
       return role() in ["librarian", "admin"];
     }
 
+    function isStaff() {
+      return role() in ["librarian", "admin"];
+    }
+
     function isAdmin() {
       return role() == "admin";
     }
@@ -49,11 +53,11 @@ service cloud.firestore {
     }
 
     match /books/{bookId} {
-      allow read: if signedIn() && (isLibrarian() || resource.data.status == "available");
-      allow create: if isLibrarian()
+      allow read: if signedIn();
+      allow create: if isStaff()
         && (request.resource.data.b_id == bookId || request.resource.data.bookId == bookId)
         && request.resource.data.status in ["available", "issued", "lost", "damaged"];
-      allow update: if isLibrarian()
+      allow update: if isStaff()
         && (request.resource.data.b_id == bookId || request.resource.data.bookId == bookId)
         && request.resource.data.status in ["available", "issued", "lost", "damaged"];
       allow delete: if isAdmin();
@@ -68,6 +72,7 @@ service cloud.firestore {
     match /issueRequests/{requestId} {
       allow read: if signedIn() && (resource.data.studentUid == request.auth.uid || isLibrarian());
       allow create: if signedIn()
+        && role() == "student"
         && request.resource.data.studentUid == request.auth.uid
         && request.resource.data.confirmationChecked == true
         && request.resource.data.status == "pending"
