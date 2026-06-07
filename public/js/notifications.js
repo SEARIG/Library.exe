@@ -61,6 +61,12 @@ function isConfigured() {
   ].some((value) => value.startsWith("EMAILJS_"));
 }
 
+export function isEmailNotificationsConfigured() {
+  return isConfigured();
+}
+
+export const EMAILJS_SETUP_MESSAGE = "Email notifications are not configured yet. Please add EmailJS Service ID, Template ID, and Public Key.";
+
 function toDate(value) {
   if (!value) return null;
   const date = value.toDate ? value.toDate() : new Date(value);

@@ -21,6 +21,8 @@ import {
   updateDoc
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 import {
+  EMAILJS_SETUP_MESSAGE,
+  isEmailNotificationsConfigured,
   runReminderCheck,
   sendEmailNotification
 } from "./notifications.js";
@@ -37,6 +39,12 @@ const metrics = {
   issued: $("#metricIssued"),
   penalties: $("#metricPenalties")
 };
+const testEmailButton = $("#sendTestEmailBtn");
+
+if (testEmailButton && !isEmailNotificationsConfigured()) {
+  testEmailButton.disabled = true;
+  testEmailButton.title = EMAILJS_SETUP_MESSAGE;
+}
 
 onSnapshot(collection(db, "users"), (snap) => {
   metrics.users.textContent = snap.size;
@@ -178,11 +186,12 @@ $("#sendTestEmailBtn").addEventListener("click", async (event) => {
         <span>Emails sent: ${result.sent ? 1 : 0}</span>
         <span>Skipped: ${result.sent ? 0 : 1}</span>
       </div>`;
-    showToast(result.sent ? "Test email sent." : "EmailJS is not configured yet.", result.sent ? "success" : "error");
+    showToast(result.sent ? "Test email sent." : EMAILJS_SETUP_MESSAGE, result.sent ? "success" : "error");
   } catch (error) {
     logDetailedError(error);
-    $("#notificationResult").innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
-    showToast(error.message, "error");
+    const message = error.message?.includes("EMAILJS") ? EMAILJS_SETUP_MESSAGE : error.message;
+    $("#notificationResult").innerHTML = `<div class="empty">${escapeHtml(message)}</div>`;
+    showToast(message, "error");
   } finally {
     button.disabled = false;
   }
