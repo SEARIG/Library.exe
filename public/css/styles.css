@@ -515,6 +515,13 @@ dialog::backdrop {
   padding: 0 10px;
 }
 
+#addBookForm,
+#addBookForm > *,
+#addBookForm .toolbar,
+#addBookForm .barcode-sticker {
+  max-width: 100%;
+}
+
 .metric {
   grid-column: span 3;
 }
@@ -641,5 +648,20 @@ th {
   .book-preview {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  #addBookForm {
+    grid-template-columns: 1fr;
+  }
+
+  #addBookForm .toolbar {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  #addBookForm .toolbar .btn,
+  #addBookForm .toolbar button {
+    width: 100%;
   }
 }

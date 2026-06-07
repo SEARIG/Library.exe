@@ -38,6 +38,8 @@ let latestBooks = [];
 let latestBarcodeDataUrl = "";
 let publisherStream = null;
 let publisherScanTimer = null;
+const showBookDebug = new URLSearchParams(window.location.search).get("debug") === "true"
+  || localStorage.debugBooks === "true";
 
 function timeOf(value) {
   if (!value) return 0;
@@ -234,6 +236,8 @@ function cleanGoogleBookCode(rawCode) {
 function updateGoogleFetchDebug(details) {
   const debugBox = document.getElementById("googleFetchDebug");
   if (!debugBox) return;
+  debugBox.hidden = !showBookDebug;
+  if (!showBookDebug) return;
   const attempts = details.attempts || [details];
   debugBox.innerHTML = `
     <strong>Online Metadata Debug</strong>
@@ -245,6 +249,36 @@ function updateGoogleFetchDebug(details) {
       <span>Results found: ${escapeHtml(attempt.resultCount ?? "-")}</span>
       <span>Error: ${escapeHtml(attempt.error || "-")}</span>
     `).join("")}`;
+}
+
+function setMetadataSourceBadge(source) {
+  const badge = document.getElementById("metadataSourceBadge");
+  if (!badge) return;
+  const labels = {
+    google: "Fetched from Google Books",
+    openlibrary: "Fetched from Open Library",
+    local: "Fetched from Local Database"
+  };
+  badge.textContent = labels[source] || "";
+  badge.hidden = !source;
+}
+
+function inferCategory(title = "") {
+  const normalized = title.toLowerCase();
+  if (normalized.includes("pyq")) return "pyq";
+  if (normalized.includes("question")) return "qna";
+  return "textbook";
+}
+
+function inferSubject(title = "") {
+  const normalized = title.toLowerCase();
+  const subjects = [
+    "Machine Design",
+    "Operations Research",
+    "Thermodynamics",
+    "Engineering Drawing"
+  ];
+  return subjects.find((subject) => normalized.includes(subject.toLowerCase())) || "General";
 }
 
 function normalizeGoogleBook(info, cleanCode) {
@@ -262,7 +296,8 @@ function normalizeGoogleBook(info, cleanCode) {
     isbn13,
     isbn10,
     isbn: isbn13 || isbn10 || cleanCode,
-    source: "Google Books"
+    source: "Google Books",
+    metadataSource: "google"
   };
 }
 
@@ -292,7 +327,8 @@ async function normalizeOpenLibraryIsbn(data, cleanCode) {
     isbn13: Array.isArray(data.isbn_13) ? data.isbn_13[0] : "",
     isbn10: Array.isArray(data.isbn_10) ? data.isbn_10[0] : "",
     isbn: (Array.isArray(data.isbn_13) && data.isbn_13[0]) || (Array.isArray(data.isbn_10) && data.isbn_10[0]) || cleanCode,
-    source: "Open Library ISBN"
+    source: "Open Library ISBN",
+    metadataSource: "openlibrary"
   };
 }
 
@@ -306,7 +342,8 @@ function normalizeOpenLibrarySearch(doc, cleanCode) {
     isbn13: Array.isArray(doc.isbn) ? doc.isbn.find((item) => String(item).length === 13) || "" : "",
     isbn10: Array.isArray(doc.isbn) ? doc.isbn.find((item) => String(item).length === 10) || "" : "",
     isbn: cleanCode,
-    source: "Open Library Search"
+    source: "Open Library Search",
+    metadataSource: "openlibrary"
   };
 }
 
@@ -319,6 +356,27 @@ async function fetchGoogleBookDetails(rawCode) {
 
   const attempts = [];
   const lookups = [
+    {
+      source: "Local Database",
+      url: `Firestore books where publisherBarcode/isbn/barcodeValue == ${cleanCode}`,
+      getResult: async () => {
+        const localMatches = latestBooks.find(({ data }) =>
+          data.publisherBarcode === cleanCode
+          || data.isbn === cleanCode
+          || data.barcodeValue === cleanCode
+        );
+        return localMatches ? {
+          title: localMatches.data.bname || "",
+          authors: localMatches.data.author || "",
+          publisher: localMatches.data.publisher || "",
+          categories: localMatches.data.subject || "",
+          imageUrl: localMatches.data.imageUrl || "",
+          isbn: localMatches.data.isbn || cleanCode,
+          source: "Local Database",
+          metadataSource: "local"
+        } : null;
+      }
+    },
     {
       source: "Google Books",
       url: `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(cleanCode)}`,
@@ -340,6 +398,20 @@ async function fetchGoogleBookDetails(rawCode) {
   ];
 
   for (const lookup of lookups) {
+    if (lookup.source === "Local Database") {
+      const localResult = await lookup.getResult();
+      attempts.push({
+        source: lookup.source,
+        url: lookup.url,
+        status: "local",
+        resultCount: localResult ? 1 : 0,
+        error: ""
+      });
+      updateGoogleFetchDebug({ cleanCode, attempts });
+      if (localResult) return localResult;
+      continue;
+    }
+
     console.log("Trying metadata URL:", lookup.url);
 
     const response = await fetch(lookup.url, {
@@ -353,7 +425,9 @@ async function fetchGoogleBookDetails(rawCode) {
 
     if (!response.ok) {
       const text = await response.text();
-      console.error("Metadata API error response:", text);
+      if (response.status !== 429) {
+        console.error("Metadata API error response:", text);
+      }
       attempts.push({
         source: lookup.source,
         url: lookup.url,
@@ -412,14 +486,18 @@ async function fetchGoogleBook(event) {
     const isbnEl = document.getElementById("isbnInput");
     const imageUrlEl = document.getElementById("imageUrlInput");
     const publisherBarcodeEl = document.getElementById("publisherBarcodeInput");
+    const metadataSourceEl = document.getElementById("metadataSourceInput");
 
     if (bnameEl && info.title) bnameEl.value = info.title;
-    if (subjectEl && info.categories) subjectEl.value = info.categories;
+    if (subjectEl) subjectEl.value = inferSubject(info.title || info.categories);
+    $("#category").value = inferCategory(info.title);
     if (authorEl) authorEl.value = info.authors;
     if (publisherEl) publisherEl.value = info.publisher;
     if (isbnEl) isbnEl.value = info.isbn || info.isbn13 || info.isbn10 || cleanCode;
     if (imageUrlEl) imageUrlEl.value = info.imageUrl;
     if (publisherBarcodeEl) publisherBarcodeEl.value = cleanCode;
+    if (metadataSourceEl) metadataSourceEl.value = info.metadataSource || "";
+    setMetadataSourceBadge(info.metadataSource);
 
     $("#bookFetchPreview").innerHTML = `
       <article class="book-preview">
@@ -494,6 +572,7 @@ async function saveBook(event) {
       author: $("#authorInput").value.trim(),
       publisher: $("#publisherInput").value.trim(),
       imageUrl: $("#imageUrlInput").value.trim(),
+      metadataSource: $("#metadataSourceInput").value.trim(),
       status: "available",
       issuedTo: null,
       currentIssueId: null,
@@ -536,6 +615,8 @@ async function saveBook(event) {
     addBookForm.reset();
     $("#category").value = "pyq";
     $("#bookFetchPreview").innerHTML = `<div class="empty">Fetch details or fill the book manually.</div>`;
+    $("#metadataSourceInput").value = "";
+    setMetadataSourceBadge("");
     latestBarcodeDataUrl = "";
     const counterSnap = await getDoc(doc(db, "counters", "books"));
     setNextBookId(counterSnap.exists() ? counterSnap.data().lastId : 0);
@@ -619,6 +700,8 @@ function loadBookIntoForm(id, data) {
   $("#authorInput").value = data.author || "";
   $("#publisherInput").value = data.publisher || "";
   $("#imageUrlInput").value = data.imageUrl || "";
+  $("#metadataSourceInput").value = data.metadataSource || "";
+  setMetadataSourceBadge(data.metadataSource || "");
   $("#bookFetchPreview").innerHTML = `
     <article class="book-preview">
       <img src="${escapeHtml(data.imageUrl || "assets/book-placeholder.svg")}" alt="">
