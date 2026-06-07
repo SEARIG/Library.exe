@@ -42,6 +42,7 @@ const bookSearch = $("#bookSearch");
 let nextBookId = "1";
 let editingBookId = null;
 let latestBooks = [];
+let latestPendingRequests = [];
 let latestBarcodeDataUrl = "";
 let publisherStream = null;
 let publisherScanTimer = null;
@@ -79,10 +80,15 @@ function barcodeValueFor(bid) {
   return `BOOK-${bid}`;
 }
 
+function localBookForRequest(request = {}) {
+  const bookDocId = request.b_id || request.bookId;
+  return latestBooks.find((item) => item.id === bookDocId || item.data.b_id === bookDocId)?.data || null;
+}
+
 async function approveRequest(requestId) {
   console.log("Selected requestId:", requestId);
   let notificationPayload = null;
-  await runTransaction(db, async (transaction) => {
+  const transactionResult = await runTransaction(db, async (transaction) => {
     const requestRef = doc(db, "issueRequests", requestId);
     const requestSnap = await transaction.get(requestRef);
     if (!requestSnap.exists()) {
@@ -98,7 +104,7 @@ async function approveRequest(requestId) {
     });
 
     if (requestData.status !== "pending") {
-      throw new Error(`Issue request is already ${requestData.status}.`);
+      throw new Error("This request was already processed.");
     }
 
     const bookDocId = requestData.b_id || requestData.bookId;
@@ -114,7 +120,15 @@ async function approveRequest(requestId) {
 
     const bookData = bookSnap.data();
     if (bookData.status !== "available") {
-      throw new Error("This book is not available.");
+      const requestUpdate = {
+        status: "rejected",
+        reviewedBy: auth.currentUser.uid,
+        reviewedAt: serverTimestamp(),
+        rejectionReason: "Book already issued or unavailable."
+      };
+      console.log("Rejecting unavailable book request:", { requestId, requestUpdate });
+      transaction.update(requestRef, requestUpdate);
+      return { conflict: true };
     }
 
     const issueRef = doc(collection(db, "bookIssues"));
@@ -171,7 +185,12 @@ async function approveRequest(requestId) {
       issueDate: requestData.issueDate,
       dueDate: requestData.dueDate
     };
+    return { conflict: false };
   });
+
+  if (transactionResult?.conflict) {
+    return { conflict: true };
+  }
 
   if (notificationPayload?.studentUid) {
     const studentSnap = await getDoc(doc(db, "students", notificationPayload.studentUid));
@@ -180,7 +199,7 @@ async function approveRequest(requestId) {
     notificationPayload.studentName = notificationPayload.studentName || student.name || "Student";
   }
 
-  return notificationPayload;
+  return { conflict: false, notificationPayload };
 }
 
 async function rejectRequest(requestId) {
@@ -201,7 +220,7 @@ async function rejectRequest(requestId) {
     });
 
     if (requestData.status !== "pending") {
-      throw new Error(`Issue request is already ${requestData.status}.`);
+      throw new Error("This request was already processed.");
     }
 
     const requestUpdate = {
@@ -756,7 +775,9 @@ function renderBooksTable() {
                 <button class="btn btn-muted" data-book-action="view">View</button>
                 <button class="btn btn-muted" data-book-action="edit">Edit</button>
                 <button class="btn btn-muted" data-book-action="print">Print Barcode</button>
-                <button class="btn btn-muted" data-book-action="lost">Mark Lost</button>
+                ${data.status === "lost"
+                  ? `<button class="btn btn-primary" data-book-action="found">Mark Found</button>`
+                  : `<button class="btn btn-muted" data-book-action="lost">Mark Lost</button>`}
                 <button class="btn btn-muted" data-book-action="damaged">Mark Damaged</button>
               </div>
             </td>
@@ -859,6 +880,15 @@ $("#booksTable").addEventListener("click", async (event) => {
       loadBookIntoForm(id, data);
     } else if (button.dataset.bookAction === "print") {
       await printStickerFor(data);
+    } else if (button.dataset.bookAction === "found") {
+      await updateDoc(doc(db, "books", id), {
+        status: "available",
+        issuedTo: null,
+        issuedToName: null,
+        currentIssueId: null,
+        updatedAt: serverTimestamp()
+      });
+      showToast("Book marked as found and available.", "success");
     } else if (button.dataset.bookAction === "lost" || button.dataset.bookAction === "damaged") {
       await updateDoc(doc(db, "books", id), {
         status: button.dataset.bookAction,
@@ -875,44 +905,57 @@ $("#booksTable").addEventListener("click", async (event) => {
 onSnapshot(
   query(collection(db, "issueRequests"), where("status", "==", "pending")),
   (snap) => {
-    const target = $("#pendingRequests");
-    if (snap.empty) {
-      renderEmpty(target, "No pending issue requests.");
-      return;
-    }
-    target.innerHTML = snap.docs.sort((a, b) => timeOf(a.data().createdAt) - timeOf(b.data().createdAt)).map((item) => {
-      const request = item.data();
-      return `
-        <article class="request-card" data-request-id="${item.id}">
-          <img src="${escapeHtml(request.bookImage || "assets/book-placeholder.svg")}" alt="">
-          <div>
-            <strong>${escapeHtml(request.bookTitle)}</strong>
-            <span>${escapeHtml(request.bookId)} requested by ${escapeHtml(request.studentName)}</span>
-            <span>Issue ${formatDate(request.issueDate)} | Due ${formatDate(request.dueDate)}</span>
-          </div>
-          <div class="row-actions">
-            <button class="btn btn-primary" data-action="approve">Approve</button>
-            <button class="btn btn-muted" data-action="reject">Reject</button>
-          </div>
-        </article>`;
-    }).join("");
+    latestPendingRequests = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
+    renderPendingRequests();
   }
 );
 
+function renderPendingRequests() {
+  const target = $("#pendingRequests");
+  if (!latestPendingRequests.length) {
+    renderEmpty(target, "No pending issue requests.");
+    return;
+  }
+  target.innerHTML = latestPendingRequests.sort((a, b) => timeOf(a.data.createdAt) - timeOf(b.data.createdAt)).map((item) => {
+    const request = item.data;
+    const book = localBookForRequest(request);
+    const unavailable = book && book.status !== "available";
+    return `
+      <article class="request-card" data-request-id="${item.id}">
+        <img src="${escapeHtml(request.bookImage || "assets/book-placeholder.svg")}" alt="">
+        <div>
+          <strong>${escapeHtml(request.bookTitle)}</strong>
+          <span>${escapeHtml(request.bookId)} requested by ${escapeHtml(request.studentName)}</span>
+          <span>Issue ${formatDate(request.issueDate)} | Due ${formatDate(request.dueDate)}</span>
+          ${unavailable ? `<span class="badge badge-issued">Book already issued</span>` : ""}
+        </div>
+        <div class="row-actions">
+          <button class="btn btn-primary approve-request-btn" data-request-id="${item.id}" type="button" ${unavailable ? "disabled" : ""}>Approve</button>
+          <button class="btn btn-muted reject-request-btn" data-request-id="${item.id}" type="button">Reject</button>
+        </div>
+      </article>`;
+  }).join("");
+}
+
 $("#pendingRequests").addEventListener("click", async (event) => {
-  const button = event.target.closest("button[data-action]");
-  if (!button) return;
-  const card = button.closest("[data-request-id]");
-  const requestId = card.dataset.requestId;
-  const confirmed = await confirmAction(button.dataset.action === "approve"
-    ? "Approve this book issue?"
-    : "Reject this issue request?");
+  const approveBtn = event.target.closest(".approve-request-btn");
+  const rejectBtn = event.target.closest(".reject-request-btn");
+  if (!approveBtn && !rejectBtn) return;
+  const button = approveBtn || rejectBtn;
+  const requestId = button.dataset.requestId;
+  if (approveBtn) console.log("Approve clicked:", requestId);
+  if (rejectBtn) console.log("Reject clicked:", requestId);
+  const confirmed = await confirmAction(approveBtn ? "Approve this book issue?" : "Reject this issue request?");
   if (!confirmed) return;
   button.disabled = true;
   try {
-    if (button.dataset.action === "approve") {
-      const notificationPayload = await approveRequest(requestId);
-      sendEmailNotification("issued", notificationPayload).catch((error) => {
+    if (approveBtn) {
+      const result = await approveRequest(requestId);
+      if (result?.conflict) {
+        showToast("This book is already issued or unavailable.", "warning");
+        return;
+      }
+      sendEmailNotification("issued", result.notificationPayload).catch((error) => {
         console.error("Issue email notification failed:", error);
       });
       showToast("Book issued successfully.", "success");
@@ -921,7 +964,7 @@ $("#pendingRequests").addEventListener("click", async (event) => {
       showToast("Issue request rejected.", "success");
     }
   } catch (error) {
-    if (button.dataset.action === "approve") {
+    if (approveBtn) {
       console.error("Approve failed full error:", error);
       console.error("Approve failed code:", error.code);
       console.error("Approve failed message:", error.message);
@@ -930,7 +973,13 @@ $("#pendingRequests").addEventListener("click", async (event) => {
       console.error("Reject failed code:", error.code);
       console.error("Reject failed message:", error.message);
     }
-    showToast(`${error.code || "error"}: ${error.message}`, "error");
+    if (error.message === "This request was already processed.") {
+      showToast("This request was already processed.", "warning");
+    } else if (error.message.includes("not available")) {
+      showToast("This book is already issued or unavailable.", "warning");
+    } else {
+      showToast(`${error.code || "error"}: ${error.message}`, "error");
+    }
   } finally {
     button.disabled = false;
   }
@@ -1009,6 +1058,7 @@ onSnapshot(
   (snap) => {
     latestBooks = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
     renderBooksTable();
+    renderPendingRequests();
     const target = $("#recentBooks");
     if (snap.empty) {
       renderEmpty(target, "No books found.");

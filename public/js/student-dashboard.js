@@ -69,10 +69,9 @@ function shortUid(uid = "") {
 }
 
 onSnapshot(
-  query(collection(db, "bookIssues"), where("studentUid", "==", user.uid)),
+  query(collection(db, "bookIssues"), where("studentUid", "==", user.uid), where("status", "==", "issued")),
   (snap) => {
     const issued = snap.docs
-      .filter((item) => item.data().status === "issued")
       .sort((a, b) => timeOf(b.data().issueDate) - timeOf(a.data().issueDate));
     const target = $("#issuedBooks");
     if (!issued.length) {
@@ -99,11 +98,11 @@ onSnapshot(
 );
 
 onSnapshot(
-  query(collection(db, "issueRequests"), where("studentUid", "==", user.uid)),
+  query(collection(db, "issueRequests"), where("studentUid", "==", user.uid), where("status", "==", "pending")),
   (snap) => {
     const target = $("#issueHistory");
     if (snap.empty) {
-      renderEmpty(target, "No issue requests yet.");
+      renderEmpty(target, "No pending issue requests.");
       return;
     }
     target.innerHTML = snap.docs.sort((a, b) => timeOf(b.data().createdAt) - timeOf(a.data().createdAt)).map((item) => {

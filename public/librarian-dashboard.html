@@ -20,8 +20,8 @@
         <h1>Librarian Dashboard</h1>
         <p>Review pending issue requests, verify availability, and process returns.</p>
       </section>
-      <section class="dashboard-grid">
-        <article class="panel span-5">
+      <section class="librarian-grid">
+        <article class="panel librarian-add-book">
           <h2>Add Book / Generate Barcode</h2>
           <form id="addBookForm" class="form-grid">
             <label>Auto B_ID<input id="autoBId" readonly></label>
@@ -66,16 +66,16 @@
             </div>
           </form>
         </article>
-        <article class="panel span-7">
+        <article class="panel librarian-books">
           <h2>Book Database</h2>
           <label>Search Books<input id="bookSearch" placeholder="Search by B_ID, name, subject, category, inside number, publisher barcode, or library barcode"></label>
-          <div id="booksTable" class="table-wrap"></div>
+          <div id="booksTable" class="table-scroll"></div>
         </article>
-        <article class="panel span-8">
+        <article class="panel librarian-pending">
           <h2>Pending Requests</h2>
           <div id="pendingRequests" class="list-stack"></div>
         </article>
-        <article class="panel span-4">
+        <article class="panel librarian-notifications">
           <h2>Notification Tools</h2>
           <p class="helper-text">EmailJS is optional. Configure it to enable free email notifications.</p>
           <div class="toolbar">
@@ -84,7 +84,7 @@
           </div>
           <div id="notificationResult" class="empty">No notification check has been run yet.</div>
         </article>
-        <article class="panel span-4">
+        <article class="panel librarian-return">
           <h2>Quick Return</h2>
           <div class="toolbar">
             <button class="btn btn-muted" id="startQuickReturnScannerBtn" type="button">Scan Library Barcode</button>
@@ -96,19 +96,19 @@
             <button class="btn btn-primary" type="submit">Return Book</button>
           </form>
         </article>
-        <article class="panel span-6">
+        <article class="panel librarian-active">
           <h2>Active Issues</h2>
           <div id="activeIssues" class="list-stack"></div>
         </article>
-        <article class="panel span-6">
+        <article class="panel librarian-returns">
           <h2>Returns</h2>
           <div id="returnsList" class="list-stack"></div>
         </article>
-        <article class="panel span-6">
+        <article class="panel librarian-students">
           <h2>Recent Students</h2>
           <div id="recentStudents" class="list-stack"></div>
         </article>
-        <article class="panel span-6">
+        <article class="panel librarian-recent-books">
           <h2>Books</h2>
           <div id="recentBooks" class="list-stack"></div>
         </article>

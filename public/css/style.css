@@ -302,6 +302,23 @@ canvas {
   align-items: start;
 }
 
+.librarian-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.librarian-add-book { grid-column: 1; grid-row: span 2; }
+.librarian-books { grid-column: 2; }
+.librarian-pending { grid-column: 1; }
+.librarian-notifications { grid-column: 2; }
+.librarian-return { grid-column: 2; }
+.librarian-active { grid-column: 1; }
+.librarian-returns { grid-column: 2; }
+.librarian-students { grid-column: 1; }
+.librarian-recent-books { grid-column: 2; }
+
 .panel,
 .metric,
 .auth-shell {
@@ -843,7 +860,8 @@ dialog::backdrop {
   margin-bottom: 16px;
 }
 
-.table-wrap {
+.table-wrap,
+.table-scroll {
   width: 100%;
   overflow-x: auto;
 }
@@ -951,8 +969,21 @@ td strong {
 
 @media (max-width: 900px) {
   .auth-shell,
-  .scanner-layout {
+  .scanner-layout,
+  .librarian-grid {
     grid-template-columns: 1fr;
+  }
+
+  .librarian-add-book,
+  .librarian-books,
+  .librarian-pending,
+  .librarian-notifications,
+  .librarian-return,
+  .librarian-active,
+  .librarian-returns,
+  .librarian-students,
+  .librarian-recent-books {
+    grid-column: 1;
   }
 
   .auth-brand {
@@ -1078,7 +1109,8 @@ td strong {
     flex-direction: column;
   }
 
-  .table-wrap {
+  .table-wrap,
+  .table-scroll {
     overflow-x: hidden;
   }
 
