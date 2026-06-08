@@ -3,28 +3,50 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>MLSU Library System</title>
+    <title>ULC | Universal Library Cloud</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#0f8b9d">
+    <meta name="theme-color" content="#12201b">
   </head>
-  <body class="auth-page">
-    <main class="auth-shell landing-shell">
-      <section class="auth-brand">
-        <h1>MLSU Library</h1>
-        <p>Smart barcode-based library management for students and librarians.</p>
-        <div class="feature-chips" aria-label="Library features">
-          <span>Barcode Issue</span>
-          <span>Smart Catalog</span>
-          <span>Due Reminders</span>
-          <span>Penalty Tracking</span>
+  <body class="ulc-page">
+    <header class="ulc-topbar">
+      <a class="ulc-brand" href="index.html">ULC</a>
+      <nav class="ulc-nav" aria-label="Primary navigation">
+        <a href="login.html">Login</a>
+        <a href="register.html">Start Subscription</a>
+        <a href="ulc-dashboard.html">Dashboard</a>
+      </nav>
+    </header>
+    <main>
+      <section class="ulc-hero">
+        <div class="ulc-hero-copy">
+          <p class="eyebrow">Universal Library Cloud</p>
+          <h1>ULC</h1>
+          <p>Multi-tenant library SaaS for universities, independent colleges, and private libraries with subscription billing, tenant-isolated Firestore data, barcode workflows, and role-based dashboards.</p>
+          <div class="ulc-actions">
+            <a class="btn btn-primary" href="register.html">Register Organization</a>
+            <a class="btn btn-muted" href="login.html">Login</a>
+          </div>
+        </div>
+        <div class="ulc-hero-panel" aria-label="Platform snapshot">
+          <span>Universities</span>
+          <strong>Colleges, staff, students, books</strong>
+          <span>Independent colleges</span>
+          <strong>Own catalog and users</strong>
+          <span>Private libraries</span>
+          <strong>Members, barcode issues, fines</strong>
         </div>
       </section>
-      <section class="auth-card">
-        <h2>Enter the library</h2>
-        <div class="form-grid">
-          <a class="btn btn-primary" href="login.html">Login</a>
-          <a class="btn btn-muted" href="signup.html">Student Signup</a>
+      <section class="ulc-section">
+        <div class="ulc-section-head">
+          <h2>V1 Operations</h2>
+          <p>Production-minded controls for billing, books, people, requests, returns, fines, and audit trails.</p>
+        </div>
+        <div class="ulc-feature-grid">
+          <article><h3>Role Dashboards</h3><p>Super admin, university admin, college admin, library admin, librarian, and student views.</p></article>
+          <article><h3>Tenant Data Paths</h3><p>Books, students, members, and staff are stored below the correct organization path.</p></article>
+          <article><h3>Barcode Workflow</h3><p>Every book receives a unique library barcode for issue, return, lost, and found flows.</p></article>
+          <article><h3>Billing Hooks</h3><p>Razorpay subscription creation is handled server-side with env-based credentials.</p></article>
         </div>
       </section>
     </main>

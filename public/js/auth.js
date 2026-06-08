@@ -51,8 +51,12 @@ function logError(error) {
 }
 
 function roleRedirect(role) {
+  if (["super_admin", "university_admin", "college_admin", "library_admin"].includes(role)) {
+    return "ulc-dashboard.html";
+  }
   if (role === "admin") return "admin-dashboard.html";
   if (role === "librarian") return "librarian-dashboard.html";
+  if (role === "student") return "ulc-dashboard.html";
   return "student-dashboard.html";
 }
 
@@ -62,7 +66,7 @@ async function getUserRole(uid) {
     throw new Error("User profile not found. Contact the library administrator.");
   }
   const userData = userSnap.data();
-  if (userData.active === false) {
+  if (userData.active === false || userData.status === "suspended" || userData.status === "inactive") {
     throw new Error("Your account is inactive. Contact the library administrator.");
   }
   return userData.role || "student";

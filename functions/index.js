@@ -8,42 +8,30 @@ admin.initializeApp();
 const db = admin.firestore();
 const FieldValue = admin.firestore.FieldValue;
 const Timestamp = admin.firestore.Timestamp;
-const PENALTY_PER_DAY = 5;
-const ISSUE_DAYS = 45;
-const DEFAULT_USERS = {
-  admin: {
-    email: "admin@123.com",
-    password: "1332Admin!",
-    role: "admin",
-    name: "System Administrator"
-  },
-  librarian: {
-    email: "librarian@123.com",
-    password: "1334Librarian!",
-    role: "librarian",
-    name: "Library Staff"
-  }
-};
 
-async function requireRole(auth, roles) {
-  if (!auth) {
-    throw new HttpsError("unauthenticated", "Login is required.");
-  }
-  const userSnap = await db.doc(`users/${auth.uid}`).get();
-  if (!userSnap.exists || userSnap.get("active") !== true) {
-    throw new HttpsError("permission-denied", "Your account is not active.");
-  }
-  const role = userSnap.get("role");
-  if (!roles.includes(role)) {
-    throw new HttpsError("permission-denied", "You do not have permission for this action.");
-  }
-  return { uid: auth.uid, role };
+const ISSUE_DAYS = 45;
+const FINE_PER_DAY = 5;
+const ACTIVE_STATUSES = ["active", "trialing"];
+const ADMIN_ROLES = ["super_admin", "university_admin", "college_admin", "library_admin"];
+const STAFF_ROLES = [...ADMIN_ROLES, "librarian"];
+
+function clean(value) {
+  return String(value || "").trim();
+}
+
+function normalizeBarcode(value) {
+  return clean(value).replace(/\s+/g, "");
+}
+
+function now() {
+  return FieldValue.serverTimestamp();
 }
 
 function toDate(value) {
   if (!value) return null;
   if (value.toDate) return value.toDate();
-  return new Date(value);
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function addDays(date, days) {
@@ -60,137 +48,658 @@ function daysBetween(start, end) {
   return Math.max(0, Math.floor((endDate - startDate) / 86400000));
 }
 
-function sendSms(phoneNumber, message) {
-  // TODO: Wire a provider adapter without exposing credentials in frontend code.
-  // Provider options: Fast2SMS, MSG91, Twilio.
-  console.log("SMS placeholder", { phoneNumber, message });
+function orgCollection(orgType) {
+  if (orgType === "university") return "universities";
+  if (orgType === "independent_college") return "independentColleges";
+  if (orgType === "private_library") return "privateLibraries";
+  throw new HttpsError("invalid-argument", "Unsupported organization type.");
 }
 
-function formatSmsDate(value) {
-  const date = toDate(value);
-  if (!date) return "";
-  return date.toLocaleDateString("en-GB");
+function adminRoleFor(orgType) {
+  if (orgType === "university") return "university_admin";
+  if (orgType === "independent_college") return "college_admin";
+  if (orgType === "private_library") return "library_admin";
+  throw new HttpsError("invalid-argument", "Unsupported organization type.");
 }
 
-async function getAuthUserByEmail(email) {
+function slug(value) {
+  return clean(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 50) || "org";
+}
+
+function assertFields(payload, fields) {
+  fields.forEach((field) => {
+    if (!clean(payload[field])) {
+      throw new HttpsError("invalid-argument", `${field} is required.`);
+    }
+  });
+}
+
+async function writeAudit(action, actorUid, payload = {}) {
+  const ref = db.collection("auditLogs").doc();
+  await ref.set({
+    logId: ref.id,
+    action,
+    actorUid: actorUid || "system",
+    ...payload,
+    createdAt: now(),
+    updatedAt: now(),
+    status: "active"
+  });
+}
+
+async function logEmail(event, to, subject, payload = {}, status = "queued") {
+  const ref = db.collection("emailLogs").doc();
+  await ref.set({
+    emailId: ref.id,
+    event,
+    to,
+    subject,
+    payload,
+    provider: process.env.RESEND_API_KEY ? "resend" : process.env.SENDGRID_API_KEY ? "sendgrid" : "log_only",
+    status,
+    createdAt: now(),
+    updatedAt: now()
+  });
+}
+
+async function sendEmail(event, to, subject, text, payload = {}) {
+  if (!to) return;
   try {
-    return await admin.auth().getUserByEmail(email);
+    if (process.env.RESEND_API_KEY) {
+      const { Resend } = require("resend");
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      await resend.emails.send({
+        from: process.env.EMAIL_FROM || "ULC <noreply@ulc.local>",
+        to,
+        subject,
+        text
+      });
+      await logEmail(event, to, subject, payload, "sent");
+      return;
+    }
+
+    if (process.env.SENDGRID_API_KEY) {
+      const sendgrid = require("@sendgrid/mail");
+      sendgrid.setApiKey(process.env.SENDGRID_API_KEY);
+      await sendgrid.send({
+        from: process.env.EMAIL_FROM || "noreply@ulc.local",
+        to,
+        subject,
+        text
+      });
+      await logEmail(event, to, subject, payload, "sent");
+      return;
+    }
+
+    await logEmail(event, to, subject, { ...payload, text }, "logged");
   } catch (error) {
-    if (error.code === "auth/user-not-found") return null;
-    throw error;
+    console.error("Email failed", { event, to, error });
+    await logEmail(event, to, subject, { ...payload, error: error.message }, "failed");
   }
 }
 
-async function ensureDefaultUser(key) {
-  const defaults = DEFAULT_USERS[key];
-  if (!defaults) {
-    throw new HttpsError("invalid-argument", "Unknown default user type.");
+async function requireUser(auth, roles = []) {
+  if (!auth) throw new HttpsError("unauthenticated", "Login is required.");
+  const snap = await db.doc(`users/${auth.uid}`).get();
+  if (!snap.exists) throw new HttpsError("permission-denied", "User profile not found.");
+  const profile = snap.data();
+  const status = profile.status || (profile.active === false ? "inactive" : "active");
+  if (!ACTIVE_STATUSES.includes(status) && profile.active !== true) {
+    throw new HttpsError("permission-denied", "Your account is not active.");
   }
-
-  let authUser = await getAuthUserByEmail(defaults.email);
-  let createdAuthUser = false;
-  if (!authUser) {
-    authUser = await admin.auth().createUser({
-      email: defaults.email,
-      password: defaults.password,
-      displayName: defaults.name,
-      emailVerified: true,
-      disabled: false
-    });
-    createdAuthUser = true;
+  if (roles.length && !roles.includes(profile.role)) {
+    throw new HttpsError("permission-denied", "You do not have permission for this action.");
   }
+  return { uid: auth.uid, ...profile, status };
+}
 
-  const userRef = db.doc(`users/${authUser.uid}`);
-  const userSnap = await userRef.get();
-  if (!userSnap.exists) {
-    await userRef.set({
-      uid: authUser.uid,
-      email: defaults.email,
-      role: defaults.role,
-      name: defaults.name,
-      active: true,
-      createdAt: FieldValue.serverTimestamp()
-    });
-  } else {
-    await userRef.set({
-      uid: authUser.uid,
-      email: defaults.email,
-      role: defaults.role,
-      name: defaults.name,
-      active: true
-    }, { merge: true });
-  }
-
+function tenantIdsFromProfile(profile) {
   return {
-    uid: authUser.uid,
-    email: defaults.email,
-    role: defaults.role,
-    existed: !createdAuthUser && userSnap.exists,
-    authCreated: createdAuthUser,
-    profileCreated: !userSnap.exists
+    orgType: profile.orgType || "",
+    universityId: profile.universityId || null,
+    collegeId: profile.collegeId || null,
+    libraryId: profile.libraryId || null
   };
 }
 
-async function getDefaultUserStatus(key) {
-  const defaults = DEFAULT_USERS[key];
-  const authUser = await getAuthUserByEmail(defaults.email);
-  if (!authUser) {
+function canAccessTenant(profile, data) {
+  if (profile.role === "super_admin") return true;
+  if (profile.orgType !== data.orgType) return false;
+  if (profile.universityId && data.universityId && profile.universityId !== data.universityId) return false;
+  if (profile.collegeId && data.collegeId && profile.collegeId !== data.collegeId) return false;
+  if (profile.libraryId && data.libraryId && profile.libraryId !== data.libraryId) return false;
+  return true;
+}
+
+function tenantRootFromProfile(profile, input = {}) {
+  if (profile.orgType === "university") {
+    const universityId = clean(input.universityId || profile.universityId);
+    const collegeId = clean(input.collegeId || profile.collegeId);
+    if (!universityId || !collegeId) {
+      throw new HttpsError("failed-precondition", "A university college is required for this action.");
+    }
     return {
-      email: defaults.email,
-      role: defaults.role,
-      exists: false,
-      authExists: false,
-      profileExists: false
+      orgType: "university",
+      universityId,
+      collegeId,
+      libraryId: null,
+      rootPath: `universities/${universityId}/colleges/${collegeId}`,
+      peopleCollection: "students"
     };
   }
 
-  const userSnap = await db.doc(`users/${authUser.uid}`).get();
+  if (profile.orgType === "independent_college") {
+    const collegeId = clean(input.collegeId || profile.collegeId);
+    if (!collegeId) throw new HttpsError("failed-precondition", "College assignment is required.");
+    return {
+      orgType: "independent_college",
+      universityId: null,
+      collegeId,
+      libraryId: null,
+      rootPath: `independentColleges/${collegeId}`,
+      peopleCollection: "students"
+    };
+  }
+
+  if (profile.orgType === "private_library") {
+    const libraryId = clean(input.libraryId || profile.libraryId);
+    if (!libraryId) throw new HttpsError("failed-precondition", "Library assignment is required.");
+    return {
+      orgType: "private_library",
+      universityId: null,
+      collegeId: null,
+      libraryId,
+      rootPath: `privateLibraries/${libraryId}`,
+      peopleCollection: "members"
+    };
+  }
+
+  throw new HttpsError("failed-precondition", "Your account is not assigned to an organization.");
+}
+
+function tenantFields(root) {
   return {
-    uid: authUser.uid,
-    email: defaults.email,
-    role: defaults.role,
-    exists: userSnap.exists,
-    authExists: true,
-    profileExists: userSnap.exists
+    orgType: root.orgType,
+    universityId: root.universityId,
+    collegeId: root.collegeId,
+    libraryId: root.libraryId
   };
 }
 
-exports.getDefaultUsersStatus = onCall(async () => {
-  console.log("Checking default user setup status");
+async function getBookByBarcode(profile, libraryBarcode) {
+  let query = db.collectionGroup("books").where("libraryBarcode", "==", normalizeBarcode(libraryBarcode)).limit(5);
+  const matches = await query.get();
+  const match = matches.docs.find((docSnap) => canAccessTenant(profile, docSnap.data()));
+  if (!match) throw new HttpsError("not-found", "Book not found in your organization.");
+  return match;
+}
+
+exports.createRazorpaySubscription = onCall(async (request) => {
+  const payload = request.data || {};
+  assertFields(payload, ["orgType", "organizationName", "email", "phone"]);
+  const pricing = payload.pricing || {};
+  const planId = pricing.billingCycle === "yearly"
+    ? process.env.RAZORPAY_YEARLY_PLAN_ID
+    : process.env.RAZORPAY_MONTHLY_PLAN_ID;
+
+  if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET || !planId) {
+    return {
+      mode: "demo",
+      keyId: process.env.RAZORPAY_KEY_ID || "rzp_test_demo",
+      subscriptionId: `demo_sub_${Date.now()}`,
+      amount: pricing.finalAmount || 0
+    };
+  }
+
+  const authHeader = Buffer.from(`${process.env.RAZORPAY_KEY_ID}:${process.env.RAZORPAY_KEY_SECRET}`).toString("base64");
+  const response = await fetch("https://api.razorpay.com/v1/subscriptions", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${authHeader}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      plan_id: planId,
+      total_count: pricing.billingCycle === "yearly" ? 10 : 120,
+      quantity: 1,
+      customer_notify: 1,
+      notes: {
+        orgType: payload.orgType,
+        organizationName: payload.organizationName,
+        quotedAmount: String(pricing.finalAmount || 0)
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new HttpsError("internal", `Razorpay subscription failed: ${errorText}`);
+  }
+
+  const subscription = await response.json();
   return {
-    admin: await getDefaultUserStatus("admin"),
-    librarian: await getDefaultUserStatus("librarian")
+    mode: "razorpay",
+    keyId: process.env.RAZORPAY_KEY_ID,
+    subscriptionId: subscription.id,
+    amount: pricing.finalAmount || 0
   };
 });
 
-exports.setupDefaultUser = onCall(async (request) => {
-  const type = String(request.data?.type || "").trim().toLowerCase();
-  console.log("Default user setup requested", { type });
-  const result = await ensureDefaultUser(type);
-  console.log("Default user setup completed", result);
-  return result;
-});
+exports.completeOrganizationRegistration = onCall(async (request) => {
+  const payload = request.data || {};
+  assertFields(payload, ["orgType", "organizationName", "email", "phone", "address", "authorizedPerson"]);
+  assertFields(payload.admin || {}, ["name", "email", "phone", "password"]);
 
-exports.approveIssueRequest = onCall(async (request) => {
-  const actor = await requireRole(request.auth, ["librarian", "admin"]);
-  const requestId = String(request.data.requestId || "").trim();
-  if (!requestId) {
-    throw new HttpsError("invalid-argument", "requestId is required.");
+  const orgType = payload.orgType;
+  const collectionName = orgCollection(orgType);
+  const orgRef = db.collection(collectionName).doc();
+  const subscriptionRef = db.collection("subscriptions").doc();
+  const paymentRef = db.collection("payments").doc();
+  const orgId = orgRef.id;
+  const pricing = payload.pricing || {};
+  const payment = payload.payment || {};
+  const adminRole = adminRoleFor(orgType);
+  const baseOrgData = {
+    name: clean(payload.organizationName),
+    email: clean(payload.email),
+    phone: clean(payload.phone),
+    address: clean(payload.address),
+    planType: pricing.planType || "unlimited",
+    subscriptionId: subscriptionRef.id,
+    billingStatus: "active",
+    createdBy: "registration",
+    createdAt: now(),
+    updatedAt: now(),
+    status: "active"
+  };
+
+  let authUser;
+  try {
+    authUser = await admin.auth().createUser({
+      email: clean(payload.admin.email),
+      password: payload.admin.password,
+      displayName: clean(payload.admin.name),
+      phoneNumber: clean(payload.admin.phone).startsWith("+") ? clean(payload.admin.phone) : undefined,
+      emailVerified: false,
+      disabled: false
+    });
+  } catch (error) {
+    if (error.code !== "auth/email-already-exists") throw error;
+    authUser = await admin.auth().getUserByEmail(clean(payload.admin.email));
   }
 
+  const userDoc = {
+    uid: authUser.uid,
+    firebaseAuthUid: authUser.uid,
+    name: clean(payload.admin.name),
+    email: clean(payload.admin.email),
+    phone: clean(payload.admin.phone),
+    role: adminRole,
+    orgType,
+    universityId: orgType === "university" ? orgId : null,
+    collegeId: orgType === "independent_college" ? orgId : null,
+    libraryId: orgType === "private_library" ? orgId : null,
+    status: "active",
+    active: true,
+    billingStatus: "active",
+    createdAt: now(),
+    updatedAt: now()
+  };
+
+  const batch = db.batch();
+  if (orgType === "university") {
+    const defaultCollegeId = `${slug(payload.organizationName)}-main-college`;
+    userDoc.collegeId = defaultCollegeId;
+    batch.set(orgRef, {
+      universityId: orgId,
+      ...baseOrgData
+    });
+    batch.set(orgRef.collection("colleges").doc(defaultCollegeId), {
+      collegeId: defaultCollegeId,
+      universityId: orgId,
+      name: `${clean(payload.organizationName)} Main College`,
+      email: clean(payload.email),
+      phone: clean(payload.phone),
+      address: clean(payload.address),
+      orgType,
+      libraryId: null,
+      status: "active",
+      createdAt: now(),
+      updatedAt: now()
+    });
+  } else if (orgType === "independent_college") {
+    batch.set(orgRef, {
+      collegeId: orgId,
+      ...baseOrgData
+    });
+  } else {
+    batch.set(orgRef, {
+      libraryId: orgId,
+      ownerName: clean(payload.authorizedPerson),
+      ...baseOrgData
+    });
+  }
+
+  batch.set(subscriptionRef, {
+    subscriptionId: subscriptionRef.id,
+    organizationId: orgId,
+    orgType,
+    universityId: userDoc.universityId,
+    collegeId: userDoc.collegeId,
+    libraryId: userDoc.libraryId,
+    planType: pricing.planType || "unlimited",
+    billingCycle: pricing.billingCycle || "monthly",
+    monthlyAmount: pricing.monthlyAmount || 0,
+    yearlyAmount: pricing.yearlyAmount || 0,
+    discountPercent: pricing.discountPercent || 0,
+    finalAmount: pricing.finalAmount || 0,
+    razorpaySubscriptionId: payment.razorpay_subscription_id || null,
+    status: "active",
+    createdAt: now(),
+    updatedAt: now()
+  });
+
+  batch.set(paymentRef, {
+    paymentId: paymentRef.id,
+    subscriptionId: subscriptionRef.id,
+    organizationId: orgId,
+    orgType,
+    universityId: userDoc.universityId,
+    collegeId: userDoc.collegeId,
+    libraryId: userDoc.libraryId,
+    amount: pricing.finalAmount || 0,
+    currency: "INR",
+    razorpayPaymentId: payment.razorpay_payment_id || null,
+    razorpaySignature: payment.razorpay_signature || null,
+    mode: payment.mode || "razorpay",
+    status: "successful",
+    createdAt: now(),
+    updatedAt: now()
+  });
+
+  batch.set(db.doc(`users/${authUser.uid}`), userDoc);
+  await batch.commit();
+
+  await Promise.all([
+    sendEmail("welcome", userDoc.email, "Welcome to ULC", `Welcome ${userDoc.name}. Your ULC organization is active.`, { organizationId: orgId }),
+    sendEmail("subscription_activated", clean(payload.email), "ULC subscription activated", "Your ULC subscription is active.", { subscriptionId: subscriptionRef.id }),
+    writeAudit("organization_registered", authUser.uid, {
+      orgType,
+      universityId: userDoc.universityId,
+      collegeId: userDoc.collegeId,
+      libraryId: userDoc.libraryId,
+      organizationId: orgId,
+      subscriptionId: subscriptionRef.id
+    })
+  ]);
+
+  return {
+    organizationId: orgId,
+    subscriptionId: subscriptionRef.id,
+    adminUid: authUser.uid,
+    role: adminRole
+  };
+});
+
+exports.getTenantDashboard = onCall(async (request) => {
+  const profile = await requireUser(request.auth);
+  const counts = {
+    organizations: 0,
+    books: 0,
+    people: 0,
+    pendingRequests: 0,
+    activeIssues: 0,
+    fines: 0
+  };
+  let organizations = [];
+
+  if (profile.role === "super_admin") {
+    const [universities, colleges, libraries] = await Promise.all([
+      db.collection("universities").limit(30).get(),
+      db.collection("independentColleges").limit(30).get(),
+      db.collection("privateLibraries").limit(30).get()
+    ]);
+    organizations = [...universities.docs, ...colleges.docs, ...libraries.docs].map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+    counts.organizations = organizations.length;
+  } else {
+    counts.organizations = 1;
+  }
+
+  const tenant = tenantIdsFromProfile(profile);
+  let booksQuery = db.collectionGroup("books").limit(50);
+  let peopleQuery = profile.orgType === "private_library"
+    ? db.collectionGroup("members").limit(50)
+    : db.collectionGroup("students").limit(50);
+  let requestsQuery = db.collection("issueRequests").where("status", "==", "pending").limit(50);
+  let issuesQuery = db.collection("issueRecords").where("status", "==", "issued").limit(50);
+  let auditQuery = db.collection("auditLogs").orderBy("createdAt", "desc").limit(30);
+
+  if (profile.role !== "super_admin") {
+    booksQuery = booksQuery.where("orgType", "==", tenant.orgType);
+    peopleQuery = peopleQuery.where("orgType", "==", tenant.orgType);
+    requestsQuery = requestsQuery.where("orgType", "==", tenant.orgType);
+    issuesQuery = issuesQuery.where("orgType", "==", tenant.orgType);
+    auditQuery = auditQuery.where("orgType", "==", tenant.orgType);
+    if (tenant.universityId) {
+      booksQuery = booksQuery.where("universityId", "==", tenant.universityId);
+      peopleQuery = peopleQuery.where("universityId", "==", tenant.universityId);
+      requestsQuery = requestsQuery.where("universityId", "==", tenant.universityId);
+      issuesQuery = issuesQuery.where("universityId", "==", tenant.universityId);
+      auditQuery = auditQuery.where("universityId", "==", tenant.universityId);
+    }
+    if (tenant.collegeId) {
+      booksQuery = booksQuery.where("collegeId", "==", tenant.collegeId);
+      peopleQuery = peopleQuery.where("collegeId", "==", tenant.collegeId);
+      requestsQuery = requestsQuery.where("collegeId", "==", tenant.collegeId);
+      issuesQuery = issuesQuery.where("collegeId", "==", tenant.collegeId);
+      auditQuery = auditQuery.where("collegeId", "==", tenant.collegeId);
+    }
+    if (tenant.libraryId) {
+      booksQuery = booksQuery.where("libraryId", "==", tenant.libraryId);
+      peopleQuery = peopleQuery.where("libraryId", "==", tenant.libraryId);
+      requestsQuery = requestsQuery.where("libraryId", "==", tenant.libraryId);
+      issuesQuery = issuesQuery.where("libraryId", "==", tenant.libraryId);
+      auditQuery = auditQuery.where("libraryId", "==", tenant.libraryId);
+    }
+  }
+
+  const [booksSnap, peopleSnap, requestsSnap, issuesSnap, auditSnap] = await Promise.all([
+    booksQuery.get(),
+    peopleQuery.get(),
+    requestsQuery.get(),
+    issuesQuery.get(),
+    auditQuery.get().catch(() => db.collection("auditLogs").limit(30).get())
+  ]);
+
+  const books = booksSnap.docs.map((docSnap) => ({ bookId: docSnap.id, ...docSnap.data() }));
+  const people = peopleSnap.docs.map((docSnap) => ({ studentUid: docSnap.id, ...docSnap.data() }));
+  const issueRequests = requestsSnap.docs.map((docSnap) => ({ requestId: docSnap.id, ...docSnap.data() }));
+  const issues = issuesSnap.docs.map((docSnap) => ({ issueId: docSnap.id, ...docSnap.data() }));
+  const auditLogs = auditSnap.docs.map((docSnap) => ({ logId: docSnap.id, ...docSnap.data() }));
+
+  counts.books = books.length;
+  counts.people = people.length;
+  counts.pendingRequests = issueRequests.length;
+  counts.activeIssues = issues.length;
+  counts.fines = issues.reduce((total, issue) => total + Number(issue.fineAmount || issue.penaltyAmount || 0), 0);
+
+  return { counts, organizations, books, people, issueRequests, issues, auditLogs };
+});
+
+exports.addTenantBook = onCall(async (request) => {
+  const profile = await requireUser(request.auth, STAFF_ROLES);
+  const root = tenantRootFromProfile(profile, request.data || {});
+  const payload = request.data || {};
+  assertFields(payload, ["title"]);
+  const totalCopies = Math.max(1, Number(payload.totalCopies || 1));
+  const bookRef = db.doc(`${root.rootPath}/books/${db.collection("_").doc().id}`);
+  const libraryBarcode = normalizeBarcode(payload.libraryBarcode) || `ULC-${bookRef.id}`;
+
+  await bookRef.set({
+    bookId: bookRef.id,
+    libraryBarcode,
+    isbn: clean(payload.isbn),
+    title: clean(payload.title),
+    author: clean(payload.author),
+    publisher: clean(payload.publisher),
+    category: clean(payload.category),
+    totalCopies,
+    availableCopies: totalCopies,
+    issuedCopies: 0,
+    lostCopies: 0,
+    shelfNo: clean(payload.shelfNo),
+    status: "available",
+    addedBy: profile.uid,
+    ...tenantFields(root),
+    createdAt: now(),
+    updatedAt: now()
+  });
+
+  await writeAudit("book_created", profile.uid, { bookId: bookRef.id, libraryBarcode, ...tenantFields(root) });
+  return { bookId: bookRef.id, libraryBarcode };
+});
+
+exports.addTenantPerson = onCall(async (request) => {
+  const profile = await requireUser(request.auth, STAFF_ROLES);
+  const root = tenantRootFromProfile(profile, request.data || {});
+  const payload = request.data || {};
+  assertFields(payload, ["name", "email"]);
+  const personRef = db.doc(`${root.rootPath}/${root.peopleCollection}/${db.collection("_").doc().id}`);
+
+  await personRef.set({
+    studentUid: personRef.id,
+    name: clean(payload.name),
+    email: clean(payload.email),
+    phone: clean(payload.phone),
+    rollNo: clean(payload.rollNo),
+    course: clean(payload.course),
+    year: clean(payload.year),
+    totalIssuedBooks: 0,
+    totalFine: 0,
+    ...tenantFields(root),
+    status: "active",
+    createdAt: now(),
+    updatedAt: now()
+  });
+
+  await Promise.all([
+    sendEmail("student_account_created", clean(payload.email), "Your ULC library profile is ready", "Your library profile has been created.", { personId: personRef.id }),
+    writeAudit("person_created", profile.uid, { personId: personRef.id, ...tenantFields(root) })
+  ]);
+
+  return { personId: personRef.id };
+});
+
+exports.requestBookIssue = onCall(async (request) => {
+  const profile = await requireUser(request.auth, ["student"]);
+  const libraryBarcode = normalizeBarcode(request.data?.libraryBarcode);
+  if (!libraryBarcode) throw new HttpsError("invalid-argument", "Library barcode is required.");
+  const bookSnap = await getBookByBarcode(profile, libraryBarcode);
+  const book = bookSnap.data();
+  if (Number(book.availableCopies || 0) <= 0 || book.status === "lost") {
+    throw new HttpsError("failed-precondition", "This book is not available.");
+  }
+
+  const requestRef = db.collection("issueRequests").doc();
+  await requestRef.set({
+    requestId: requestRef.id,
+    studentUid: profile.uid,
+    studentName: profile.name || "",
+    studentEmail: profile.email || "",
+    bookId: bookSnap.id,
+    bookPath: bookSnap.ref.path,
+    libraryBarcode,
+    bookTitle: book.title || "",
+    status: "pending",
+    ...tenantIdsFromProfile(profile),
+    createdAt: now(),
+    updatedAt: now(),
+    reviewedBy: null,
+    reviewedAt: null
+  });
+
+  await writeAudit("issue_requested", profile.uid, { requestId: requestRef.id, ...tenantIdsFromProfile(profile) });
+  return { requestId: requestRef.id };
+});
+
+async function approveUlcIssue(requestId, actor) {
   const result = await db.runTransaction(async (transaction) => {
     const requestRef = db.doc(`issueRequests/${requestId}`);
     const requestSnap = await transaction.get(requestRef);
-    if (!requestSnap.exists) {
-      throw new HttpsError("not-found", "Issue request not found.");
+    if (!requestSnap.exists) throw new HttpsError("not-found", "Issue request not found.");
+    const issueRequest = requestSnap.data();
+    if (!issueRequest.bookPath) return null;
+    if (!canAccessTenant(actor, issueRequest)) throw new HttpsError("permission-denied", "Request belongs to another tenant.");
+    if (issueRequest.status !== "pending") throw new HttpsError("failed-precondition", "Only pending requests can be approved.");
+
+    const bookRef = db.doc(issueRequest.bookPath);
+    const bookSnap = await transaction.get(bookRef);
+    if (!bookSnap.exists) throw new HttpsError("failed-precondition", "Book record does not exist.");
+    const book = bookSnap.data();
+    const availableCopies = Number(book.availableCopies || 0);
+    if (availableCopies <= 0 || book.status === "lost") {
+      throw new HttpsError("failed-precondition", "Book is not available.");
     }
 
+    const issueDate = new Date();
+    const dueDate = addDays(issueDate, ISSUE_DAYS);
+    const issueRef = db.collection("issueRecords").doc();
+    transaction.set(issueRef, {
+      issueId: issueRef.id,
+      requestId,
+      studentUid: issueRequest.studentUid,
+      studentName: issueRequest.studentName,
+      studentEmail: issueRequest.studentEmail,
+      bookId: issueRequest.bookId,
+      bookPath: issueRequest.bookPath,
+      libraryBarcode: issueRequest.libraryBarcode,
+      bookTitle: issueRequest.bookTitle,
+      issueDate: Timestamp.fromDate(issueDate),
+      dueDate: Timestamp.fromDate(dueDate),
+      returnDate: null,
+      fineAmount: 0,
+      status: "issued",
+      approvedBy: actor.uid,
+      ...tenantIdsFromProfile(issueRequest),
+      createdAt: now(),
+      updatedAt: now()
+    });
+
+    transaction.update(bookRef, {
+      availableCopies: availableCopies - 1,
+      issuedCopies: Number(book.issuedCopies || 0) + 1,
+      status: availableCopies - 1 <= 0 ? "issued" : "available",
+      currentIssueId: issueRef.id,
+      updatedAt: now()
+    });
+
+    transaction.update(requestRef, {
+      status: "approved",
+      issueId: issueRef.id,
+      reviewedBy: actor.uid,
+      reviewedAt: now(),
+      updatedAt: now()
+    });
+
+    return { issueId: issueRef.id, studentEmail: issueRequest.studentEmail, bookTitle: issueRequest.bookTitle };
+  });
+
+  if (!result) return null;
+  await Promise.all([
+    sendEmail("issue_approved", result.studentEmail, "Book issue approved", `${result.bookTitle} has been issued to you.`, result),
+    writeAudit("issue_approved", actor.uid, { requestId, issueId: result.issueId })
+  ]);
+  return result;
+}
+
+async function approveLegacyIssue(requestId, actor) {
+  return db.runTransaction(async (transaction) => {
+    const requestRef = db.doc(`issueRequests/${requestId}`);
+    const requestSnap = await transaction.get(requestRef);
+    if (!requestSnap.exists) throw new HttpsError("not-found", "Issue request not found.");
     const issueRequest = requestSnap.data();
     if (issueRequest.status !== "pending") {
       throw new HttpsError("failed-precondition", "Only pending requests can be approved.");
-    }
-    if (issueRequest.confirmationChecked !== true) {
-      throw new HttpsError("failed-precondition", "Student confirmation is missing.");
     }
 
     const studentRef = db.doc(`students/${issueRequest.studentUid}`);
@@ -202,21 +711,16 @@ exports.approveIssueRequest = onCall(async (request) => {
       transaction.get(bookRef)
     ]);
 
-    if (!studentSnap.exists || !studentUserSnap.exists || studentUserSnap.get("active") !== true) {
+    if (!studentSnap.exists || !studentUserSnap.exists || studentUserSnap.get("active") === false) {
       throw new HttpsError("failed-precondition", "Student profile is missing or inactive.");
     }
-    if (!bookSnap.exists) {
-      throw new HttpsError("failed-precondition", "Book record does not exist.");
-    }
-    if (bookSnap.get("status") !== "available") {
+    if (!bookSnap.exists || bookSnap.get("status") !== "available") {
       throw new HttpsError("failed-precondition", "Book is not available.");
     }
 
     const issueDate = toDate(issueRequest.issueDate) || new Date();
     const dueDate = toDate(issueRequest.dueDate) || addDays(issueDate, ISSUE_DAYS);
     const issueRef = db.collection("bookIssues").doc();
-    const now = FieldValue.serverTimestamp();
-
     transaction.set(issueRef, {
       issueId: issueRef.id,
       requestId,
@@ -232,13 +736,10 @@ exports.approveIssueRequest = onCall(async (request) => {
       dueDate: Timestamp.fromDate(dueDate),
       returnDate: null,
       status: "issued",
-      penaltyPerDay: PENALTY_PER_DAY,
+      penaltyPerDay: FINE_PER_DAY,
       penaltyAmount: 0,
-      reminder15Sent: false,
-      reminder30Sent: false,
-      reminder45Sent: false,
       approvedBy: actor.uid,
-      approvedAt: now,
+      approvedAt: now(),
       returnedBy: null,
       returnedAt: null
     });
@@ -248,104 +749,169 @@ exports.approveIssueRequest = onCall(async (request) => {
       issuedTo: issueRequest.studentUid,
       issuedToName: issueRequest.studentName || studentSnap.get("name") || "",
       currentIssueId: issueRef.id,
-      updatedAt: now
+      updatedAt: now()
     });
 
     transaction.update(requestRef, {
       status: "approved",
       reviewedBy: actor.uid,
-      reviewedAt: now,
-      issueId: issueRef.id
+      reviewedAt: now(),
+      issueId: issueRef.id,
+      updatedAt: now()
     });
 
-    return { issueId: issueRef.id };
+    return { issueId: issueRef.id, legacy: true };
   });
+}
 
-  return result;
+exports.approveIssueRequest = onCall(async (request) => {
+  const actor = await requireUser(request.auth, STAFF_ROLES.concat(["admin"]));
+  const requestId = clean(request.data?.requestId);
+  if (!requestId) throw new HttpsError("invalid-argument", "requestId is required.");
+  const ulcResult = await approveUlcIssue(requestId, actor);
+  return ulcResult || approveLegacyIssue(requestId, actor);
 });
 
 exports.rejectIssueRequest = onCall(async (request) => {
-  const actor = await requireRole(request.auth, ["librarian", "admin"]);
-  const requestId = String(request.data.requestId || "").trim();
-  if (!requestId) {
-    throw new HttpsError("invalid-argument", "requestId is required.");
-  }
-
+  const actor = await requireUser(request.auth, STAFF_ROLES.concat(["admin"]));
+  const requestId = clean(request.data?.requestId);
+  if (!requestId) throw new HttpsError("invalid-argument", "requestId is required.");
   const requestRef = db.doc(`issueRequests/${requestId}`);
   const requestSnap = await requestRef.get();
-  if (!requestSnap.exists) {
-    throw new HttpsError("not-found", "Issue request not found.");
+  if (!requestSnap.exists) throw new HttpsError("not-found", "Issue request not found.");
+  const issueRequest = requestSnap.data();
+  if (issueRequest.orgType && !canAccessTenant(actor, issueRequest)) {
+    throw new HttpsError("permission-denied", "Request belongs to another tenant.");
   }
-  if (requestSnap.get("status") !== "pending") {
-    throw new HttpsError("failed-precondition", "Only pending requests can be rejected.");
-  }
+  if (issueRequest.status !== "pending") throw new HttpsError("failed-precondition", "Only pending requests can be rejected.");
 
   await requestRef.update({
     status: "rejected",
+    rejectionReason: clean(request.data?.reason) || "Rejected by librarian",
     reviewedBy: actor.uid,
-    reviewedAt: FieldValue.serverTimestamp(),
-    rejectionReason: String(request.data.reason || "")
+    reviewedAt: now(),
+    updatedAt: now()
   });
 
+  await Promise.all([
+    sendEmail("issue_rejected", issueRequest.studentEmail, "Book issue request rejected", clean(request.data?.reason) || "Your book issue request was rejected.", { requestId }),
+    writeAudit("issue_rejected", actor.uid, { requestId, ...(issueRequest.orgType ? tenantIdsFromProfile(issueRequest) : {}) })
+  ]);
   return { requestId, status: "rejected" };
 });
 
-exports.returnBook = onCall(async (request) => {
-  const actor = await requireRole(request.auth, ["librarian", "admin"]);
-  const scannedBarcode = String(request.data.bookId || request.data.barcodeValue || "").trim().replace(/\s+/g, "");
-  console.log("Return requested", { scannedBarcode, actor: actor.uid });
-  if (!scannedBarcode) {
-    throw new HttpsError("invalid-argument", "Library barcode is required.");
+async function returnTenantBookHandler(request) {
+  const actor = await requireUser(request.auth, STAFF_ROLES.concat(["admin"]));
+  const scannedBarcode = request.data?.libraryBarcode || request.data?.bookId || request.data?.barcodeValue;
+  let bookSnap;
+  try {
+    bookSnap = await getBookByBarcode(actor, scannedBarcode);
+  } catch (error) {
+    if (error.code === "not-found") {
+      return returnLegacyBook(actor, scannedBarcode);
+    }
+    throw error;
   }
-
-  const barcodeMatches = await db.collection("books")
-    .where("barcodeValue", "==", scannedBarcode)
+  const book = bookSnap.data();
+  const issueMatches = await db.collection("issueRecords")
+    .where("bookPath", "==", bookSnap.ref.path)
+    .where("status", "==", "issued")
     .limit(1)
     .get();
-  console.log("Return barcode query", { empty: barcodeMatches.empty, size: barcodeMatches.size });
+  if (issueMatches.empty) throw new HttpsError("not-found", "No active issue found for this book.");
 
-  if (barcodeMatches.empty) {
-    throw new HttpsError("not-found", "Book record not found for this library barcode.");
-  }
-
-  const bookId = barcodeMatches.docs[0].id;
-  const bookData = barcodeMatches.docs[0].data();
-  const currentIssueId = bookData.currentIssueId;
-  console.log("Return matched book", { bookId, currentIssueId, status: bookData.status });
-  if (!currentIssueId) {
-    throw new HttpsError("not-found", "No active issue found for this book.");
-  }
-
-  const issueRef = db.doc(`bookIssues/${currentIssueId}`);
-  const bookRef = db.doc(`books/${bookId}`);
-  const returnDate = new Date();
-
+  const issueRef = issueMatches.docs[0].ref;
   const result = await db.runTransaction(async (transaction) => {
+    const [freshBookSnap, issueSnap] = await Promise.all([
+      transaction.get(bookSnap.ref),
+      transaction.get(issueRef)
+    ]);
+    if (!freshBookSnap.exists || !issueSnap.exists) throw new HttpsError("not-found", "Issue or book record is missing.");
+    const freshBook = freshBookSnap.data();
+    const issue = issueSnap.data();
+    const returnDate = new Date();
+    const dueDate = toDate(issue.dueDate) || returnDate;
+    const lateDays = Math.max(0, daysBetween(dueDate, returnDate));
+    const fineAmount = lateDays * FINE_PER_DAY;
+
+    transaction.update(issueRef, {
+      status: "returned",
+      returnDate: Timestamp.fromDate(returnDate),
+      fineAmount,
+      returnedBy: actor.uid,
+      updatedAt: now()
+    });
+    transaction.update(bookSnap.ref, {
+      availableCopies: Number(freshBook.availableCopies || 0) + 1,
+      issuedCopies: Math.max(0, Number(freshBook.issuedCopies || 0) - 1),
+      status: "available",
+      currentIssueId: null,
+      updatedAt: now()
+    });
+    const returnRef = db.collection("returnRecords").doc();
+    transaction.set(returnRef, {
+      returnId: returnRef.id,
+      issueId: issueRef.id,
+      bookId: bookSnap.id,
+      libraryBarcode: freshBook.libraryBarcode,
+      studentUid: issue.studentUid,
+      lateDays,
+      fineAmount,
+      returnedBy: actor.uid,
+      ...tenantIdsFromProfile(freshBook),
+      status: "returned",
+      createdAt: now(),
+      updatedAt: now()
+    });
+    return { issueId: issueRef.id, returnId: returnRef.id, fineAmount, studentEmail: issue.studentEmail, bookTitle: issue.bookTitle };
+  });
+
+  await Promise.all([
+    sendEmail("book_returned", result.studentEmail, "Book returned", `${result.bookTitle} has been returned. Fine: ₹${result.fineAmount}.`, result),
+    result.fineAmount > 0 ? sendEmail("fine_generated", result.studentEmail, "Library fine generated", `A fine of ₹${result.fineAmount} was generated.`, result) : Promise.resolve(),
+    writeAudit("book_returned", actor.uid, { bookId: bookSnap.id, issueId: result.issueId, ...tenantIdsFromProfile(book) })
+  ]);
+  return result;
+}
+
+exports.returnTenantBook = onCall(returnTenantBookHandler);
+exports.returnBook = onCall(returnTenantBookHandler);
+
+async function returnLegacyBook(actor, barcodeValue) {
+  const scannedBarcode = normalizeBarcode(barcodeValue);
+  if (!scannedBarcode) throw new HttpsError("invalid-argument", "Library barcode is required.");
+  const barcodeMatches = await db.collection("books").where("barcodeValue", "==", scannedBarcode).limit(1).get();
+  if (barcodeMatches.empty) throw new HttpsError("not-found", "Book record not found for this library barcode.");
+
+  const bookRef = barcodeMatches.docs[0].ref;
+  const bookData = barcodeMatches.docs[0].data();
+  const issueId = bookData.currentIssueId;
+  if (!issueId) throw new HttpsError("not-found", "No active issue found for this book.");
+  const issueRef = db.doc(`bookIssues/${issueId}`);
+
+  return db.runTransaction(async (transaction) => {
     const [issueSnap, bookSnap] = await Promise.all([
       transaction.get(issueRef),
       transaction.get(bookRef)
     ]);
-
     if (!issueSnap.exists || issueSnap.get("status") !== "issued") {
       throw new HttpsError("failed-precondition", "This issue is already closed.");
     }
-    if (!bookSnap.exists) {
-      throw new HttpsError("failed-precondition", "Book record does not exist.");
-    }
+    if (!bookSnap.exists) throw new HttpsError("failed-precondition", "Book record does not exist.");
 
     const issue = issueSnap.data();
-    const issueDate = toDate(issue.issueDate);
+    const issueDate = toDate(issue.issueDate) || new Date();
+    const returnDate = new Date();
     const daysUsed = daysBetween(issueDate, returnDate);
     const lateDays = Math.max(0, daysUsed - ISSUE_DAYS);
-    const penaltyAmount = lateDays * (issue.penaltyPerDay || PENALTY_PER_DAY);
-    const now = FieldValue.serverTimestamp();
+    const penaltyAmount = lateDays * (issue.penaltyPerDay || FINE_PER_DAY);
 
     transaction.update(issueRef, {
       returnDate: Timestamp.fromDate(returnDate),
       status: "returned",
       penaltyAmount,
       returnedBy: actor.uid,
-      returnedAt: now
+      returnedAt: now()
     });
 
     transaction.update(bookRef, {
@@ -353,7 +919,7 @@ exports.returnBook = onCall(async (request) => {
       issuedTo: null,
       issuedToName: null,
       currentIssueId: null,
-      updatedAt: now
+      updatedAt: now()
     });
 
     if (penaltyAmount > 0) {
@@ -366,61 +932,95 @@ exports.returnBook = onCall(async (request) => {
         amount: penaltyAmount,
         daysLate: lateDays,
         status: "unpaid",
-        createdAt: now,
+        createdAt: now(),
         paidAt: null
       });
     }
 
-    return { issueId: issueRef.id, daysUsed, lateDays, penaltyAmount };
+    return { issueId: issueRef.id, daysUsed, lateDays, penaltyAmount, legacy: true };
   });
+}
 
-  return result;
+exports.markTenantBookLost = onCall(async (request) => {
+  const actor = await requireUser(request.auth, STAFF_ROLES.concat(["admin"]));
+  const bookSnap = await getBookByBarcode(actor, request.data?.libraryBarcode);
+  const book = bookSnap.data();
+  const lostRef = db.collection("lostBookRecords").doc();
+  await db.runTransaction(async (transaction) => {
+    const freshBookSnap = await transaction.get(bookSnap.ref);
+    const freshBook = freshBookSnap.data();
+    transaction.update(bookSnap.ref, {
+      lostCopies: Number(freshBook.lostCopies || 0) + 1,
+      availableCopies: Math.max(0, Number(freshBook.availableCopies || 0) - 1),
+      status: "lost",
+      updatedAt: now()
+    });
+    transaction.set(lostRef, {
+      lostRecordId: lostRef.id,
+      bookId: bookSnap.id,
+      bookPath: bookSnap.ref.path,
+      libraryBarcode: freshBook.libraryBarcode,
+      markedBy: actor.uid,
+      foundAt: null,
+      ...tenantIdsFromProfile(freshBook),
+      status: "lost",
+      createdAt: now(),
+      updatedAt: now()
+    });
+  });
+  await Promise.all([
+    sendEmail("book_lost", actor.email, "Book marked lost", `${book.title || bookSnap.id} was marked lost.`, { bookId: bookSnap.id }),
+    writeAudit("book_lost", actor.uid, { bookId: bookSnap.id, lostRecordId: lostRef.id, ...tenantIdsFromProfile(book) })
+  ]);
+  return { bookId: bookSnap.id, lostRecordId: lostRef.id };
 });
 
-exports.sendIssueApprovalSms = onDocumentCreated("bookIssues/{issueId}", async (event) => {
+exports.markTenantBookFound = onCall(async (request) => {
+  const actor = await requireUser(request.auth, STAFF_ROLES.concat(["admin"]));
+  const bookSnap = await getBookByBarcode(actor, request.data?.libraryBarcode);
+  const book = bookSnap.data();
+  const lostMatches = await db.collection("lostBookRecords")
+    .where("bookPath", "==", bookSnap.ref.path)
+    .where("status", "==", "lost")
+    .limit(1)
+    .get();
+  await db.runTransaction(async (transaction) => {
+    const freshBookSnap = await transaction.get(bookSnap.ref);
+    const freshBook = freshBookSnap.data();
+    transaction.update(bookSnap.ref, {
+      lostCopies: Math.max(0, Number(freshBook.lostCopies || 0) - 1),
+      availableCopies: Number(freshBook.availableCopies || 0) + 1,
+      status: "available",
+      updatedAt: now()
+    });
+    if (!lostMatches.empty) {
+      transaction.update(lostMatches.docs[0].ref, {
+        status: "found",
+        foundBy: actor.uid,
+        foundAt: now(),
+        updatedAt: now()
+      });
+    }
+  });
+  await writeAudit("book_found", actor.uid, { bookId: bookSnap.id, ...tenantIdsFromProfile(book) });
+  return { bookId: bookSnap.id };
+});
+
+exports.sendIssueCreatedEmail = onDocumentCreated("issueRecords/{issueId}", async (event) => {
   const issue = event.data?.data();
   if (!issue || issue.status !== "issued") return;
-
-  const studentSnap = await db.doc(`students/${issue.studentUid}`).get();
-  if (!studentSnap.exists) return;
-
-  sendSms(
-    studentSnap.get("phone"),
-    `Book issued successfully.\nReturn by ${formatSmsDate(issue.dueDate)}`
-  );
+  await sendEmail("issue_approved", issue.studentEmail, "Book issued", `${issue.bookTitle} is due on ${toDate(issue.dueDate)?.toLocaleDateString("en-IN") || "the due date"}.`, issue);
 });
 
 exports.sendIssueReminders = onSchedule("every day 09:00", async () => {
-  const issuedSnap = await db.collection("bookIssues").where("status", "==", "issued").get();
-  const today = new Date();
-
+  const issuedSnap = await db.collection("issueRecords").where("status", "==", "issued").get();
   await Promise.all(issuedSnap.docs.map(async (issueDoc) => {
     const issue = issueDoc.data();
-    const issueDate = toDate(issue.issueDate);
-    const day = daysBetween(issueDate, today);
-    const reminderMap = {
-      15: "reminder15Sent",
-      30: "reminder30Sent",
-      45: "reminder45Sent"
-    };
-    const flag = reminderMap[day];
-    if (!flag || issue[flag] === true) return;
-
-    const studentSnap = await db.doc(`students/${issue.studentUid}`).get();
-    if (!studentSnap.exists) return;
-
-    const message = day === 45
-      ? "Book overdue. ₹5/day penalty active."
-      : `MLSU Library reminder: return ${issue.bookTitle || issue.bookId} by ${formatSmsDate(issue.dueDate)}.`;
-
-    sendSms(
-      studentSnap.get("phone"),
-      message
-    );
-
-    await issueDoc.ref.update({
-      [flag]: true,
-      [`${flag}At`]: FieldValue.serverTimestamp()
-    });
+    const dueDate = toDate(issue.dueDate);
+    if (!dueDate) return;
+    const daysLate = daysBetween(dueDate, new Date());
+    if (daysLate <= 0 || issue.overdueEmailSent) return;
+    await sendEmail("fine_generated", issue.studentEmail, "Library book overdue", `${issue.bookTitle} is overdue. Fine is ₹${daysLate * FINE_PER_DAY}.`, issue);
+    await issueDoc.ref.update({ overdueEmailSent: true, updatedAt: now() });
   }));
 });

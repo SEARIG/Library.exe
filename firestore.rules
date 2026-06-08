@@ -6,98 +6,234 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function userDoc() {
+    function user() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
+    function profile() {
+      return user().data;
+    }
+
+    function active() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && (profile().status in ["active", "trialing"] || profile().active == true);
+    }
+
     function role() {
-      return signedIn() && userDoc().data.active == true ? userDoc().data.role : null;
+      return active() ? profile().role : "";
     }
 
-    function isStudent(uid) {
-      return signedIn() && request.auth.uid == uid;
+    function superAdmin() {
+      return role() == "super_admin";
     }
 
-    function isLibrarian() {
-      return role() in ["librarian", "admin"];
+    function adminRole() {
+      return role() in ["super_admin", "university_admin", "college_admin", "library_admin"];
     }
 
-    function isStaff() {
-      return role() in ["librarian", "admin"];
+    function staffRole() {
+      return role() in ["super_admin", "university_admin", "college_admin", "library_admin", "librarian"];
     }
 
-    function isAdmin() {
-      return role() == "admin";
+    function sameTenant(data) {
+      return superAdmin()
+        || (
+          active()
+          && data.orgType == profile().orgType
+          && (!("universityId" in data) || data.universityId == null || data.universityId == profile().universityId)
+          && (!("collegeId" in data) || data.collegeId == null || data.collegeId == profile().collegeId)
+          && (!("libraryId" in data) || data.libraryId == null || data.libraryId == profile().libraryId)
+        );
+    }
+
+    function ownStudentRecord(data) {
+      return active()
+        && role() == "student"
+        && data.studentUid == request.auth.uid;
+    }
+
+    function protectedFieldsClean() {
+      return request.resource.data.keys().hasAll(["orgType", "createdAt", "updatedAt", "status"]);
     }
 
     match /users/{uid} {
-      allow read: if isStudent(uid) || isLibrarian();
-      allow create: if isStudent(uid)
-        && request.resource.data.uid == uid
+      allow read: if superAdmin() || role() == "admin" || request.auth.uid == uid || (staffRole() && sameTenant(resource.data));
+      allow create: if request.auth.uid == uid
         && request.resource.data.role == "student"
-        && request.resource.data.active == true;
-      allow update: if isAdmin()
-        || (isStudent(uid)
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["uid", "role", "active", "createdAt"]));
-      allow delete: if isAdmin();
+        && request.resource.data.uid == uid
+        && (protectedFieldsClean() || request.resource.data.active == true);
+      allow update: if superAdmin()
+        || (request.auth.uid == uid
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["uid", "firebaseAuthUid", "role", "orgType", "universityId", "collegeId", "libraryId", "createdAt"]));
+      allow delete: if superAdmin() || role() == "admin";
     }
 
     match /students/{uid} {
-      allow read: if isStudent(uid) || isLibrarian();
-      allow create: if isStudent(uid)
+      allow read: if active() && (request.auth.uid == uid || staffRole() || role() == "admin");
+      allow create: if active()
+        && request.auth.uid == uid
         && request.resource.data.uid == uid;
-      allow update: if isStaff()
-        || (isStudent(uid)
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["uid", "createdAt"]));
-      allow delete: if isAdmin();
+      allow update: if active()
+        && (staffRole() || role() == "admin" || request.auth.uid == uid)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["uid", "createdAt"]);
+      allow delete: if superAdmin() || role() == "admin";
     }
 
     match /books/{bookId} {
-      allow read: if signedIn();
-      allow create: if isStaff()
-        && (request.resource.data.b_id == bookId || request.resource.data.bookId == bookId)
+      allow read: if active();
+      allow create, update: if active()
+        && (staffRole() || role() == "admin")
         && request.resource.data.status in ["available", "issued", "lost", "damaged"];
-      allow update: if isStaff()
-        && (request.resource.data.b_id == bookId || request.resource.data.bookId == bookId)
-        && request.resource.data.status in ["available", "issued", "lost", "damaged"];
-      allow delete: if isAdmin();
-    }
-
-    match /counters/{counterId} {
-      allow read: if isLibrarian();
-      allow create, update: if isLibrarian() && counterId == "books";
-      allow delete: if isAdmin();
-    }
-
-    match /issueRequests/{requestId} {
-      allow read: if signedIn() && (resource.data.studentUid == request.auth.uid || isLibrarian());
-      allow create: if signedIn()
-        && role() == "student"
-        && request.resource.data.studentUid == request.auth.uid
-        && request.resource.data.confirmationChecked == true
-        && request.resource.data.status == "pending"
-        && request.resource.data.reviewedBy == null
-        && request.resource.data.reviewedAt == null;
-      allow update: if isStaff()
-        || (signedIn()
-          && resource.data.studentUid == request.auth.uid
-          && resource.data.status == "pending"
-          && request.resource.data.status == "cancelled"
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["studentUid", "bookId", "issueDate", "dueDate"]));
-      allow delete: if isAdmin();
+      allow delete: if superAdmin() || role() == "admin";
     }
 
     match /bookIssues/{issueId} {
-      allow read: if signedIn()
-        && (resource.data.studentUid == request.auth.uid || isStaff());
-      allow create: if isStaff();
-      allow update: if isStaff();
-      allow delete: if isAdmin();
+      allow read: if active()
+        && (resource.data.studentUid == request.auth.uid || staffRole() || role() == "admin");
+      allow create, update: if active() && (staffRole() || role() == "admin");
+      allow delete: if superAdmin() || role() == "admin";
     }
 
     match /penalties/{penaltyId} {
-      allow read: if signedIn() && (resource.data.studentUid == request.auth.uid || isLibrarian());
-      allow create, update, delete: if false;
+      allow read: if active()
+        && (resource.data.studentUid == request.auth.uid || staffRole() || role() == "admin");
+      allow write: if false;
+    }
+
+    match /counters/{counterId} {
+      allow read, create, update: if active() && (staffRole() || role() == "admin");
+      allow delete: if superAdmin() || role() == "admin";
+    }
+
+    match /universities/{universityId} {
+      allow read: if superAdmin() || (active() && profile().universityId == universityId);
+      allow create, update, delete: if superAdmin();
+
+      match /colleges/{collegeId} {
+        allow read: if superAdmin()
+          || (active() && profile().universityId == universityId && (role() == "university_admin" || profile().collegeId == collegeId));
+        allow create, update: if superAdmin() || (role() == "university_admin" && profile().universityId == universityId);
+        allow delete: if superAdmin();
+
+        match /books/{bookId} {
+          allow read: if active() && sameTenant(resource.data);
+          allow create, update: if staffRole() && sameTenant(request.resource.data) && protectedFieldsClean();
+          allow delete: if adminRole() && sameTenant(resource.data);
+        }
+
+        match /students/{studentUid} {
+          allow read: if (request.auth.uid == studentUid) || (active() && sameTenant(resource.data));
+          allow create, update: if staffRole() && sameTenant(request.resource.data) && protectedFieldsClean();
+          allow delete: if adminRole() && sameTenant(resource.data);
+        }
+
+        match /staff/{staffId} {
+          allow read: if staffRole() && sameTenant(resource.data);
+          allow create, update: if adminRole() && sameTenant(request.resource.data);
+          allow delete: if adminRole() && sameTenant(resource.data);
+        }
+      }
+    }
+
+    match /independentColleges/{collegeId} {
+      allow read: if superAdmin() || (active() && profile().collegeId == collegeId);
+      allow create, update, delete: if superAdmin();
+
+      match /books/{bookId} {
+        allow read: if active() && sameTenant(resource.data);
+        allow create, update: if staffRole() && sameTenant(request.resource.data) && protectedFieldsClean();
+        allow delete: if adminRole() && sameTenant(resource.data);
+      }
+
+      match /students/{studentUid} {
+        allow read: if (request.auth.uid == studentUid) || (active() && sameTenant(resource.data));
+        allow create, update: if staffRole() && sameTenant(request.resource.data) && protectedFieldsClean();
+        allow delete: if adminRole() && sameTenant(resource.data);
+      }
+
+      match /staff/{staffId} {
+        allow read: if staffRole() && sameTenant(resource.data);
+        allow create, update: if adminRole() && sameTenant(request.resource.data);
+        allow delete: if adminRole() && sameTenant(resource.data);
+      }
+    }
+
+    match /privateLibraries/{libraryId} {
+      allow read: if superAdmin() || (active() && profile().libraryId == libraryId);
+      allow create, update, delete: if superAdmin();
+
+      match /books/{bookId} {
+        allow read: if active() && sameTenant(resource.data);
+        allow create, update: if staffRole() && sameTenant(request.resource.data) && protectedFieldsClean();
+        allow delete: if adminRole() && sameTenant(resource.data);
+      }
+
+      match /members/{studentUid} {
+        allow read: if (request.auth.uid == studentUid) || (active() && sameTenant(resource.data));
+        allow create, update: if staffRole() && sameTenant(request.resource.data) && protectedFieldsClean();
+        allow delete: if adminRole() && sameTenant(resource.data);
+      }
+
+      match /staff/{staffId} {
+        allow read: if staffRole() && sameTenant(resource.data);
+        allow create, update: if adminRole() && sameTenant(request.resource.data);
+        allow delete: if adminRole() && sameTenant(resource.data);
+      }
+    }
+
+    match /issueRequests/{requestId} {
+      allow read: if active() && (sameTenant(resource.data) || ownStudentRecord(resource.data));
+      allow create: if active()
+        && role() == "student"
+        && request.resource.data.studentUid == request.auth.uid
+        && request.resource.data.status == "pending"
+        && sameTenant(request.resource.data)
+        && protectedFieldsClean();
+      allow update: if staffRole() && sameTenant(resource.data);
+      allow delete: if superAdmin();
+    }
+
+    match /issueRecords/{issueId} {
+      allow read: if active() && (sameTenant(resource.data) || ownStudentRecord(resource.data));
+      allow create, update: if staffRole() && sameTenant(request.resource.data);
+      allow delete: if superAdmin();
+    }
+
+    match /returnRecords/{returnId} {
+      allow read: if active() && (sameTenant(resource.data) || ownStudentRecord(resource.data));
+      allow create, update: if staffRole() && sameTenant(request.resource.data);
+      allow delete: if superAdmin();
+    }
+
+    match /lostBookRecords/{lostRecordId} {
+      allow read: if staffRole() && sameTenant(resource.data);
+      allow create, update: if staffRole() && sameTenant(request.resource.data);
+      allow delete: if superAdmin();
+    }
+
+    match /subscriptions/{subscriptionId} {
+      allow read: if superAdmin() || (adminRole() && sameTenant(resource.data));
+      allow write: if superAdmin();
+    }
+
+    match /payments/{paymentId} {
+      allow read: if superAdmin() || (adminRole() && sameTenant(resource.data));
+      allow write: if superAdmin();
+    }
+
+    match /emailLogs/{emailId} {
+      allow read: if superAdmin();
+      allow write: if false;
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if superAdmin() || (staffRole() && sameTenant(resource.data));
+      allow write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

@@ -1,260 +1,83 @@
-# MLSU Library Management Web App
+# ULC - Universal Library Cloud
 
-Responsive Firebase app for student book issue requests, librarian approvals, returns, penalties, EmailJS notifications, and PWA notification preparation.
+ULC is a Firebase-backed, multi-tenant library SaaS for universities, independent colleges, and private libraries.
 
-## Stack
+## V1 Scope
 
-- Firebase Auth
-- Cloud Firestore
-- Firebase Hosting
-- Firebase Cloud Functions
-- EmailJS browser email notifications
-- HTML, CSS, JavaScript
+- Organization registration for `university`, `independent_college`, and `private_library`.
+- Plan selection for Unlimited or Custom billing.
+- Custom billing formula: `999 + (bookCount * 3) + (studentCount * 3)`.
+- Yearly billing applies a 10% discount.
+- Server-side Razorpay subscription creation with demo fallback when Razorpay env vars are not configured.
+- Server-side organization, subscription, payment, and main-admin creation.
+- Role-aware dashboard entry for:
+  - `super_admin`
+  - `university_admin`
+  - `college_admin`
+  - `library_admin`
+  - `librarian`
+  - `student`
+- Tenant-scoped book and student/member management.
+- Google Books and Open Library ISBN lookup from the dashboard.
+- Barcode-based issue request, approve/reject, return, lost, and found Cloud Functions.
+- Email event logging plus SendGrid or Resend support.
+- Tenant-aware Firestore security rules.
 
-## Project Structure
+## Important Files
 
-- `public/` - hosted web app pages and browser JavaScript
-- `firestore.rules` - role-based Firestore security rules
-- `functions/index.js` - callable approval, rejection, return, and scheduled reminder functions
-- `firebase.json` - Hosting, Firestore, and Functions configuration
+- `public/index.html` - ULC landing and entry screen.
+- `public/register.html` - organization subscription onboarding.
+- `public/ulc-dashboard.html` - shared role-based ULC dashboard.
+- `public/js/ulc-register.js` - pricing, Razorpay checkout, registration completion.
+- `public/js/ulc-dashboard.js` - dashboard actions and external book lookup.
+- `functions/index.js` - callable backend for billing, tenancy, books, people, issue/return/lost/found, email logs, audit logs.
+- `firestore.rules` - strict role and tenant isolation rules.
 
-## Setup
+Legacy MLSU screens remain in `public/*dashboard.html`, `public/signup.html`, and the older dashboard scripts.
 
-1. Create a Firebase project.
-2. Enable Email/Password authentication in Firebase Auth.
-3. Create a Cloud Firestore database.
-4. Install the Firebase CLI:
+## Environment Variables
 
-   ```bash
-   npm install -g firebase-tools
-   ```
-
-5. Login and select your project:
-
-   ```bash
-   firebase login
-   firebase use --add
-   ```
-
-6. The Firebase web app config is already set in `public/js/firebase-config.js`.
-7. Install Cloud Functions dependencies:
-
-   ```bash
-   cd functions
-   npm install
-   cd ..
-   ```
-
-8. Deploy rules, hosting, and functions:
-
-   ```bash
-   firebase deploy
-   ```
-
-## Local Development
-
-Run the Firebase emulator suite:
+Do not put secret keys in frontend files. Configure these for Cloud Functions:
 
 ```bash
-firebase emulators:start
+RAZORPAY_KEY_ID=
+RAZORPAY_KEY_SECRET=
+RAZORPAY_MONTHLY_PLAN_ID=
+RAZORPAY_YEARLY_PLAN_ID=
+SENDGRID_API_KEY=
+RESEND_API_KEY=
+EMAIL_FROM=
 ```
 
-Or serve only the static app:
+If Razorpay variables are missing, registration uses a demo subscription id so local development can continue.
+
+## Local Preview
+
+From the project root, serve the frontend with any static server:
 
 ```bash
-firebase serve --only hosting
+python -m http.server 4173 --bind 127.0.0.1 --directory public
 ```
 
-## GitHub and Vercel
+Then open:
 
-This repo is ready to push to GitHub. Keep Firebase secrets and local emulator files out of Git with the included `.gitignore`.
+```text
+http://127.0.0.1:4173/
+```
 
-For Vercel, import the GitHub repo and use `public` as the output directory. The static app can run on Vercel, but callable Cloud Functions, scheduled reminders, Firestore rules, and Firebase Auth still belong to the Firebase project and must be deployed with Firebase CLI.
+## Deployment Notes
 
-## First Admin
-
-Student signup intentionally creates only `student` accounts. To create the default admin and librarian accounts, use either the local script or the setup page.
-
-Local script:
+Install/update function dependencies before deployment:
 
 ```bash
 cd functions
 npm install
-cd ..
-node create-default-users.js
 ```
 
-Setup page:
+Deploy with Firebase CLI after credentials and rules are reviewed:
 
-```text
-public/setup-users.html
+```bash
+firebase deploy --only hosting,functions,firestore:rules
 ```
 
-The setup page calls Cloud Functions and does not expose default passwords in frontend JavaScript.
-
-Manual fallback:
-
-1. Sign up normally.
-2. In Firestore, open `users/{uid}` for that account.
-3. Change `role` from `student` to `admin`.
-4. Keep `active` set to `true`.
-
-After the first admin exists, use `admin-dashboard.html` to promote librarians or manage accounts.
-
-## Core Flow
-
-1. Student signs up and gets records in `users/{uid}` and `students/{uid}`.
-2. Student opens `scan-book.html`, scans or enters a book barcode, reviews the auto-filled popup, confirms ownership, and submits an `issueRequests` record.
-3. Librarian opens `librarian-dashboard.html`, approves or rejects pending requests.
-4. Approval runs in a Cloud Function transaction, creates `bookIssues/{issueId}`, updates the book to `issued`, and marks the request `approved`.
-5. Librarian scans or enters the book barcode for returns. The return flow calculates late days and clears the active issue state.
-6. EmailJS can notify students when books are issued, returned, or need reminders.
-7. The Vercel API endpoint `api/reminder-check.js` can run due-date reminder checks from the Notification Tools cards.
-
-## Email Notifications
-
-The app uses [EmailJS](https://www.emailjs.com/) for free frontend-triggered email notifications. No private keys should be stored in frontend code.
-
-Notification helper:
-
-```text
-public/js/notifications.js
-```
-
-Reusable function:
-
-```js
-sendEmailNotification(type, payload)
-```
-
-Supported types:
-
-- `issued`
-- `returned`
-- `reminder15`
-- `reminder30`
-- `reminder45`
-
-Payload shape:
-
-```js
-{
-  studentName,
-  studentEmail,
-  bookTitle,
-  issueDate,
-  dueDate,
-  returnDate,
-  penaltyAmount
-}
-```
-
-### EmailJS Setup
-
-1. Create an EmailJS account.
-2. Connect Gmail or another supported email service.
-3. Create one template that accepts these variables:
-   - `notification_type`
-   - `student_name`
-   - `student_email`
-   - `book_title`
-   - `issue_date`
-   - `due_date`
-   - `return_date`
-   - `penalty_amount`
-4. Copy your EmailJS service ID, template ID, and public key.
-5. Open `public/js/notifications.js`.
-6. The app is currently configured with:
-
-   ```js
-   const EMAILJS_CONFIG = {
-     publicKey: "otUu_kwRgzrvjTdRJ",
-     serviceId: "service_mlsu123",
-     templateId: "template_592zvwg"
-   };
-   ```
-
-Suggested template content:
-
-```text
-Hello {{student_name}},
-
-Notification: {{notification_type}}
-Book: {{book_title}}
-Issue date: {{issue_date}}
-Due date: {{due_date}}
-Return date: {{return_date}}
-Penalty: Rs.{{penalty_amount}}
-
-- MLSU Library
-```
-
-EmailJS public keys are intended for browser use, but do not put private provider/API secrets in frontend JavaScript.
-
-### Reminder Check
-
-Scheduled reminders cannot run reliably from a static frontend, so the app includes a staff-triggered reminder tool for now.
-
-Admin and librarian dashboards include:
-
-- `Run Reminder Check`
-- `Send Test Email`
-
-`Run Reminder Check` reads active `bookIssues`, calculates days remaining until `dueDate`, sends the matching email at 15, 7, 3, and 1 day left or overdue, and updates Firestore flags:
-
-- `reminder15DaysLeftSent`
-- `reminder7DaysLeftSent`
-- `reminder3DaysLeftSent`
-- `reminder1DayLeftSent`
-- `overdueReminderSent`
-
-This prevents duplicate reminder emails.
-
-For Vercel backend reminders, add these environment variables:
-
-```text
-FIREBASE_PROJECT_ID=mlsu-library-system
-FIREBASE_CLIENT_EMAIL=your_service_account_client_email
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_KEY\n-----END PRIVATE KEY-----\n"
-```
-
-The reminder endpoint is:
-
-```text
-/api/reminder-check
-```
-
-It returns:
-
-```js
-{
-  checked,
-  sent,
-  skipped,
-  overdue
-}
-```
-
-## PWA Push Notification Preparation
-
-The app includes PWA preparation files:
-
-- `public/manifest.json`
-- `public/service-worker.js`
-- `public/js/push-notifications.js`
-
-Push notifications are not fully implemented yet. Future path:
-
-1. Add Firebase Cloud Messaging.
-2. Request notification permission after a user action.
-3. Create a Firebase VAPID key.
-4. Store user FCM tokens in Firestore.
-5. Send push notifications from a trusted backend or Cloud Function.
-
-## Security Notes
-
-- Students cannot create `bookIssues`.
-- Students can create only their own pending `issueRequests`.
-- Librarian/admin approvals and returns are handled by Cloud Functions using Firestore transactions.
-- Students can read only their own student, request, issue, and penalty records.
-- Admins can manage users and delete protected records where rules allow it.
+Firestore composite indexes may be requested for dashboard queries that combine `collectionGroup`, tenant filters, and ordering. Create the index links Firebase reports during testing.
