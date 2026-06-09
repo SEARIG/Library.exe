@@ -14,6 +14,7 @@ import {
 import {
   collection,
   doc,
+  getDoc,
   onSnapshot,
   orderBy,
   query,
@@ -37,7 +38,9 @@ form.addEventListener("submit", async (event) => {
   }
   setLoading(form, true);
   try {
-    await setDoc(doc(db, "books", bookId), {
+    const bookRef = doc(db, "books", bookId);
+    const existingBook = await getDoc(bookRef);
+    await setDoc(bookRef, {
       bookId,
       serialNo: $("#serialNo").value.trim(),
       barcodeValue: $("#barcodeValue").value.trim() || bookId,
@@ -49,6 +52,12 @@ form.addEventListener("submit", async (event) => {
       status: $("#status").value,
       issuedTo: null,
       currentIssueId: null,
+      ...(existingBook.exists() ? {} : {
+        barcodePrinted: false,
+        barcodePrintedAt: null,
+        barcodePrintedBy: null,
+        barcodePrintBatchId: null
+      }),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     }, { merge: true });

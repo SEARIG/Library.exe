@@ -74,6 +74,32 @@
           <label>Search Books<input id="bookSearch" placeholder="Search by B_ID, name, subject, category, inside number, publisher barcode, or library barcode"></label>
           <div id="booksTable" class="table-scroll"></div>
         </article>
+        <article class="panel librarian-barcode-manager">
+          <h2>Barcode Print Manager</h2>
+          <div class="form-grid">
+            <label>Print Status
+              <select id="barcodePrintStatusFilter">
+                <option value="notPrinted">New / Not Printed</option>
+                <option value="printed">Printed</option>
+                <option value="all">All</option>
+              </select>
+            </label>
+            <label>B_ID From<input id="barcodeRangeFrom" inputmode="numeric" placeholder="1"></label>
+            <label>B_ID To<input id="barcodeRangeTo" inputmode="numeric" placeholder="100"></label>
+            <label>Category<input id="barcodeCategoryFilter" placeholder="textbook"></label>
+            <label>Import Batch<input id="barcodeImportBatchFilter" placeholder="batch id"></label>
+            <label>Book Status<input id="barcodeBookStatusFilter" placeholder="available / issued"></label>
+          </div>
+          <div class="toolbar">
+            <button class="btn btn-muted" id="selectVisibleBarcodesBtn" type="button">Select All Visible</button>
+            <button class="btn btn-muted" id="previewBarcodesBtn" type="button">Preview Barcodes</button>
+            <button class="btn btn-primary" id="generateBulkBarcodePdfBtn" type="button">Generate Bulk PDF</button>
+            <button class="btn btn-muted" id="markSelectedPrintedBtn" type="button">Mark Selected as Printed</button>
+            <button class="btn btn-muted" id="exportBarcodeExcelBtn" type="button">Export Barcode Excel</button>
+          </div>
+          <div id="barcodePrintSummary" class="empty">Select books to preview barcode output.</div>
+          <div id="barcodePrintTable" class="table-scroll"></div>
+        </article>
         <article class="panel librarian-pending">
           <h2>Pending Requests</h2>
           <div id="pendingRequests" class="list-stack"></div>
@@ -119,6 +145,8 @@
     </main>
     <div id="toast" class="toast"></div>
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
     <script type="module" src="./js/notifications.js"></script>
     <script type="module" src="./js/librarian-dashboard.js"></script>

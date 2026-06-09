@@ -24,6 +24,7 @@ import {
 import {
   collection,
   doc,
+  addDoc,
   getDoc,
   getDocs,
   limit,
@@ -1010,7 +1011,11 @@ async function saveBook(event) {
         status: "available",
         issuedTo: null,
         issuedToName: null,
-        currentIssueId: null
+        currentIssueId: null,
+        barcodePrinted: false,
+        barcodePrintedAt: null,
+        barcodePrintedBy: null,
+        barcodePrintBatchId: null
       };
       const createdBookId = await runTransaction(db, async (transaction) => {
         const counterRef = doc(db, "counters", "books");
@@ -1130,6 +1135,268 @@ function renderBooksTable() {
           </tr>`).join("")}
       </tbody>
     </table>`;
+}
+
+function barcodeBookId(item) {
+  return item.data.b_id || item.id;
+}
+
+function barcodeBookTitle(data = {}) {
+  return bookTitle(data) || data.title || "Untitled book";
+}
+
+function shortBookName(name = "") {
+  const value = String(name || "");
+  return value.length > 28 ? `${value.slice(0, 25)}...` : value;
+}
+
+function selectedBarcodeIds() {
+  return Array.from(document.querySelectorAll(".barcode-print-select:checked"))
+    .map((input) => input.value);
+}
+
+function barcodeFilterValue(id) {
+  return String(document.getElementById(id)?.value || "").trim().toLowerCase();
+}
+
+function filteredBarcodeBooks() {
+  const printStatus = $("#barcodePrintStatusFilter")?.value || "notPrinted";
+  const rangeFrom = Number($("#barcodeRangeFrom")?.value || 0);
+  const rangeTo = Number($("#barcodeRangeTo")?.value || 0);
+  const category = barcodeFilterValue("barcodeCategoryFilter");
+  const importBatch = barcodeFilterValue("barcodeImportBatchFilter");
+  const status = barcodeFilterValue("barcodeBookStatusFilter");
+
+  return latestBooks.filter((item) => {
+    const data = item.data;
+    const bid = Number(data.b_id || item.id || 0);
+    const printed = data.barcodePrinted === true;
+    if (printStatus === "notPrinted" && printed) return false;
+    if (printStatus === "printed" && !printed) return false;
+    if (rangeFrom && bid < rangeFrom) return false;
+    if (rangeTo && bid > rangeTo) return false;
+    if (category && String(data.category || "").toLowerCase() !== category) return false;
+    if (importBatch && String(data.importBatchId || "").toLowerCase() !== importBatch) return false;
+    if (status && String(data.status || "").toLowerCase() !== status) return false;
+    return true;
+  });
+}
+
+function renderBarcodeSummary(count = selectedBarcodeIds().length) {
+  const pages = Math.max(1, Math.ceil(count / 24));
+  $("#barcodePrintSummary").innerHTML = `
+    <div class="success-box">
+      <strong>${count} barcode${count === 1 ? "" : "s"} selected</strong>
+      <span>${count} barcode${count === 1 ? "" : "s"} will be generated on ${pages} page${pages === 1 ? "" : "s"}.</span>
+    </div>`;
+}
+
+function renderBarcodePrintManager() {
+  const rows = filteredBarcodeBooks();
+  const target = $("#barcodePrintTable");
+  if (!target) return;
+  if (!rows.length) {
+    renderEmpty(target, "No books match the barcode print filters.");
+    renderBarcodeSummary(0);
+    return;
+  }
+
+  target.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th><span class="sr-only">Select</span></th>
+          <th>B_ID</th>
+          <th>Book Name</th>
+          <th>BLegal Number</th>
+          <th>Barcode Value</th>
+          <th>Print Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((item) => {
+          const data = item.data;
+          const printed = data.barcodePrinted === true;
+          const bid = barcodeBookId(item);
+          return `
+            <tr data-barcode-book-id="${escapeHtml(item.id)}">
+              <td><input class="barcode-print-select" type="checkbox" value="${escapeHtml(item.id)}" ${printed ? "" : "checked"}></td>
+              <td>${escapeHtml(bid)}</td>
+              <td><strong>${escapeHtml(barcodeBookTitle(data))}</strong><span>${escapeHtml(data.category || "")}</span></td>
+              <td>${escapeHtml(data.blegal_num || "")}</td>
+              <td>${escapeHtml(data.barcodeValue || barcodeValueFor(bid))}</td>
+              <td>${printed ? `<span class="badge badge-issued">Printed</span>` : `<span class="badge badge-available">Not Printed</span>`}</td>
+              <td>${printed ? `<button class="btn btn-muted reprint-barcode-btn" data-book-id="${escapeHtml(item.id)}" type="button">Reprint</button>` : ""}</td>
+            </tr>`;
+        }).join("")}
+      </tbody>
+    </table>`;
+  renderBarcodeSummary(selectedBarcodeIds().length);
+}
+
+function barcodeImageDataUrl(value) {
+  return new Promise((resolve, reject) => {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    window.JsBarcode(svg, value, {
+      format: "CODE128",
+      width: 1.6,
+      height: 38,
+      displayValue: false,
+      margin: 0
+    });
+    const xml = new XMLSerializer().serializeToString(svg);
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 320;
+      canvas.height = 90;
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 8, 8, canvas.width - 16, canvas.height - 16);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    image.onerror = reject;
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`;
+  });
+}
+
+function timestampForFile() {
+  const date = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}`;
+}
+
+async function generateBarcodePdfForBooks(items, batchId) {
+  if (!window.jspdf?.jsPDF) throw new Error("jsPDF is not loaded.");
+  if (!window.JsBarcode) throw new Error("JsBarcode is not loaded.");
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const stickerWidth = 63;
+  const stickerHeight = 33;
+  const marginX = 10.5;
+  const marginY = 12;
+  const gapX = 0;
+  const gapY = 0;
+
+  for (let index = 0; index < items.length; index += 1) {
+    if (index > 0 && index % 24 === 0) pdf.addPage();
+    const pageIndex = index % 24;
+    const col = pageIndex % 3;
+    const row = Math.floor(pageIndex / 3);
+    const x = marginX + col * (stickerWidth + gapX);
+    const y = marginY + row * (stickerHeight + gapY);
+    const data = items[index].data;
+    const bid = barcodeBookId(items[index]);
+    const barcodeValue = data.barcodeValue || barcodeValueFor(bid);
+    const barcodeImage = await barcodeImageDataUrl(barcodeValue);
+
+    pdf.setDrawColor(210, 216, 224);
+    pdf.roundedRect(x, y, stickerWidth - 1.5, stickerHeight - 1.5, 1.5, 1.5);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(7);
+    pdf.text("MLSU Library", x + 3, y + 4.5);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(6);
+    pdf.text(`B_ID: ${bid}`, x + 3, y + 8);
+    pdf.text(`Legal No: ${data.blegal_num || "-"}`, x + 3, y + 11);
+    pdf.text(`Book: ${shortBookName(barcodeBookTitle(data))}`, x + 3, y + 14);
+    pdf.addImage(barcodeImage, "PNG", x + 5, y + 15.5, stickerWidth - 12, 11);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(7);
+    pdf.text(barcodeValue, x + stickerWidth / 2, y + 30, { align: "center" });
+  }
+
+  const pdfFileName = `barcodes_batch_${timestampForFile()}.pdf`;
+  pdf.save(pdfFileName);
+  return { pdfFileName, batchId };
+}
+
+async function writeBarcodePrintLog(book, action, batchId) {
+  await addDoc(collection(db, "barcodePrintLogs"), {
+    bookId: book.id,
+    barcodeValue: book.data.barcodeValue || barcodeValueFor(barcodeBookId(book)),
+    action,
+    userId: auth.currentUser.uid,
+    createdAt: serverTimestamp(),
+    batchId
+  });
+}
+
+async function markBarcodeBooksPrinted(items, batchId, pdfFileName, action = "printed") {
+  await setDoc(doc(db, "barcodePrintBatches", batchId), {
+    batchId,
+    createdBy: auth.currentUser.uid,
+    createdAt: serverTimestamp(),
+    totalBooks: items.length,
+    bookIds: items.map((item) => item.id),
+    pdfFileName,
+    status: "generated"
+  });
+
+  await Promise.all(items.map(async (item) => {
+    const updatePayload = action === "printed" && item.data.barcodePrinted !== true
+      ? {
+          barcodePrinted: true,
+          barcodePrintedAt: serverTimestamp(),
+          barcodePrintedBy: auth.currentUser.uid,
+          barcodePrintBatchId: batchId,
+          updatedAt: serverTimestamp()
+        }
+      : {
+          lastReprintedAt: serverTimestamp(),
+          lastReprintedBy: auth.currentUser.uid,
+          updatedAt: serverTimestamp()
+        };
+    await updateDoc(doc(db, "books", item.id), updatePayload);
+    await writeBarcodePrintLog(item, action, batchId);
+  }));
+}
+
+function selectedBarcodeBooks() {
+  const ids = new Set(selectedBarcodeIds());
+  return latestBooks.filter((item) => ids.has(item.id));
+}
+
+async function generateBulkBarcodePdf(markAfterGenerate = true, items = selectedBarcodeBooks(), action = "printed") {
+  if (!items.length) {
+    showToast("Select at least one book for barcode export.", "warning");
+    return;
+  }
+  const batchId = `batch_${Date.now()}`;
+  const { pdfFileName } = await generateBarcodePdfForBooks(items, batchId);
+  if (markAfterGenerate) {
+    const confirmed = await confirmAction(action === "reprinted" ? "Record this barcode reprint?" : "Mark these barcodes as printed?");
+    if (confirmed) {
+      await markBarcodeBooksPrinted(items, batchId, pdfFileName, action);
+      showToast("Barcode batch generated and marked as printed.", "success");
+    } else {
+      showToast("Barcode PDF generated.", "success");
+    }
+  }
+}
+
+function exportBarcodeExcel() {
+  if (!window.XLSX) throw new Error("XLSX export library is not loaded.");
+  const rows = filteredBarcodeBooks().map((item) => {
+    const data = item.data;
+    return {
+      B_ID: data.b_id || item.id,
+      "Book Name": barcodeBookTitle(data),
+      "BLegal Number": data.blegal_num || "",
+      "Barcode Value": data.barcodeValue || barcodeValueFor(data.b_id || item.id),
+      "Barcode Printed": data.barcodePrinted === true ? "Yes" : "No",
+      "Printed At": data.barcodePrintedAt ? formatDate(data.barcodePrintedAt) : "",
+      "Printed By": data.barcodePrintedBy || "",
+      Status: data.status || "",
+      Category: data.category || ""
+    };
+  });
+  const sheet = window.XLSX.utils.json_to_sheet(rows);
+  const workbook = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(workbook, sheet, "Barcodes");
+  window.XLSX.writeFile(workbook, "barcode_export.xlsx");
 }
 
 function loadBookIntoForm(id, data) {
@@ -1255,6 +1522,87 @@ $("#booksTable").addEventListener("click", async (event) => {
       });
       showToast(`Book marked ${button.dataset.bookAction}.`, "success");
     }
+  } catch (error) {
+    logDetailedError(error);
+    showToast(error.message, "error");
+  }
+});
+
+[
+  "barcodePrintStatusFilter",
+  "barcodeRangeFrom",
+  "barcodeRangeTo",
+  "barcodeCategoryFilter",
+  "barcodeImportBatchFilter",
+  "barcodeBookStatusFilter"
+].forEach((id) => {
+  const element = document.getElementById(id);
+  if (!element) return;
+  element.addEventListener("input", renderBarcodePrintManager);
+  element.addEventListener("change", renderBarcodePrintManager);
+});
+
+$("#barcodePrintTable").addEventListener("change", (event) => {
+  if (event.target.classList.contains("barcode-print-select")) {
+    renderBarcodeSummary(selectedBarcodeIds().length);
+  }
+});
+
+$("#barcodePrintTable").addEventListener("click", async (event) => {
+  const button = event.target.closest(".reprint-barcode-btn");
+  if (!button) return;
+  const item = latestBooks.find((book) => book.id === button.dataset.bookId);
+  if (!item) return;
+  try {
+    await generateBulkBarcodePdf(true, [item], "reprinted");
+  } catch (error) {
+    logDetailedError(error);
+    showToast(error.message, "error");
+  }
+});
+
+$("#selectVisibleBarcodesBtn").addEventListener("click", () => {
+  document.querySelectorAll(".barcode-print-select").forEach((input) => {
+    input.checked = true;
+  });
+  renderBarcodeSummary(selectedBarcodeIds().length);
+});
+
+$("#previewBarcodesBtn").addEventListener("click", () => {
+  renderBarcodeSummary(selectedBarcodeIds().length);
+});
+
+$("#generateBulkBarcodePdfBtn").addEventListener("click", async () => {
+  try {
+    await generateBulkBarcodePdf(true);
+  } catch (error) {
+    logDetailedError(error);
+    showToast(error.message, "error");
+  }
+});
+
+$("#markSelectedPrintedBtn").addEventListener("click", async () => {
+  const items = selectedBarcodeBooks();
+  if (!items.length) {
+    showToast("Select at least one book to mark as printed.", "warning");
+    return;
+  }
+  const confirmed = await confirmAction("Mark selected barcodes as printed?");
+  if (!confirmed) return;
+  try {
+    const batchId = `manual_${Date.now()}`;
+    await markBarcodeBooksPrinted(items, batchId, "", "printed");
+    showToast("Selected barcodes marked as printed.", "success");
+  } catch (error) {
+    logDetailedError(error);
+    showToast(error.message, "error");
+  }
+});
+
+$("#exportBarcodeExcelBtn").addEventListener("click", () => {
+  try {
+    exportBarcodeExcel();
+    showToast("Barcode Excel exported.", "success");
   } catch (error) {
     logDetailedError(error);
     showToast(error.message, "error");
@@ -1426,10 +1774,11 @@ onSnapshot(
 );
 
 onSnapshot(
-  query(collection(db, "books"), orderBy("updatedAt", "desc"), limit(50)),
+  query(collection(db, "books"), orderBy("updatedAt", "desc"), limit(500)),
   (snap) => {
     latestBooks = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
     renderBooksTable();
+    renderBarcodePrintManager();
     renderPendingRequests();
     const target = $("#recentBooks");
     if (snap.empty) {
