@@ -53,6 +53,10 @@ const showBookDebug = new URLSearchParams(window.location.search).get("debug") =
   || localStorage.debugBooks === "true";
 const testEmailButton = $("#sendTestEmailBtn");
 if (testEmailButton) testEmailButton.title = EMAILJS_SETUP_MESSAGE;
+const INDCAT_CONFIG = {
+  enabled: false,
+  apiUrl: ""
+};
 
 function timeOf(value) {
   if (!value) return 0;
@@ -343,11 +347,15 @@ async function ensureBarcodeDataUrl() {
   return latestBarcodeDataUrl;
 }
 
-function cleanGoogleBookCode(rawCode) {
+function cleanBookMetadataCode(rawCode) {
   return String(rawCode || "")
     .trim()
     .replace(/[-\s]/g, "")
     .replace(/[^A-Za-z0-9]/g, "");
+}
+
+function cleanGoogleBookCode(rawCode) {
+  return cleanBookMetadataCode(rawCode);
 }
 
 function updateGoogleFetchDebug(details) {
@@ -359,6 +367,8 @@ function updateGoogleFetchDebug(details) {
   debugBox.innerHTML = `
     <strong>Online Metadata Debug</strong>
     <span>ISBN scanned: ${escapeHtml(details.cleanCode || "-")}</span>
+    <span>Cleaned code: ${escapeHtml(details.cleanCode || "-")}</span>
+    <span>Selected source: ${escapeHtml(details.selectedSource || "-")}</span>
     ${attempts.map((attempt) => `
       <span>Source tried: ${escapeHtml(attempt.source || "-")}</span>
       <span>API URL tried: ${escapeHtml(attempt.url || "-")}</span>
@@ -374,6 +384,8 @@ function setMetadataSourceBadge(source) {
   const labels = {
     google: "Fetched from Google Books",
     openlibrary: "Fetched from Open Library",
+    loc: "Fetched from Library of Congress",
+    indcat: "Fetched from INDCAT",
     local: "Fetched from Local Database"
   };
   badge.textContent = labels[source] || "";
@@ -383,7 +395,7 @@ function setMetadataSourceBadge(source) {
 function inferCategory(title = "") {
   const normalized = title.toLowerCase();
   if (normalized.includes("pyq")) return "pyq";
-  if (normalized.includes("question")) return "qna";
+  if (normalized.includes("question") || normalized.includes("question bank") || normalized.includes("qna")) return "qna";
   return "textbook";
 }
 
@@ -406,7 +418,8 @@ function normalizeGoogleBook(info, cleanCode) {
     title: info.title || "",
     authors: Array.isArray(info.authors) ? info.authors.join(", ") : "",
     publisher: info.publisher || "",
-    categories: Array.isArray(info.categories) ? info.categories.join(", ") : "",
+    subject: Array.isArray(info.categories) ? info.categories.join(", ") : "",
+    category: inferCategory(info.title || ""),
     imageUrl: info.imageLinks?.thumbnail
       ? info.imageLinks.thumbnail.replace("http://", "https://")
       : "",
@@ -414,7 +427,8 @@ function normalizeGoogleBook(info, cleanCode) {
     isbn10,
     isbn: isbn13 || isbn10 || cleanCode,
     source: "Google Books",
-    metadataSource: "google"
+    metadataSource: "google",
+    raw: info
   };
 }
 
@@ -439,13 +453,15 @@ async function normalizeOpenLibraryIsbn(data, cleanCode) {
     title: data.title || "",
     authors: authorNames.filter(Boolean).join(", "),
     publisher: Array.isArray(data.publishers) ? data.publishers.join(", ") : "",
-    categories: Array.isArray(data.subjects) ? data.subjects.slice(0, 3).join(", ") : "",
+    subject: Array.isArray(data.subjects) ? data.subjects.slice(0, 3).join(", ") : "",
+    category: inferCategory(data.title || ""),
     imageUrl: data.covers?.[0] ? `https://covers.openlibrary.org/b/id/${data.covers[0]}-M.jpg` : "",
     isbn13: Array.isArray(data.isbn_13) ? data.isbn_13[0] : "",
     isbn10: Array.isArray(data.isbn_10) ? data.isbn_10[0] : "",
     isbn: (Array.isArray(data.isbn_13) && data.isbn_13[0]) || (Array.isArray(data.isbn_10) && data.isbn_10[0]) || cleanCode,
     source: "Open Library ISBN",
-    metadataSource: "openlibrary"
+    metadataSource: "openlibrary",
+    raw: data
   };
 }
 
@@ -454,18 +470,79 @@ function normalizeOpenLibrarySearch(doc, cleanCode) {
     title: doc.title || "",
     authors: Array.isArray(doc.author_name) ? doc.author_name.join(", ") : "",
     publisher: Array.isArray(doc.publisher) ? doc.publisher[0] || "" : "",
-    categories: Array.isArray(doc.subject) ? doc.subject.slice(0, 3).join(", ") : "",
+    subject: Array.isArray(doc.subject) ? doc.subject.slice(0, 3).join(", ") : "",
+    category: inferCategory(doc.title || ""),
     imageUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : "",
     isbn13: Array.isArray(doc.isbn) ? doc.isbn.find((item) => String(item).length === 13) || "" : "",
     isbn10: Array.isArray(doc.isbn) ? doc.isbn.find((item) => String(item).length === 10) || "" : "",
     isbn: cleanCode,
     source: "Open Library Search",
-    metadataSource: "openlibrary"
+    metadataSource: "openlibrary",
+    raw: doc
   };
 }
 
-async function fetchGoogleBookDetails(rawCode) {
-  const cleanCode = cleanGoogleBookCode(rawCode);
+function normalizeLibraryOfCongress(result, cleanCode) {
+  const title = result.title || "";
+  return {
+    title,
+    authors: Array.isArray(result.contributor)
+      ? result.contributor.join(", ")
+      : Array.isArray(result.item?.contributors)
+        ? result.item.contributors.join(", ")
+        : "",
+    publisher: Array.isArray(result.publisher) ? result.publisher.join(", ") : "",
+    subject: Array.isArray(result.subject) ? result.subject.slice(0, 3).join(", ") : "",
+    category: inferCategory(title),
+    imageUrl: Array.isArray(result.image_url) ? result.image_url[0] || "" : "",
+    isbn13: /^\d{13}$/.test(cleanCode) ? cleanCode : "",
+    isbn10: /^\d{10}$/.test(cleanCode) ? cleanCode : "",
+    isbn: cleanCode,
+    source: "Library of Congress",
+    metadataSource: "loc",
+    raw: result
+  };
+}
+
+function normalizeIndcat(data, cleanCode) {
+  const title = data.title || data.bookTitle || data.name || "";
+  const authors = Array.isArray(data.authors)
+    ? data.authors.join(", ")
+    : data.authors || data.author || "";
+  const publisher = Array.isArray(data.publisher)
+    ? data.publisher.join(", ")
+    : data.publisher || "";
+  const subject = Array.isArray(data.subject)
+    ? data.subject.slice(0, 3).join(", ")
+    : data.subject || data.category || "";
+  const isbn = data.isbn || data.isbn13 || data.isbn10 || cleanCode;
+  return {
+    title,
+    authors,
+    publisher,
+    subject,
+    category: inferCategory(title),
+    imageUrl: data.imageUrl || data.image || "",
+    isbn13: String(isbn).length === 13 ? isbn : "",
+    isbn10: String(isbn).length === 10 ? isbn : "",
+    isbn,
+    source: "INDCAT",
+    metadataSource: "indcat",
+    raw: data
+  };
+}
+
+function indcatFallback(cleanCode) {
+  return {
+    source: "INDCAT",
+    found: false,
+    fallbackUrl: `https://indcat.inflibnet.ac.in/index.php/search/book?search=${encodeURIComponent(cleanCode)}`,
+    message: "INDCAT does not expose a public JSON API in this setup. Open search manually."
+  };
+}
+
+async function lookupBookMetadata(rawCode) {
+  const cleanCode = cleanBookMetadataCode(rawCode);
 
   if (!cleanCode) {
     throw new Error("Enter or scan ISBN/publisher barcode first.");
@@ -486,17 +563,27 @@ async function fetchGoogleBookDetails(rawCode) {
           title: localMatches.data.bname || "",
           authors: localMatches.data.author || "",
           publisher: localMatches.data.publisher || "",
-          categories: localMatches.data.subject || "",
+          subject: localMatches.data.subject || "",
+          category: localMatches.data.category || inferCategory(localMatches.data.bname || ""),
           imageUrl: localMatches.data.imageUrl || "",
           isbn: localMatches.data.isbn || cleanCode,
+          isbn13: String(localMatches.data.isbn || cleanCode).length === 13 ? localMatches.data.isbn || cleanCode : "",
+          isbn10: String(localMatches.data.isbn || cleanCode).length === 10 ? localMatches.data.isbn || cleanCode : "",
           source: "Local Database",
-          metadataSource: "local"
+          metadataSource: "local",
+          raw: localMatches.data
         } : null;
       }
     },
     {
-      source: "Google Books",
+      source: "Google Books ISBN",
       url: `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(cleanCode)}`,
+      getCount: (data) => data.items?.length || 0,
+      getResult: (data) => data.items?.[0]?.volumeInfo ? normalizeGoogleBook(data.items[0].volumeInfo, cleanCode) : null
+    },
+    {
+      source: "Google Books General",
+      url: `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(cleanCode)}`,
       getCount: (data) => data.items?.length || 0,
       getResult: (data) => data.items?.[0]?.volumeInfo ? normalizeGoogleBook(data.items[0].volumeInfo, cleanCode) : null
     },
@@ -511,6 +598,24 @@ async function fetchGoogleBookDetails(rawCode) {
       url: `https://openlibrary.org/search.json?isbn=${encodeURIComponent(cleanCode)}`,
       getCount: (data) => data.docs?.length || 0,
       getResult: (data) => data.docs?.[0] ? normalizeOpenLibrarySearch(data.docs[0], cleanCode) : null
+    },
+    {
+      source: "Library of Congress",
+      url: `https://www.loc.gov/books/?fo=json&q=${encodeURIComponent(cleanCode)}`,
+      getCount: (data) => data.results?.filter((item) => item.title).length || 0,
+      getResult: (data) => {
+        const result = data.results?.find((item) => item.title);
+        return result ? normalizeLibraryOfCongress(result, cleanCode) : null;
+      }
+    },
+    {
+      source: "INDCAT",
+      url: INDCAT_CONFIG.enabled && INDCAT_CONFIG.apiUrl
+        ? `${INDCAT_CONFIG.apiUrl}?isbn=${encodeURIComponent(cleanCode)}`
+        : indcatFallback(cleanCode).fallbackUrl,
+      getCount: (data) => data && (data.title || data.bookTitle || data.name) ? 1 : 0,
+      getResult: (data) => data ? normalizeIndcat(data, cleanCode) : null,
+      fallback: !INDCAT_CONFIG.enabled || !INDCAT_CONFIG.apiUrl
     }
   ];
 
@@ -524,59 +629,96 @@ async function fetchGoogleBookDetails(rawCode) {
         resultCount: localResult ? 1 : 0,
         error: ""
       });
-      updateGoogleFetchDebug({ cleanCode, attempts });
+      updateGoogleFetchDebug({ cleanCode, attempts, selectedSource: localResult ? "Local Firestore" : "" });
       if (localResult) return localResult;
       continue;
     }
 
-    console.log("Trying metadata URL:", lookup.url);
-
-    const response = await fetch(lookup.url, {
-      method: "GET",
-      headers: {
-        "Accept": "application/json"
-      }
-    });
-
-    console.log("Metadata response status:", response.status);
-
-    if (!response.ok) {
-      const text = await response.text();
-      if (response.status !== 429) {
-        console.error("Metadata API error response:", text);
-      }
+    if (lookup.fallback) {
+      const fallback = indcatFallback(cleanCode);
       attempts.push({
         source: lookup.source,
-        url: lookup.url,
-        status: response.status,
+        url: fallback.fallbackUrl,
+        status: "fallback",
         resultCount: 0,
-        error: text
+        error: fallback.message
       });
       updateGoogleFetchDebug({ cleanCode, attempts });
       continue;
     }
 
-    const data = await response.json();
-    console.log("Metadata data:", data);
-    const resultCount = lookup.getCount(data);
-    attempts.push({
-      source: lookup.source,
-      url: lookup.url,
-      status: response.status,
-      resultCount,
-      error: ""
-    });
-    updateGoogleFetchDebug({ cleanCode, attempts });
+    if (lookup.source === "Library of Congress") {
+      console.log("Trying Library of Congress:", lookup.url);
+    }
+    console.log("Trying metadata URL:", lookup.url);
 
-    if (resultCount > 0) {
-      const result = await lookup.getResult(data);
-      if (result && (result.title || result.publisher || result.authors)) {
-        return result;
+    try {
+      const response = await fetch(lookup.url, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json"
+        }
+      });
+
+      console.log("Metadata response status:", response.status);
+
+      if (!response.ok) {
+        const text = await response.text();
+        if (response.status !== 429) {
+          console.error("Metadata API error response:", text);
+        }
+        attempts.push({
+          source: lookup.source,
+          url: lookup.url,
+          status: response.status,
+          resultCount: 0,
+          error: response.status === 429 ? "Quota exceeded; continuing to next source." : text
+        });
+        updateGoogleFetchDebug({ cleanCode, attempts });
+        continue;
       }
+
+      const data = await response.json();
+      if (lookup.source === "Library of Congress") {
+        console.log("LOC result:", data);
+      } else {
+        console.log("Metadata data:", data);
+      }
+      const resultCount = lookup.getCount(data);
+      attempts.push({
+        source: lookup.source,
+        url: lookup.url,
+        status: response.status,
+        resultCount,
+        error: ""
+      });
+      updateGoogleFetchDebug({ cleanCode, attempts });
+
+      if (resultCount > 0) {
+        const result = await lookup.getResult(data);
+        if (result && (result.title || result.publisher || result.authors || result.subject)) {
+          updateGoogleFetchDebug({ cleanCode, attempts, selectedSource: result.source });
+          return result;
+        }
+      }
+    } catch (error) {
+      console.error(`${lookup.source} lookup failed:`, error);
+      attempts.push({
+        source: lookup.source,
+        url: lookup.url,
+        status: "error",
+        resultCount: 0,
+        error: error.message
+      });
+      updateGoogleFetchDebug({ cleanCode, attempts });
     }
   }
 
-  return null;
+  return { found: false, indcatFallback: indcatFallback(cleanCode), attempts };
+}
+
+async function fetchGoogleBookDetails(rawCode) {
+  return lookupBookMetadata(rawCode);
 }
 
 async function fetchGoogleBook(event) {
@@ -586,13 +728,18 @@ async function fetchGoogleBook(event) {
 
   try {
     const info = await fetchGoogleBookDetails(barcodeInput?.value);
-    if (!info) {
-      $("#bookFetchPreview").innerHTML = `<div class="empty">No online data found. Please fill manually.</div>`;
-      if (!/^\d{10}(\d{3})?$/.test(cleanCode)) {
-        showToast("This barcode may not be an ISBN. Google Books can only fetch details from ISBN/publisher barcode. Please type manually.", "error");
-      } else {
-        showToast("No online data found. Please fill manually.", "warning");
+    if (!info || info.found === false) {
+      const fallbackUrl = info?.indcatFallback?.fallbackUrl;
+      $("#bookFetchPreview").innerHTML = `
+        <div class="empty">
+          <span>No online metadata found. Please fill manually once. Future scans will use local database.</span>
+          ${fallbackUrl ? `<button class="btn btn-muted" id="openIndcatFallbackBtn" type="button">Search INDCAT Manually</button>` : ""}
+        </div>`;
+      const indcatButton = document.getElementById("openIndcatFallbackBtn");
+      if (indcatButton && fallbackUrl) {
+        indcatButton.addEventListener("click", () => window.open(fallbackUrl, "_blank", "noopener,noreferrer"));
       }
+      showToast("No online metadata found. Please fill manually once. Future scans will use local database.", "warning");
       return;
     }
 
@@ -606,8 +753,8 @@ async function fetchGoogleBook(event) {
     const metadataSourceEl = document.getElementById("metadataSourceInput");
 
     if (bnameEl && info.title) bnameEl.value = info.title;
-    if (subjectEl) subjectEl.value = inferSubject(info.title || info.categories);
-    $("#category").value = inferCategory(info.title);
+    if (subjectEl) subjectEl.value = info.subject || info.category || inferSubject(info.title) || "General";
+    $("#category").value = info.category || inferCategory(info.title);
     if (authorEl) authorEl.value = info.authors;
     if (publisherEl) publisherEl.value = info.publisher;
     if (isbnEl) isbnEl.value = info.isbn || info.isbn13 || info.isbn10 || cleanCode;
@@ -626,7 +773,10 @@ async function fetchGoogleBook(event) {
           <span>${escapeHtml(info.source || "Online metadata")}</span>
         </div>
       </article>`;
-    showToast("Book details fetched successfully.", "success");
+    const successMessage = info.metadataSource === "local"
+      ? "Book details filled from local library database."
+      : `Book details fetched from ${info.source}.`;
+    showToast(successMessage, "success");
   } catch (error) {
     console.error("Online metadata fetch failed:", error);
     updateGoogleFetchDebug({
@@ -636,7 +786,7 @@ async function fetchGoogleBook(event) {
       resultCount: "-",
       error: error.message
     });
-    showToast(error.message || "Online metadata fetch failed. Please try again or fill manually.", "error");
+    showToast("Online metadata lookup failed. Please fill manually once. Future scans will use local database.", "warning");
   }
 }
 

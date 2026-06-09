@@ -47,9 +47,10 @@
             <input id="metadataSourceInput" type="hidden">
             <div class="toolbar">
               <button class="btn btn-muted" id="scanPublisherBtn" type="button">Scan Publisher Barcode</button>
-              <button class="btn btn-muted" id="fetchGoogleBookBtn" type="button">Fetch Details from Google</button>
+              <button class="btn btn-muted" id="fetchGoogleBookBtn" type="button">Fetch Book Details</button>
               <button class="btn btn-muted" id="generateBarcodeBtn" type="button">Generate Library Barcode</button>
             </div>
+            <p class="helper-text">Searches Local Database, Google Books, Open Library, Library of Congress, and INDCAT fallback.</p>
             <video id="publisherScannerVideo" class="scanner-video compact-video" playsinline autoplay muted hidden></video>
             <span id="metadataSourceBadge" class="badge" hidden></span>
             <div id="bookFetchPreview" class="empty">Fetch details or fill the book manually.</div>
