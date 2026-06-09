@@ -88,6 +88,12 @@ service cloud.firestore {
       allow delete: if superAdmin() || role() == "admin";
     }
 
+    match /bookMetadata/{isbn} {
+      allow read: if active();
+      allow create, update: if active() && (staffRole() || role() == "admin");
+      allow delete: if superAdmin() || role() == "admin";
+    }
+
     match /bookIssues/{issueId} {
       allow read: if active()
         && (resource.data.studentUid == request.auth.uid || staffRole() || role() == "admin");

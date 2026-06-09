@@ -25,12 +25,14 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   limit,
   onSnapshot,
   orderBy,
   query,
   runTransaction,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
@@ -94,6 +96,65 @@ function collectBookMetadata() {
     imageUrl: $("#imageUrlInput").value.trim(),
     updatedAt: serverTimestamp()
   };
+}
+
+function metadataDocId(code) {
+  return cleanBookMetadataCode(code).toUpperCase();
+}
+
+function titleKeywords(title = "") {
+  return String(title || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length >= 3)
+    .slice(0, 12);
+}
+
+function normalizeLocalMetadata(data = {}, cleanCode = "") {
+  const title = data.bname || data.title || "";
+  const isbn = data.isbn || data.isbn13 || data.isbn10 || cleanCode;
+  return {
+    title,
+    authors: data.author || data.authors || "",
+    publisher: data.publisher || "",
+    subject: data.subject || "",
+    category: data.category || inferCategory(title),
+    imageUrl: data.imageUrl || "",
+    isbn,
+    isbn13: String(isbn).length === 13 ? isbn : "",
+    isbn10: String(isbn).length === 10 ? isbn : "",
+    source: "Local Metadata Database",
+    metadataSource: "local",
+    raw: data
+  };
+}
+
+async function saveBookMetadataForFuture(source = "manual") {
+  const cleanCode = metadataDocId($("#isbnInput").value || $("#publisherBarcodeInput").value);
+  if (!cleanCode) throw new Error("Enter publisher ISBN/barcode before saving metadata.");
+  const metadata = collectBookMetadata();
+  if (!metadata.bname) throw new Error("Book Name is required before saving metadata.");
+  const payload = {
+    isbn: metadata.isbn || cleanCode,
+    publisherBarcode: metadata.publisherBarcode || cleanCode,
+    bname: metadata.bname,
+    author: metadata.author || "",
+    publisher: metadata.publisher || "",
+    subject: metadata.subject || "General",
+    category: metadata.category || inferCategory(metadata.bname),
+    imageUrl: metadata.imageUrl || "",
+    source,
+    bnameKeywords: titleKeywords(metadata.bname),
+    updatedAt: serverTimestamp()
+  };
+  const ref = doc(db, "bookMetadata", cleanCode);
+  const existing = await getDoc(ref);
+  await setDoc(ref, {
+    ...payload,
+    createdAt: existing.exists() ? existing.data().createdAt || serverTimestamp() : serverTimestamp()
+  }, { merge: true });
+  return payload;
 }
 
 function localBookForRequest(request = {}) {
@@ -368,6 +429,7 @@ function updateGoogleFetchDebug(details) {
     <strong>Online Metadata Debug</strong>
     <span>ISBN scanned: ${escapeHtml(details.cleanCode || "-")}</span>
     <span>Cleaned code: ${escapeHtml(details.cleanCode || "-")}</span>
+    <span>Local metadata found: ${details.localMetadataFound ? "yes" : "no"}</span>
     <span>Selected source: ${escapeHtml(details.selectedSource || "-")}</span>
     ${attempts.map((attempt) => `
       <span>Source tried: ${escapeHtml(attempt.source || "-")}</span>
@@ -541,23 +603,54 @@ function indcatFallback(cleanCode) {
   };
 }
 
+async function findLocalMetadata(cleanCode) {
+  if (!cleanCode) return null;
+  const docSnap = await getDoc(doc(db, "bookMetadata", metadataDocId(cleanCode)));
+  if (docSnap.exists()) return normalizeLocalMetadata(docSnap.data(), cleanCode);
+
+  const isbnSnap = await getDocs(query(collection(db, "bookMetadata"), where("isbn", "==", cleanCode), limit(1)));
+  if (!isbnSnap.empty) return normalizeLocalMetadata(isbnSnap.docs[0].data(), cleanCode);
+
+  const barcodeSnap = await getDocs(query(collection(db, "bookMetadata"), where("publisherBarcode", "==", cleanCode), limit(1)));
+  if (!barcodeSnap.empty) return normalizeLocalMetadata(barcodeSnap.docs[0].data(), cleanCode);
+
+  return null;
+}
+
+async function findLocalMetadataByTitle(title) {
+  const keywords = titleKeywords(title);
+  if (!keywords.length) return null;
+  const snap = await getDocs(query(collection(db, "bookMetadata"), where("bnameKeywords", "array-contains", keywords[0]), limit(10)));
+  const normalizedTitle = String(title || "").toLowerCase();
+  const found = snap.docs.find((item) => {
+    const name = String(item.data().bname || "").toLowerCase();
+    return keywords.some((word) => name.includes(word)) || normalizedTitle.includes(name);
+  }) || snap.docs[0];
+  return found ? normalizeLocalMetadata(found.data(), found.id) : null;
+}
+
 async function lookupBookMetadata(rawCode) {
   const cleanCode = cleanBookMetadataCode(rawCode);
+  const typedTitle = $("#bnameInput")?.value?.trim() || "";
 
-  if (!cleanCode) {
+  if (!cleanCode && !typedTitle) {
     throw new Error("Enter or scan ISBN/publisher barcode first.");
   }
 
   const attempts = [];
   const lookups = [
     {
+      source: "Local Metadata Database",
+      url: cleanCode ? `bookMetadata/${metadataDocId(cleanCode)} or isbn/publisherBarcode == ${cleanCode}` : `bookMetadata title keywords for ${typedTitle}`,
+      getResult: async () => cleanCode ? findLocalMetadata(cleanCode) : findLocalMetadataByTitle(typedTitle)
+    },
+    {
       source: "Local Database",
-      url: `Firestore books where publisherBarcode/isbn/barcodeValue == ${cleanCode}`,
+      url: `Firestore books where publisherBarcode/isbn == ${cleanCode}`,
       getResult: async () => {
         const localMatches = latestBooks.find(({ data }) =>
           data.publisherBarcode === cleanCode
           || data.isbn === cleanCode
-          || data.barcodeValue === cleanCode
         );
         return localMatches ? {
           title: localMatches.data.bname || "",
@@ -620,6 +713,26 @@ async function lookupBookMetadata(rawCode) {
   ];
 
   for (const lookup of lookups) {
+    if (lookup.source === "Local Metadata Database") {
+      const localMetadata = await lookup.getResult();
+      attempts.push({
+        source: lookup.source,
+        url: lookup.url,
+        status: "local",
+        resultCount: localMetadata ? 1 : 0,
+        error: ""
+      });
+      updateGoogleFetchDebug({
+        cleanCode,
+        attempts,
+        localMetadataFound: Boolean(localMetadata),
+        selectedSource: localMetadata ? "Local Metadata Database" : ""
+      });
+      if (localMetadata) return localMetadata;
+      if (!cleanCode) return { found: false, indcatFallback: null, attempts };
+      continue;
+    }
+
     if (lookup.source === "Local Database") {
       const localResult = await lookup.getResult();
       attempts.push({
@@ -629,7 +742,12 @@ async function lookupBookMetadata(rawCode) {
         resultCount: localResult ? 1 : 0,
         error: ""
       });
-      updateGoogleFetchDebug({ cleanCode, attempts, selectedSource: localResult ? "Local Firestore" : "" });
+      updateGoogleFetchDebug({
+        cleanCode,
+        attempts,
+        localMetadataFound: false,
+        selectedSource: localResult ? "Local Firestore" : ""
+      });
       if (localResult) return localResult;
       continue;
     }
@@ -729,17 +847,20 @@ async function fetchGoogleBook(event) {
   try {
     const info = await fetchGoogleBookDetails(barcodeInput?.value);
     if (!info || info.found === false) {
+      const isbnEl = document.getElementById("isbnInput");
+      if (isbnEl) isbnEl.value = cleanCode;
+      if (barcodeInput) barcodeInput.value = cleanCode;
       const fallbackUrl = info?.indcatFallback?.fallbackUrl;
       $("#bookFetchPreview").innerHTML = `
         <div class="empty">
-          <span>No online metadata found. Please fill manually once. Future scans will use local database.</span>
+          <span>Online metadata not found. Enter details once and this system will remember it.</span>
           ${fallbackUrl ? `<button class="btn btn-muted" id="openIndcatFallbackBtn" type="button">Search INDCAT Manually</button>` : ""}
         </div>`;
       const indcatButton = document.getElementById("openIndcatFallbackBtn");
       if (indcatButton && fallbackUrl) {
         indcatButton.addEventListener("click", () => window.open(fallbackUrl, "_blank", "noopener,noreferrer"));
       }
-      showToast("No online metadata found. Please fill manually once. Future scans will use local database.", "warning");
+      showToast("No online metadata found. Please enter details once. Future scans will auto-fill from local database.", "warning");
       return;
     }
 
@@ -916,6 +1037,13 @@ async function saveBook(event) {
       showToast("Book saved successfully.", "success");
     }
 
+    try {
+      await saveBookMetadataForFuture($("#metadataSourceInput").value.trim() || "manual");
+    } catch (metadataError) {
+      console.error("Saving reusable book metadata failed:", metadataError);
+      showToast("Book saved, but reusable metadata could not be saved.", "warning");
+    }
+
     editingBookId = null;
     editingExistingBook = null;
     addBookForm.reset();
@@ -1070,6 +1198,15 @@ $("#scanPublisherBtn").addEventListener("click", () => startPublisherScanner().c
   logDetailedError(error);
   showToast(error.message, "error");
 }));
+$("#saveMetadataBtn").addEventListener("click", async () => {
+  try {
+    await saveBookMetadataForFuture("manual");
+    showToast("Metadata saved for future scans.", "success");
+  } catch (error) {
+    console.error("Save metadata failed:", error);
+    showToast(error.message || "Could not save metadata.", "error");
+  }
+});
 $("#generateBarcodeBtn").addEventListener("click", () => {
   const bid = $("#autoBId").value || nextBookId;
   renderBarcode(barcodeValueFor(bid), bid);
