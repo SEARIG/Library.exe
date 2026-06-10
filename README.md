@@ -81,3 +81,100 @@ firebase deploy --only hosting,functions,firestore:rules
 ```
 
 Firestore composite indexes may be requested for dashboard queries that combine `collectionGroup`, tenant filters, and ordering. Create the index links Firebase reports during testing.
+
+## MLSU Smart Library Management System
+
+### Project Progress Update
+
+#### Completed Features
+
+##### Authentication & Roles
+
+- Firebase Authentication
+- Student Login
+- Librarian Login
+- Admin Login
+- Role-Based Access Control
+
+##### Library Management
+
+- Book Database
+- Add Book Manually
+- Auto B_ID Generation
+- Library Barcode Generation
+- Barcode Scanning
+- Book Status Tracking
+
+##### Issue & Return System
+
+- Student Book Requests
+- Librarian Approval/Rejection
+- Book Issue Workflow
+- Book Return Workflow
+- Lost Book Management
+- Found Book Recovery
+
+##### Metadata System
+
+- Google Books Integration
+- Open Library Integration
+- Self-Learning Metadata Database
+- Local Metadata Caching
+
+##### Notifications
+
+- EmailJS Integration
+- Book Issued Notifications
+- Book Returned Notifications
+- Penalty Notifications
+- Reminder Notification Framework
+
+##### Reporting & Tracking
+
+- Activity Tracking
+- Penalty Tracking
+- Issue History
+- Return History
+
+#### In Progress
+
+- Excel Book Import
+- Excel Book Export
+- Bulk Barcode Printing
+- Public Library Catalogue
+- Advanced Dashboard UI
+- Library Bookshelf Theme
+- Student Import System
+
+#### Planned Features
+
+- Due Reminder Automation
+- No Dues Certificate Verification
+- Advanced Reports
+- Multi-Source Metadata Lookup
+- Library Analytics
+- Mobile APK Version
+
+#### Innovation Highlights
+
+- Dual Barcode Architecture
+- Self-Learning Metadata Repository
+- Cloud-Based Firestore Integration
+- Automated Library Workflows
+- Smart Inventory Tracking
+
+#### Authors
+
+- Nakul Singh Rajawat
+- Prakshat Sharma
+- Puneet Sharma
+
+#### Institution
+
+Mohanlal Sukhadia University (MLSU)
+
+#### Version
+
+Development Build v1.0
+
+Last Updated: June 2026
