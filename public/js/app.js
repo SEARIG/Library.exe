@@ -10,6 +10,54 @@ export const $$ = (selector, root = document) => [...root.querySelectorAll(selec
 export { showToast } from "./toast.js";
 export { confirmAction } from "./toast.js";
 
+function openAppModal(id) {
+  const modal = document.getElementById(id);
+  if (!modal?.classList.contains("modal-backdrop")) return false;
+  modal.classList.add("open");
+  document.body.classList.add("modal-open");
+  return true;
+}
+
+function closeAppModal(modal) {
+  modal?.classList.remove("open");
+  if (!document.querySelector(".modal-backdrop.open")) {
+    document.body.classList.remove("modal-open");
+  }
+}
+
+document.addEventListener("click", (event) => {
+  const openButton = event.target.closest("[data-open-modal]");
+  if (openButton) {
+    openAppModal(openButton.dataset.openModal);
+    return;
+  }
+
+  const modalLink = event.target.closest('a[href*="#"]');
+  if (modalLink) {
+    const id = modalLink.getAttribute("href").split("#")[1];
+    if (id && openAppModal(id)) {
+      event.preventDefault();
+      return;
+    }
+  }
+
+  const closeButton = event.target.closest("[data-close-modal]");
+  if (closeButton) {
+    closeAppModal(closeButton.closest(".modal-backdrop"));
+    return;
+  }
+
+  if (event.target.classList?.contains("modal-backdrop")) {
+    closeAppModal(event.target);
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    document.querySelectorAll(".modal-backdrop.open").forEach(closeAppModal);
+  }
+});
+
 function ensureAuthLoadingScreen() {
   if (!document.body.classList.contains("protected-page")) return null;
   renderNavbarSkeleton();

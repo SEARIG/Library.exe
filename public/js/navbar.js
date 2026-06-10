@@ -12,19 +12,19 @@ const roleLinks = {
   ],
   librarian: [
     ["Dashboard", "librarian-dashboard.html"],
-    ["Add Book", "librarian-dashboard.html#addBookForm"],
-    ["Book Database", "librarian-dashboard.html#booksTable"],
-    ["Issue History", "librarian-dashboard.html#activeIssues"],
-    ["Return History", "librarian-dashboard.html#returnsList"],
-    ["Import Books", "librarian-dashboard.html#bookImportResult"],
-    ["Export Books", "librarian-dashboard.html#exportBooksExcelBtn"],
-    ["Barcode Manager", "librarian-dashboard.html#barcodePrintTable"],
-    ["Reports", "librarian-dashboard.html#notificationResult"]
+    ["Add Book", "librarian-dashboard.html#addBookModal"],
+    ["Book Database", "librarian-dashboard.html#bookDatabaseModal"],
+    ["Import Books", "librarian-dashboard.html#bookDatabaseModal"],
+    ["Export Books", "librarian-dashboard.html#bookDatabaseModal"],
+    ["Barcode Manager", "librarian-dashboard.html#barcodeManagerModal"],
+    ["Issue History", "librarian-dashboard.html#issueHistoryModal"],
+    ["Return History", "librarian-dashboard.html#returnHistoryModal"],
+    ["Reports", "librarian-dashboard.html#librarianReportsModal"]
   ],
   admin: [
     ["Dashboard", "admin-dashboard.html"],
     ["Users", "admin-dashboard.html#userManagementModal"],
-    ["Books", "books.html"],
+    ["Import Students", "admin-dashboard.html#studentImportModal"],
     ["Reports", "admin-dashboard.html#reportsModal"],
     ["Email History", "admin-dashboard.html#emailHistoryModal"],
     ["No Dues", "admin-dashboard.html#noDuesModal"],
@@ -63,6 +63,13 @@ export function renderNavbar(currentRole, currentUserData = {}) {
     sidebar.id = "appSidebar";
     document.body.append(sidebar);
   }
+  let overlay = document.querySelector("#sidebarOverlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "sidebarOverlay";
+    overlay.className = "sidebar-overlay";
+    document.body.append(overlay);
+  }
   const startsOpen = !window.matchMedia("(max-width: 768px)").matches;
   sidebar.className = startsOpen ? "app-sidebar open" : "app-sidebar";
   document.body.classList.toggle("sidebar-open", startsOpen);
@@ -92,6 +99,11 @@ export function renderNavbar(currentRole, currentUserData = {}) {
       document.body.classList.remove("sidebar-open");
       toggle.setAttribute("aria-expanded", "false");
     });
+  });
+  overlay.addEventListener("click", () => {
+    sidebar.classList.remove("open");
+    document.body.classList.remove("sidebar-open");
+    toggle.setAttribute("aria-expanded", "false");
   });
   header.querySelector("#signOutBtn").addEventListener("click", async () => {
     await signOut(auth);

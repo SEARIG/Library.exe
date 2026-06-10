@@ -15,11 +15,13 @@
         <div class="nav-skeleton"><span></span><span></span><span></span></div>
       </div>
     </header>
+
     <main class="app-main">
       <section class="page-title">
         <h1>Librarian Dashboard</h1>
         <p>Review pending issue requests, verify availability, and process returns.</p>
       </section>
+
       <section class="admin-metrics">
         <article class="metric"><span>Total Books</span><strong id="metricTotalBooks">0</strong></article>
         <article class="metric"><span>Issued</span><strong id="metricIssuedBooks">0</strong></article>
@@ -29,135 +31,27 @@
         <article class="metric"><span>Pending Requests</span><strong id="metricPendingRequests">0</strong></article>
         <article class="metric"><span>New Book Requests</span><strong id="metricNewBookRequests">0</strong></article>
       </section>
-      <section class="librarian-grid">
-        <article class="panel librarian-add-book">
-          <h2>Add Book / Generate Barcode</h2>
-          <form id="addBookForm" class="form-grid">
-            <p class="helper-text" id="bookSaveModeHelp">Availability is controlled only by issue, return, lost, and found actions.</p>
-            <label>Auto B_ID<input id="autoBId" readonly></label>
-            <label>Book Name<input id="bnameInput" required></label>
-            <label>Subject<input id="subjectInput"></label>
-            <label>Category
-              <select id="category" required>
-                <option value="pyq">pyq</option>
-                <option value="textbook">textbook</option>
-                <option value="qna">qna</option>
-                <option value="reference">reference</option>
-                <option value="notes">notes</option>
-                <option value="journal">journal</option>
-                <option value="other">other</option>
-              </select>
-            </label>
-            <label>Author<input id="authorInput"></label>
-            <label>Publisher<input id="publisherInput"></label>
-            <label>BLegal Number / Inside Book Number<input id="blegalNum"></label>
-            <label>Publisher Barcode / ISBN<input id="publisherBarcodeInput"></label>
-            <label>Image URL<input id="imageUrlInput"></label>
-            <label>Library Barcode Value<input id="libraryBarcodeValueInput" readonly></label>
-            <input id="isbnInput" type="hidden">
-            <input id="metadataSourceInput" type="hidden">
-            <div class="toolbar">
-              <button class="btn btn-muted" id="scanPublisherBtn" type="button">Scan Publisher Barcode</button>
-              <button class="btn btn-muted" id="fetchGoogleBookBtn" type="button">Fetch Book Details</button>
-              <button class="btn btn-muted" id="saveMetadataBtn" type="button">Save Metadata for Future</button>
-              <button class="btn btn-muted" id="generateBarcodeBtn" type="button">Generate Library Barcode</button>
-            </div>
-            <p class="helper-text">Use publisher ISBN for metadata. Use generated library barcode for issue and return.</p>
-            <p class="helper-text">Searches Local Database, Google Books, Open Library, and Library of Congress.</p>
-            <video id="publisherScannerVideo" class="scanner-video compact-video" playsinline autoplay muted hidden></video>
-            <span id="metadataSourceBadge" class="badge" hidden></span>
-            <div id="bookFetchPreview" class="empty">Fetch details or fill the book manually.</div>
-            <div id="googleFetchDebug" class="empty" hidden>Online metadata debug details will appear here.</div>
-            <div id="barcodeSticker" class="barcode-sticker">
-              <strong>MLSU Library</strong>
-              <span id="stickerBId">B_ID: -</span>
-              <svg id="libraryBarcodeSvg"></svg>
-              <span id="stickerBarcodeValue">BOOK-</span>
-            </div>
-            <div class="toolbar">
-              <button class="btn btn-muted" id="downloadBarcodeBtn" type="button">Download Barcode as PNG</button>
-              <button class="btn btn-muted" id="printBarcodeBtn" type="button">Print Barcode Sticker</button>
-              <button class="btn btn-primary" id="saveBookBtn" type="submit">Save Book</button>
-            </div>
-          </form>
+
+      <section class="dashboard-grid">
+        <article class="panel span-12">
+          <h2>Librarian Actions</h2>
+          <div class="dashboard-action-grid">
+            <button class="btn btn-primary" data-open-modal="addBookModal" type="button">Add Book</button>
+            <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Book Database</button>
+            <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Import Books</button>
+            <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Export Books</button>
+            <button class="btn btn-muted" data-open-modal="barcodeManagerModal" type="button">Barcode Manager</button>
+            <button class="btn btn-muted" data-open-modal="returnHistoryModal" type="button">Return History</button>
+            <button class="btn btn-muted" data-open-modal="librarianReportsModal" type="button">Reports</button>
+          </div>
         </article>
-        <article class="panel librarian-books">
-          <h2>Book Database</h2>
-          <div class="toolbar">
-            <button class="btn btn-primary" id="importBooksBtn" type="button">Import Books</button>
-            <button class="btn btn-muted" id="downloadBooksTemplateBtn" type="button">Download Books Template</button>
-            <button class="btn btn-muted" id="confirmBookImportBtn" type="button" disabled>Import Previewed Books</button>
-            <button class="btn btn-muted" id="exportBooksExcelBtn" type="button">Export Books Excel</button>
-            <input id="bookImportFile" type="file" accept=".xlsx,.csv" hidden>
-          </div>
-          <div id="bookImportResult" class="empty">Upload Books.xlsx to preview and validate rows before import.</div>
-          <div id="bookImportPreview" class="table-scroll"></div>
-          <div class="library-controls">
-            <label>Search Books<input id="bookSearch" placeholder="Search by B_ID, name, author, subject, ISBN, or library barcode"></label>
-            <label>Category
-              <select id="bookCategoryFilter">
-                <option value="">All Categories</option>
-                <option value="pyq">pyq</option>
-                <option value="textbook">textbook</option>
-                <option value="qna">qna</option>
-                <option value="reference">reference</option>
-                <option value="notes">notes</option>
-                <option value="journal">journal</option>
-                <option value="other">other</option>
-              </select>
-            </label>
-            <label>Availability
-              <select id="bookAvailabilityFilter">
-                <option value="">All</option>
-                <option value="available">Available</option>
-                <option value="issued">Not Available</option>
-                <option value="lost">Lost</option>
-                <option value="damaged">Damaged</option>
-              </select>
-            </label>
-          </div>
-          <div id="booksTable" class="table-scroll"></div>
-        </article>
-        <article class="panel librarian-barcode-manager">
-          <h2>Barcode Print Manager</h2>
-          <div class="form-grid">
-            <label>Print Status
-              <select id="barcodePrintStatusFilter">
-                <option value="notPrinted">New / Not Printed</option>
-                <option value="printed">Printed</option>
-                <option value="all">All</option>
-              </select>
-            </label>
-            <label>B_ID From<input id="barcodeRangeFrom" inputmode="numeric" placeholder="1"></label>
-            <label>B_ID To<input id="barcodeRangeTo" inputmode="numeric" placeholder="100"></label>
-            <label>Category<input id="barcodeCategoryFilter" placeholder="textbook"></label>
-            <label>Import Batch<input id="barcodeImportBatchFilter" placeholder="batch id"></label>
-            <label>Book Status<input id="barcodeBookStatusFilter" placeholder="available / issued"></label>
-          </div>
-          <div class="toolbar">
-            <button class="btn btn-muted" id="selectVisibleBarcodesBtn" type="button">Select All Visible</button>
-            <button class="btn btn-muted" id="previewBarcodesBtn" type="button">Preview Barcodes</button>
-            <button class="btn btn-primary" id="generateBulkBarcodePdfBtn" type="button">Generate Bulk PDF</button>
-            <button class="btn btn-muted" id="markSelectedPrintedBtn" type="button">Mark Selected as Printed</button>
-            <button class="btn btn-muted" id="exportBarcodeExcelBtn" type="button">Export Barcode Excel</button>
-          </div>
-          <div id="barcodePrintSummary" class="empty">Select books to preview barcode output.</div>
-          <div id="barcodePrintTable" class="table-scroll"></div>
-        </article>
-        <article class="panel librarian-pending">
+
+        <article class="panel span-6 librarian-pending">
           <h2>Pending Requests</h2>
           <div id="pendingRequests" class="list-stack"></div>
         </article>
-        <article class="panel librarian-notifications">
-          <h2>Notification Tools</h2>
-          <p class="helper-text">EmailJS is optional. Configure it to enable free email notifications.</p>
-          <div class="toolbar">
-            <button class="btn btn-muted" id="runReminderCheckBtn" type="button">Run Reminder Check</button>
-            <button class="btn btn-muted" id="sendTestEmailBtn" type="button">Send Test Email</button>
-          </div>
-          <div id="notificationResult" class="empty">No notification check has been run yet.</div>
-        </article>
-        <article class="panel librarian-return">
+
+        <article class="panel span-6 librarian-return">
           <h2>Quick Return</h2>
           <div class="toolbar">
             <button class="btn btn-muted" id="startQuickReturnScannerBtn" type="button">Scan Library Barcode</button>
@@ -169,24 +63,191 @@
             <button class="btn btn-primary" type="submit">Return Book</button>
           </form>
         </article>
-        <article class="panel librarian-active">
+
+        <article class="panel span-6 librarian-active">
           <h2>Active Issues</h2>
           <div id="activeIssues" class="list-stack"></div>
         </article>
-        <article class="panel librarian-returns">
-          <h2>Returns</h2>
-          <div id="returnsList" class="list-stack"></div>
-        </article>
-        <article class="panel librarian-students">
-          <h2>Recent Students</h2>
-          <div id="recentStudents" class="list-stack"></div>
-        </article>
-        <article class="panel librarian-recent-books">
-          <h2>Books</h2>
+
+        <article class="panel span-6 librarian-recent-books">
+          <h2>Recent Activity</h2>
           <div id="recentBooks" class="list-stack"></div>
+        </article>
+
+        <article class="panel span-12 librarian-notifications">
+          <h2>Notification Tools</h2>
+          <p class="helper-text">EmailJS is optional. Configure it to enable free email notifications.</p>
+          <div class="toolbar">
+            <button class="btn btn-muted" id="runReminderCheckBtn" type="button">Run Reminder Check</button>
+            <button class="btn btn-muted" id="sendTestEmailBtn" type="button">Send Test Email</button>
+          </div>
+          <div id="notificationResult" class="empty">No notification check has been run yet.</div>
         </article>
       </section>
     </main>
+
+    <div class="modal-backdrop" id="addBookModal" role="dialog" aria-modal="true" aria-labelledby="addBookModalTitle">
+      <section class="app-modal">
+        <div class="modal-head">
+          <h2 id="addBookModalTitle">Add Book / Generate Barcode</h2>
+          <button class="btn btn-muted" data-close-modal type="button">Close</button>
+        </div>
+        <form id="addBookForm" class="form-grid">
+          <p class="helper-text" id="bookSaveModeHelp">Availability is controlled only by issue, return, lost, and found actions.</p>
+          <label>Auto B_ID<input id="autoBId" readonly></label>
+          <label>Book Name<input id="bnameInput" required></label>
+          <label>Subject<input id="subjectInput"></label>
+          <label>Category
+            <select id="category" required>
+              <option value="pyq">pyq</option>
+              <option value="textbook">textbook</option>
+              <option value="qna">qna</option>
+              <option value="reference">reference</option>
+              <option value="notes">notes</option>
+              <option value="journal">journal</option>
+              <option value="other">other</option>
+            </select>
+          </label>
+          <label>Author<input id="authorInput"></label>
+          <label>Publisher<input id="publisherInput"></label>
+          <label>BLegal Number / Inside Book Number<input id="blegalNum"></label>
+          <label>Publisher Barcode / ISBN<input id="publisherBarcodeInput"></label>
+          <label>Image URL<input id="imageUrlInput"></label>
+          <label>Library Barcode Value<input id="libraryBarcodeValueInput" readonly></label>
+          <input id="isbnInput" type="hidden">
+          <input id="metadataSourceInput" type="hidden">
+          <div class="toolbar">
+            <button class="btn btn-muted" id="scanPublisherBtn" type="button">Scan Publisher Barcode</button>
+            <button class="btn btn-muted" id="fetchGoogleBookBtn" type="button">Fetch Book Details</button>
+            <button class="btn btn-muted" id="saveMetadataBtn" type="button">Save Metadata for Future</button>
+            <button class="btn btn-muted" id="generateBarcodeBtn" type="button">Generate Library Barcode</button>
+          </div>
+          <p class="helper-text">Use publisher ISBN for metadata. Use generated library barcode for issue and return.</p>
+          <p class="helper-text">Searches Local Database, Google Books, Open Library, and Library of Congress.</p>
+          <video id="publisherScannerVideo" class="scanner-video compact-video" playsinline autoplay muted hidden></video>
+          <span id="metadataSourceBadge" class="badge" hidden></span>
+          <div id="bookFetchPreview" class="empty">Fetch details or fill the book manually.</div>
+          <div id="googleFetchDebug" class="empty" hidden>Online metadata debug details will appear here.</div>
+          <div id="barcodeSticker" class="barcode-sticker">
+            <strong>MLSU Library</strong>
+            <span id="stickerBId">B_ID: -</span>
+            <svg id="libraryBarcodeSvg"></svg>
+            <span id="stickerBarcodeValue">BOOK-</span>
+          </div>
+          <div class="toolbar">
+            <button class="btn btn-muted" id="downloadBarcodeBtn" type="button">Download Barcode as PNG</button>
+            <button class="btn btn-muted" id="printBarcodeBtn" type="button">Print Barcode Sticker</button>
+            <button class="btn btn-primary" id="saveBookBtn" type="submit">Save Book</button>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="bookDatabaseModal" role="dialog" aria-modal="true" aria-labelledby="bookDatabaseTitle">
+      <section class="app-modal">
+        <div class="modal-head">
+          <h2 id="bookDatabaseTitle">Book Database</h2>
+          <button class="btn btn-muted" data-close-modal type="button">Close</button>
+        </div>
+        <div class="toolbar">
+          <button class="btn btn-primary" id="importBooksBtn" type="button">Import Books</button>
+          <button class="btn btn-muted" id="downloadBooksTemplateBtn" type="button">Download Books Template</button>
+          <button class="btn btn-muted" id="confirmBookImportBtn" type="button" disabled>Import Previewed Books</button>
+          <button class="btn btn-muted" id="exportBooksExcelBtn" type="button">Export Books Excel</button>
+          <input id="bookImportFile" type="file" accept=".xlsx,.csv" hidden>
+        </div>
+        <div id="bookImportResult" class="empty">Upload Books.xlsx to preview and validate rows before import.</div>
+        <div id="bookImportPreview" class="table-scroll"></div>
+        <div class="library-controls">
+          <label>Search Books<input id="bookSearch" placeholder="Search by B_ID, name, author, subject, ISBN, or library barcode"></label>
+          <label>Category
+            <select id="bookCategoryFilter">
+              <option value="">All Categories</option>
+              <option value="pyq">pyq</option>
+              <option value="textbook">textbook</option>
+              <option value="qna">qna</option>
+              <option value="reference">reference</option>
+              <option value="notes">notes</option>
+              <option value="journal">journal</option>
+              <option value="other">other</option>
+            </select>
+          </label>
+          <label>Availability
+            <select id="bookAvailabilityFilter">
+              <option value="">All</option>
+              <option value="available">Available</option>
+              <option value="issued">Not Available</option>
+              <option value="lost">Lost</option>
+              <option value="damaged">Damaged</option>
+            </select>
+          </label>
+        </div>
+        <div id="booksTable" class="table-scroll"></div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="barcodeManagerModal" role="dialog" aria-modal="true" aria-labelledby="barcodeManagerTitle">
+      <section class="app-modal">
+        <div class="modal-head">
+          <h2 id="barcodeManagerTitle">Barcode Print Manager</h2>
+          <button class="btn btn-muted" data-close-modal type="button">Close</button>
+        </div>
+        <div class="form-grid">
+          <label>Print Status
+            <select id="barcodePrintStatusFilter">
+              <option value="notPrinted">New / Not Printed</option>
+              <option value="printed">Printed</option>
+              <option value="all">All</option>
+            </select>
+          </label>
+          <label>B_ID From<input id="barcodeRangeFrom" inputmode="numeric" placeholder="1"></label>
+          <label>B_ID To<input id="barcodeRangeTo" inputmode="numeric" placeholder="100"></label>
+          <label>Category<input id="barcodeCategoryFilter" placeholder="textbook"></label>
+          <label>Import Batch<input id="barcodeImportBatchFilter" placeholder="batch id"></label>
+          <label>Book Status<input id="barcodeBookStatusFilter" placeholder="available / issued"></label>
+        </div>
+        <div class="toolbar">
+          <button class="btn btn-muted" id="selectVisibleBarcodesBtn" type="button">Select All Visible</button>
+          <button class="btn btn-muted" id="previewBarcodesBtn" type="button">Preview Barcodes</button>
+          <button class="btn btn-primary" id="generateBulkBarcodePdfBtn" type="button">Generate Bulk PDF</button>
+          <button class="btn btn-muted" id="markSelectedPrintedBtn" type="button">Mark Selected as Printed</button>
+          <button class="btn btn-muted" id="exportBarcodeExcelBtn" type="button">Export Barcode Excel</button>
+        </div>
+        <div id="barcodePrintSummary" class="empty">Select books to preview barcode output.</div>
+        <div id="barcodePrintTable" class="table-scroll"></div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="issueHistoryModal" role="dialog" aria-modal="true" aria-labelledby="issueHistoryTitle">
+      <section class="app-modal">
+        <div class="modal-head">
+          <h2 id="issueHistoryTitle">Issue History</h2>
+          <button class="btn btn-muted" data-close-modal type="button">Close</button>
+        </div>
+        <div class="empty">Active issue history is shown on the dashboard.</div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="returnHistoryModal" role="dialog" aria-modal="true" aria-labelledby="returnHistoryTitle">
+      <section class="app-modal">
+        <div class="modal-head">
+          <h2 id="returnHistoryTitle">Return History</h2>
+          <button class="btn btn-muted" data-close-modal type="button">Close</button>
+        </div>
+        <div id="returnsList" class="list-stack"></div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="librarianReportsModal" role="dialog" aria-modal="true" aria-labelledby="librarianReportsTitle">
+      <section class="app-modal">
+        <div class="modal-head">
+          <h2 id="librarianReportsTitle">Reports</h2>
+          <button class="btn btn-muted" data-close-modal type="button">Close</button>
+        </div>
+        <div id="recentStudents" class="list-stack"></div>
+      </section>
+    </div>
+
     <div id="toast" class="toast"></div>
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
