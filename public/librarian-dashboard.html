@@ -71,6 +71,14 @@
         </article>
         <article class="panel librarian-books">
           <h2>Book Database</h2>
+          <div class="toolbar">
+            <button class="btn btn-primary" id="importBooksBtn" type="button">Import Books</button>
+            <button class="btn btn-muted" id="downloadBooksTemplateBtn" type="button">Download Books Template</button>
+            <button class="btn btn-muted" id="confirmBookImportBtn" type="button" disabled>Import Previewed Books</button>
+            <input id="bookImportFile" type="file" accept=".xlsx,.csv" hidden>
+          </div>
+          <div id="bookImportResult" class="empty">Upload Books.xlsx to preview and validate rows before import.</div>
+          <div id="bookImportPreview" class="table-scroll"></div>
           <label>Search Books<input id="bookSearch" placeholder="Search by B_ID, name, subject, category, inside number, publisher barcode, or library barcode"></label>
           <div id="booksTable" class="table-scroll"></div>
         </article>

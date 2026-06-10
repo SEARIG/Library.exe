@@ -48,6 +48,7 @@ let editingExistingBook = null;
 let latestBooks = [];
 let latestPendingRequests = [];
 let latestBarcodeDataUrl = "";
+let pendingBookImportRows = [];
 let publisherStream = null;
 let publisherScanTimer = null;
 let quickReturnStream = null;
@@ -60,6 +61,19 @@ const INDCAT_CONFIG = {
   enabled: false,
   apiUrl: ""
 };
+
+function logLibraryDiagnostics() {
+  console.log("XLSX loaded:", typeof XLSX);
+  console.log("jsPDF loaded:", typeof window.jspdf);
+  console.log("JsBarcode loaded:", typeof JsBarcode);
+  console.log("Excel import file input found:", Boolean(document.querySelector("input[type='file']")));
+  console.log("Excel import buttons found:", Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit']"))
+    .filter((item) => /import/i.test(item.textContent || item.value || item.id || ""))
+    .map((item) => item.id || item.textContent || item.value));
+  console.log("Export barcode Excel button found:", Boolean(document.getElementById("exportBarcodeExcelBtn")));
+  console.log("Bulk barcode PDF button found:", Boolean(document.getElementById("generateBulkBarcodePdfBtn")));
+  console.log("Metadata fetch button found:", Boolean(document.getElementById("fetchGoogleBookBtn")));
+}
 
 function timeOf(value) {
   if (!value) return 0;
@@ -82,6 +96,182 @@ function bookIdOf(book, fallbackId = "") {
 
 function barcodeValueFor(bid) {
   return `BOOK-${bid}`;
+}
+
+function readWorkbookRows(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const workbook = window.XLSX.read(event.target.result, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        resolve(window.XLSX.utils.sheet_to_json(sheet, { defval: "" }));
+      } catch (error) {
+        reject(error);
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function valueFor(row, ...names) {
+  const entries = Object.entries(row || {});
+  for (const name of names) {
+    const found = entries.find(([key]) => key.trim().toLowerCase() === name.toLowerCase());
+    if (found) return String(found[1] ?? "").trim();
+  }
+  return "";
+}
+
+function numberValue(value, fallback = 1) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function downloadWorkbookTemplate(filename, rows) {
+  if (!window.XLSX) throw new Error("XLSX library is not loaded.");
+  const sheet = window.XLSX.utils.json_to_sheet(rows);
+  const workbook = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(workbook, sheet, "Template");
+  window.XLSX.writeFile(workbook, filename);
+}
+
+function normalizeBookImportRows(rows) {
+  return rows.map((row, index) => {
+    const normalized = {
+      rowNumber: index + 2,
+      isbn: valueFor(row, "ISBN"),
+      bname: valueFor(row, "Book Name", "BookName", "Title"),
+      author: valueFor(row, "Author"),
+      publisher: valueFor(row, "Publisher"),
+      subject: valueFor(row, "Subject"),
+      category: valueFor(row, "Category") || "textbook",
+      copies: numberValue(valueFor(row, "Copies"), 1),
+      blegal_num: valueFor(row, "BLegalNumber", "BLegal Number", "Inside Book Number")
+    };
+    const errors = [];
+    if (!normalized.bname) errors.push("Book Name is required");
+    if (!normalized.subject) errors.push("Subject is required");
+    if (!normalized.category) errors.push("Category is required");
+    if (normalized.copies < 1) errors.push("Copies must be at least 1");
+    return { ...normalized, errors };
+  });
+}
+
+function renderBookImportPreview(rows) {
+  pendingBookImportRows = rows;
+  $("#confirmBookImportBtn").disabled = !rows.length || rows.some((row) => row.errors.length);
+  const totalCopies = rows.reduce((sum, row) => sum + row.copies, 0);
+  const errorCount = rows.filter((row) => row.errors.length).length;
+  $("#bookImportResult").innerHTML = `
+    <div class="${errorCount ? "empty" : "success-box"}">
+      <strong>${rows.length} row(s) parsed</strong>
+      <span>Total copies to create: ${totalCopies}</span>
+      <span>Validation errors: ${errorCount}</span>
+    </div>`;
+  if (!rows.length) {
+    renderEmpty($("#bookImportPreview"), "No rows found.");
+    return;
+  }
+  $("#bookImportPreview").innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>Row</th>
+          <th>ISBN</th>
+          <th>Book Name</th>
+          <th>Author</th>
+          <th>Publisher</th>
+          <th>Subject</th>
+          <th>Category</th>
+          <th>Copies</th>
+          <th>BLegalNumber</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((row) => `
+          <tr>
+            <td>${row.rowNumber}</td>
+            <td>${escapeHtml(row.isbn)}</td>
+            <td>${escapeHtml(row.bname)}</td>
+            <td>${escapeHtml(row.author)}</td>
+            <td>${escapeHtml(row.publisher)}</td>
+            <td>${escapeHtml(row.subject)}</td>
+            <td>${escapeHtml(row.category)}</td>
+            <td>${row.copies}</td>
+            <td>${escapeHtml(row.blegal_num)}</td>
+            <td>${row.errors.length ? escapeHtml(row.errors.join("; ")) : "Ready"}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>`;
+}
+
+async function importPreviewedBooks() {
+  const validRows = pendingBookImportRows.filter((row) => !row.errors.length);
+  if (!validRows.length) throw new Error("No valid book rows to import.");
+  const totalCopies = validRows.reduce((sum, row) => sum + row.copies, 0);
+  const importBatchId = `books_import_${Date.now()}`;
+  const result = await runTransaction(db, async (transaction) => {
+    const counterRef = doc(db, "counters", "books");
+    const counterSnap = await transaction.get(counterRef);
+    let nextId = (counterSnap.exists() ? Number(counterSnap.data().lastId || 0) : 0) + 1;
+    const createdIds = [];
+
+    validRows.forEach((row) => {
+      for (let copy = 0; copy < row.copies; copy += 1) {
+        const bId = String(nextId);
+        const bookRef = doc(db, "books", bId);
+        transaction.set(bookRef, {
+          b_id: bId,
+          bname: row.bname,
+          author: row.author,
+          publisher: row.publisher,
+          subject: row.subject,
+          category: row.category,
+          blegal_num: row.blegal_num,
+          publisherBarcode: row.isbn,
+          isbn: row.isbn,
+          imageUrl: "",
+          metadataSource: "import",
+          barcodeValue: barcodeValueFor(bId),
+          barcodeDataUrl: "",
+          barcodePrinted: false,
+          barcodePrintedAt: null,
+          barcodePrintedBy: null,
+          barcodePrintBatchId: null,
+          importBatchId,
+          status: "available",
+          issuedTo: null,
+          issuedToName: null,
+          currentIssueId: null,
+          createdBy: session.user.uid,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+        createdIds.push(bId);
+        nextId += 1;
+      }
+    });
+
+    transaction.set(counterRef, { lastId: nextId - 1 }, { merge: true });
+    return { createdIds, importBatchId };
+  });
+
+  const skipped = pendingBookImportRows.length - validRows.length;
+  $("#barcodeImportBatchFilter").value = result.importBatchId;
+  renderBarcodePrintManager();
+  $("#bookImportResult").innerHTML = `
+    <div class="success-box">
+      <strong>Books imported successfully</strong>
+      <span>Imported count: ${result.createdIds.length}</span>
+      <span>Skipped count: ${skipped}</span>
+      <span>Import batch: ${escapeHtml(result.importBatchId)}</span>
+    </div>`;
+  $("#confirmBookImportBtn").disabled = true;
+  pendingBookImportRows = [];
+  return { imported: totalCopies, skipped, importBatchId: result.importBatchId };
 }
 
 function collectBookMetadata() {
@@ -633,6 +823,7 @@ async function findLocalMetadataByTitle(title) {
 async function lookupBookMetadata(rawCode) {
   const cleanCode = cleanBookMetadataCode(rawCode);
   const typedTitle = $("#bnameInput")?.value?.trim() || "";
+  console.log("lookupBookMetadata diagnostics:", { rawCode, cleanCode, typedTitle });
 
   if (!cleanCode && !typedTitle) {
     throw new Error("Enter or scan ISBN/publisher barcode first.");
@@ -797,7 +988,21 @@ async function lookupBookMetadata(rawCode) {
         continue;
       }
 
-      const data = await response.json();
+      let data;
+      try {
+        data = await response.json();
+      } catch (parseError) {
+        console.error(`${lookup.source} JSON parse failed:`, parseError);
+        attempts.push({
+          source: lookup.source,
+          url: lookup.url,
+          status: response.status,
+          resultCount: 0,
+          error: `JSON parse failed: ${parseError.message}`
+        });
+        updateGoogleFetchDebug({ cleanCode, attempts });
+        continue;
+      }
       if (lookup.source === "Library of Congress") {
         console.log("LOC result:", data);
       } else {
@@ -1271,6 +1476,12 @@ function timestampForFile() {
 async function generateBarcodePdfForBooks(items, batchId) {
   if (!window.jspdf?.jsPDF) throw new Error("jsPDF is not loaded.");
   if (!window.JsBarcode) throw new Error("JsBarcode is not loaded.");
+  console.log("Bulk barcode PDF diagnostics:", {
+    selectedBooks: items.length,
+    batchId,
+    jsPDFLoaded: typeof window.jspdf,
+    jsBarcodeLoaded: typeof JsBarcode
+  });
   const { jsPDF } = window.jspdf;
   const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const stickerWidth = 63;
@@ -1291,6 +1502,7 @@ async function generateBarcodePdfForBooks(items, batchId) {
     const bid = barcodeBookId(items[index]);
     const barcodeValue = data.barcodeValue || barcodeValueFor(bid);
     const barcodeImage = await barcodeImageDataUrl(barcodeValue);
+    console.log("Barcode image generated:", { bookId: items[index].id, bid, barcodeValue });
 
     pdf.setDrawColor(210, 216, 224);
     pdf.roundedRect(x, y, stickerWidth - 1.5, stickerHeight - 1.5, 1.5, 1.5);
@@ -1310,6 +1522,7 @@ async function generateBarcodePdfForBooks(items, batchId) {
 
   const pdfFileName = `barcodes_batch_${timestampForFile()}.pdf`;
   pdf.save(pdfFileName);
+  console.log("PDF generation succeeds:", { pdfFileName, totalBooks: items.length, batchId });
   return { pdfFileName, batchId };
 }
 
@@ -1396,7 +1609,13 @@ function exportBarcodeExcel() {
   const sheet = window.XLSX.utils.json_to_sheet(rows);
   const workbook = window.XLSX.utils.book_new();
   window.XLSX.utils.book_append_sheet(workbook, sheet, "Barcodes");
+  console.log("Excel export diagnostics:", {
+    xlsxLoaded: typeof XLSX,
+    rows: rows.length,
+    workbookGenerated: Boolean(workbook)
+  });
   window.XLSX.writeFile(workbook, "barcode_export.xlsx");
+  console.log("Excel download triggered:", "barcode_export.xlsx");
 }
 
 function loadBookIntoForm(id, data) {
@@ -1451,6 +1670,7 @@ function onDomReady(callback) {
 }
 
 onDomReady(() => {
+  logLibraryDiagnostics();
   const fetchBtn = document.getElementById("fetchGoogleBookBtn");
   const barcodeInput = document.getElementById("publisherBarcodeInput");
 
@@ -1460,6 +1680,7 @@ onDomReady(() => {
   }
 
   fetchBtn.addEventListener("click", fetchGoogleBook);
+  console.log("Metadata fetch click handler attached:", true);
 });
 $("#scanPublisherBtn").addEventListener("click", () => startPublisherScanner().catch((error) => {
   logDetailedError(error);
@@ -1490,6 +1711,47 @@ $("#printBarcodeBtn").addEventListener("click", () => printStickerFor({
   b_id: $("#autoBId").value,
   barcodeValue: $("#stickerBarcodeValue").textContent
 }));
+$("#downloadBooksTemplateBtn").addEventListener("click", () => {
+  try {
+    downloadWorkbookTemplate("books_template.xlsx", [{
+      ISBN: "9780132350884",
+      "Book Name": "Clean Code",
+      Author: "Robert C. Martin",
+      Publisher: "Prentice Hall",
+      Subject: "Computer Science",
+      Category: "textbook",
+      Copies: 2,
+      BLegalNumber: "CS-001"
+    }]);
+  } catch (error) {
+    logDetailedError(error);
+    showToast(error.message, "error");
+  }
+});
+$("#importBooksBtn").addEventListener("click", () => $("#bookImportFile").click());
+$("#bookImportFile").addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    const rows = await readWorkbookRows(file);
+    renderBookImportPreview(normalizeBookImportRows(rows));
+    showToast("Book import preview ready.", "success");
+  } catch (error) {
+    logDetailedError(error);
+    showToast("Could not parse book import file.", "error");
+  } finally {
+    event.target.value = "";
+  }
+});
+$("#confirmBookImportBtn").addEventListener("click", async () => {
+  try {
+    const result = await importPreviewedBooks();
+    showToast(`Imported ${result.imported} book copy/copies.`, "success");
+  } catch (error) {
+    logDetailedError(error);
+    showToast(error.message, "error");
+  }
+});
 bookSearch.addEventListener("input", renderBooksTable);
 
 $("#booksTable").addEventListener("click", async (event) => {
@@ -1573,6 +1835,10 @@ $("#previewBarcodesBtn").addEventListener("click", () => {
 });
 
 $("#generateBulkBarcodePdfBtn").addEventListener("click", async () => {
+  console.log("Generate Bulk PDF click handler invoked:", {
+    selectedBooks: selectedBarcodeBooks().length,
+    visibleBooks: filteredBarcodeBooks().length
+  });
   try {
     await generateBulkBarcodePdf(true);
   } catch (error) {
@@ -1600,6 +1866,10 @@ $("#markSelectedPrintedBtn").addEventListener("click", async () => {
 });
 
 $("#exportBarcodeExcelBtn").addEventListener("click", () => {
+  console.log("Export Barcode Excel click handler invoked:", {
+    visibleBooks: filteredBarcodeBooks().length,
+    selectedBooks: selectedBarcodeBooks().length
+  });
   try {
     exportBarcodeExcel();
     showToast("Barcode Excel exported.", "success");

@@ -72,8 +72,11 @@ service cloud.firestore {
     match /students/{uid} {
       allow read: if active() && (request.auth.uid == uid || staffRole() || role() == "admin");
       allow create: if active()
-        && request.auth.uid == uid
-        && request.resource.data.uid == uid;
+        && (
+          (request.auth.uid == uid && request.resource.data.uid == uid)
+          || staffRole()
+          || role() == "admin"
+        );
       allow update: if active()
         && (staffRole() || role() == "admin" || request.auth.uid == uid)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["uid", "createdAt"]);

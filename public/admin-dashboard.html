@@ -32,6 +32,14 @@
       <section class="dashboard-grid">
         <article class="panel span-8">
           <h2>User Access</h2>
+          <div class="toolbar">
+            <button class="btn btn-primary" id="importStudentsBtn" type="button">Import Students</button>
+            <button class="btn btn-muted" id="downloadStudentsTemplateBtn" type="button">Download Students Template</button>
+            <button class="btn btn-muted" id="confirmStudentImportBtn" type="button" disabled>Import Previewed Students</button>
+            <input id="studentImportFile" type="file" accept=".xlsx,.csv" hidden>
+          </div>
+          <div id="studentImportResult" class="empty">Upload Students.xlsx to preview and validate rows before import.</div>
+          <div id="studentImportPreview" class="table-wrap"></div>
           <div id="usersTable" class="table-wrap"></div>
         </article>
         <article class="panel span-4">
@@ -50,6 +58,7 @@
       </section>
     </main>
     <div id="toast" class="toast"></div>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
     <script type="module" src="./js/notifications.js"></script>
     <script type="module" src="./js/admin-dashboard.js"></script>

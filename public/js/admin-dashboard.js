@@ -18,7 +18,9 @@ import {
   onSnapshot,
   orderBy,
   query,
-  updateDoc
+  serverTimestamp,
+  updateDoc,
+  writeBatch
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 import {
   EMAILJS_SETUP_MESSAGE,
@@ -41,6 +43,144 @@ const metrics = {
 };
 const testEmailButton = $("#sendTestEmailBtn");
 if (testEmailButton) testEmailButton.title = EMAILJS_SETUP_MESSAGE;
+let pendingStudentImportRows = [];
+
+function readWorkbookRows(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const workbook = window.XLSX.read(event.target.result, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        resolve(window.XLSX.utils.sheet_to_json(sheet, { defval: "" }));
+      } catch (error) {
+        reject(error);
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function valueFor(row, ...names) {
+  const entries = Object.entries(row || {});
+  for (const name of names) {
+    const found = entries.find(([key]) => key.trim().toLowerCase() === name.toLowerCase());
+    if (found) return String(found[1] ?? "").trim();
+  }
+  return "";
+}
+
+function downloadWorkbookTemplate(filename, rows) {
+  if (!window.XLSX) throw new Error("XLSX library is not loaded.");
+  const sheet = window.XLSX.utils.json_to_sheet(rows);
+  const workbook = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(workbook, sheet, "Template");
+  window.XLSX.writeFile(workbook, filename);
+}
+
+function normalizeStudentImportRows(rows) {
+  return rows.map((row, index) => {
+    const normalized = {
+      rowNumber: index + 2,
+      name: valueFor(row, "Name"),
+      email: valueFor(row, "Email").toLowerCase(),
+      phone: valueFor(row, "Phone"),
+      year: valueFor(row, "Year"),
+      department: valueFor(row, "Department")
+    };
+    const errors = [];
+    if (!normalized.name) errors.push("Name is required");
+    if (!normalized.email) errors.push("Email is required");
+    if (normalized.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized.email)) errors.push("Email is invalid");
+    if (!normalized.department) errors.push("Department is required");
+    return { ...normalized, errors };
+  });
+}
+
+function renderStudentImportPreview(rows) {
+  pendingStudentImportRows = rows;
+  $("#confirmStudentImportBtn").disabled = !rows.length || rows.some((row) => row.errors.length);
+  const errorCount = rows.filter((row) => row.errors.length).length;
+  $("#studentImportResult").innerHTML = `
+    <div class="${errorCount ? "empty" : "success-box"}">
+      <strong>${rows.length} student row(s) parsed</strong>
+      <span>Validation errors: ${errorCount}</span>
+    </div>`;
+  if (!rows.length) {
+    renderEmpty($("#studentImportPreview"), "No rows found.");
+    return;
+  }
+  $("#studentImportPreview").innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>Row</th>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Phone</th>
+          <th>Year</th>
+          <th>Department</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((row) => `
+          <tr>
+            <td>${row.rowNumber}</td>
+            <td>${escapeHtml(row.name)}</td>
+            <td>${escapeHtml(row.email)}</td>
+            <td>${escapeHtml(row.phone)}</td>
+            <td>${escapeHtml(row.year)}</td>
+            <td>${escapeHtml(row.department)}</td>
+            <td>${row.errors.length ? escapeHtml(row.errors.join("; ")) : "Ready"}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>`;
+}
+
+async function importPreviewedStudents() {
+  const validRows = pendingStudentImportRows.filter((row) => !row.errors.length);
+  if (!validRows.length) throw new Error("No valid student rows to import.");
+  const importBatchId = `students_import_${Date.now()}`;
+  let imported = 0;
+  let skipped = pendingStudentImportRows.length - validRows.length;
+
+  for (let index = 0; index < validRows.length; index += 450) {
+    const chunk = validRows.slice(index, index + 450);
+    const batch = writeBatch(db);
+    chunk.forEach((row) => {
+      const ref = doc(collection(db, "students"));
+      batch.set(ref, {
+        uid: ref.id,
+        name: row.name,
+        email: row.email,
+        phone: row.phone,
+        year: row.year,
+        department: row.department,
+        role: "student",
+        active: true,
+        imported: true,
+        importBatchId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      imported += 1;
+    });
+    await batch.commit();
+  }
+
+  $("#studentImportResult").innerHTML = `
+    <div class="success-box">
+      <strong>Students imported successfully</strong>
+      <span>Imported count: ${imported}</span>
+      <span>Skipped count: ${skipped}</span>
+      <span>Import batch: ${escapeHtml(importBatchId)}</span>
+    </div>`;
+  $("#confirmStudentImportBtn").disabled = true;
+  pendingStudentImportRows = [];
+  return { imported, skipped, importBatchId };
+}
 
 onSnapshot(collection(db, "users"), (snap) => {
   metrics.users.textContent = snap.size;
@@ -112,6 +252,48 @@ $("#usersTable").addEventListener("click", async (event) => {
       await updateDoc(doc(db, "users", uid), { active: isActive });
       showToast("Account status updated.", "success");
     }
+  } catch (error) {
+    logDetailedError(error);
+    showToast(error.message, "error");
+  }
+});
+
+$("#downloadStudentsTemplateBtn").addEventListener("click", () => {
+  try {
+    downloadWorkbookTemplate("students_template.xlsx", [{
+      Name: "Student Name",
+      Email: "student@example.com",
+      Phone: "9876543210",
+      Year: "1",
+      Department: "Computer Science"
+    }]);
+  } catch (error) {
+    logDetailedError(error);
+    showToast(error.message, "error");
+  }
+});
+
+$("#importStudentsBtn").addEventListener("click", () => $("#studentImportFile").click());
+
+$("#studentImportFile").addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    const rows = await readWorkbookRows(file);
+    renderStudentImportPreview(normalizeStudentImportRows(rows));
+    showToast("Student import preview ready.", "success");
+  } catch (error) {
+    logDetailedError(error);
+    showToast("Could not parse student import file.", "error");
+  } finally {
+    event.target.value = "";
+  }
+});
+
+$("#confirmStudentImportBtn").addEventListener("click", async () => {
+  try {
+    const result = await importPreviewedStudents();
+    showToast(`Imported ${result.imported} student(s).`, "success");
   } catch (error) {
     logDetailedError(error);
     showToast(error.message, "error");
