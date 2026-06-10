@@ -9,8 +9,7 @@ import {
   $,
   escapeHtml,
   formatDate,
-  renderEmpty,
-  statusBadge
+  renderEmpty
 } from "./app.js";
 
 const pageSize = 25;
@@ -79,13 +78,14 @@ function renderLibrary() {
   `;
 
   if (!visibleRows.length) {
-    renderEmpty(booksTarget, "No matching books found.");
+    renderEmpty(booksTarget, "No books found.");
   } else {
     booksTarget.innerHTML = visibleRows.map(({ id, data }) => {
       const cover = data.imageUrl || "assets/book-placeholder.svg";
+      const status = String(data.status || "available").toLowerCase();
       return `
-        <article class="card library-book-card">
-          <div class="library-book-cover">
+        <article class="book-card">
+          <div class="book-cover">
             <img src="${escapeHtml(cover)}" alt="">
           </div>
           <div>
@@ -93,8 +93,8 @@ function renderLibrary() {
             <p>${escapeHtml(data.author || "Author not listed")}</p>
           </div>
           <div class="meta-row">
-            <span class="badge badge-category">${escapeHtml(data.category || "other")}</span>
-            ${statusBadge(data.status || "available")}
+            <span class="category-badge">${escapeHtml(data.category || "other")}</span>
+            <span class="availability-badge availability-${escapeHtml(status)}">${escapeHtml(availabilityLabel(status))}</span>
           </div>
           <p><strong>Subject:</strong> ${escapeHtml(data.subject || "General")}</p>
           <p><strong>ISBN:</strong> ${escapeHtml(data.isbn || data.publisherBarcode || "-")}</p>
@@ -155,6 +155,6 @@ onSnapshot(
   },
   (error) => {
     console.error("Public library load failed:", error);
-    renderEmpty(summaryTarget, "Could not load the catalog.");
+    renderEmpty(summaryTarget, "Unable to load catalog. Check internet connection.");
   }
 );

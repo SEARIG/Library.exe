@@ -8,31 +8,27 @@
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0f766e">
   </head>
-  <body>
-    <header class="app-header">
-      <div class="header-inner">
-        <a class="brand" href="index.html">
-          <img class="brand-logo" src="assets/mlsu-logo.png" alt="">
-          <span>MLSU Library</span>
-        </a>
-        <nav class="nav">
-          <div class="nav-links">
-            <a href="library.html" aria-current="page">Library</a>
-            <a href="login.html">Login</a>
-            <a href="signup.html">Student Signup</a>
-          </div>
-        </nav>
+  <body class="library-catalog-page">
+    <header class="library-nav">
+      <div class="library-brand">
+        <img src="./assets/mlsu-logo.png" class="library-logo" alt="MLSU logo">
+        <span>MLSU Library</span>
       </div>
+      <nav>
+        <a href="library.html" aria-current="page">Library</a>
+        <a href="login.html">Login</a>
+        <a href="signup.html">Student Signup</a>
+      </nav>
     </header>
 
-    <main class="page-shell">
-      <section class="page-title">
+    <main class="library-page">
+      <section class="library-hero">
         <h1>Library Catalog</h1>
         <p>Search MLSU Library books by title, author, subject, ISBN, or inside book number.</p>
       </section>
 
-      <section class="card">
-        <div class="library-controls">
+      <section class="catalog-card">
+        <div class="catalog-filters">
           <label>Search
             <input id="librarySearch" placeholder="Book name, author, subject, ISBN, BLegal number">
           </label>
@@ -59,7 +55,7 @@
           </label>
         </div>
         <div id="librarySummary" class="empty">Loading catalog...</div>
-        <div id="libraryBooks" class="book-card-grid"></div>
+        <div id="libraryBooks" class="catalog-grid"></div>
         <div id="libraryPagination" class="pagination"></div>
       </section>
     </main>
