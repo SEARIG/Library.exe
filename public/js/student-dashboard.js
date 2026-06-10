@@ -73,11 +73,35 @@ onSnapshot(
   (snap) => {
     const issued = snap.docs
       .sort((a, b) => timeOf(b.data().issueDate) - timeOf(a.data().issueDate));
+    const issuedMetric = $("#metricStudentIssued");
+    const daysMetric = $("#metricStudentDaysLeft");
+    if (issuedMetric) issuedMetric.textContent = String(issued.length);
     const target = $("#issuedBooks");
     if (!issued.length) {
       renderEmpty(target, "No active issued books.");
+      if (daysMetric) daysMetric.textContent = "-";
+      renderEmpty($("#dueCountdown"), "No active due dates.");
       return;
     }
+    const remainingValues = issued
+      .map((item) => daysRemaining(item.data().dueDate))
+      .filter((value) => value !== null);
+    const nearestDays = remainingValues.length ? Math.min(...remainingValues) : null;
+    if (daysMetric) daysMetric.textContent = nearestDays === null ? "-" : String(nearestDays);
+    $("#dueCountdown").innerHTML = issued.map((item) => {
+      const issue = item.data();
+      const remaining = daysRemaining(issue.dueDate);
+      const isOverdue = remaining !== null && remaining < 0;
+      return `
+        <article class="list-row">
+          <div>
+            <strong>${escapeHtml(issue.bookTitle || issue.bookId)}</strong>
+            <span>Due ${formatDate(issue.dueDate)}</span>
+            <span>${isOverdue ? `${Math.abs(remaining)} day(s) overdue` : `${remaining ?? "-"} day(s) left`}</span>
+          </div>
+          ${isOverdue ? statusBadge("overdue") : statusBadge("active")}
+        </article>`;
+    }).join("");
     target.innerHTML = issued.map((item) => {
       const issue = item.data();
       const remaining = daysRemaining(issue.dueDate);
@@ -101,6 +125,8 @@ onSnapshot(
   query(collection(db, "issueRequests"), where("studentUid", "==", user.uid), where("status", "==", "pending")),
   (snap) => {
     const target = $("#issueHistory");
+    const requestMetric = $("#metricStudentRequests");
+    if (requestMetric) requestMetric.textContent = String(snap.size);
     if (snap.empty) {
       renderEmpty(target, "No pending issue requests.");
       return;
@@ -120,9 +146,36 @@ onSnapshot(
 );
 
 onSnapshot(
+  query(collection(db, "bookIssues"), where("studentUid", "==", user.uid), where("status", "==", "returned")),
+  (snap) => {
+    const returnedMetric = $("#metricStudentReturned");
+    if (returnedMetric) returnedMetric.textContent = String(snap.size);
+    const target = $("#activityTimeline");
+    if (snap.empty) {
+      renderEmpty(target, "No returned books yet.");
+      return;
+    }
+    target.innerHTML = snap.docs.sort((a, b) => timeOf(b.data().returnDate) - timeOf(a.data().returnDate)).map((item) => {
+      const issue = item.data();
+      return `
+        <article class="list-row">
+          <div>
+            <strong>${escapeHtml(issue.bookTitle || issue.bookId)}</strong>
+            <span>Returned ${formatDate(issue.returnDate)}</span>
+          </div>
+          ${statusBadge("returned")}
+        </article>`;
+    }).join("");
+  }
+);
+
+onSnapshot(
   query(collection(db, "penalties"), where("studentUid", "==", user.uid)),
   (snap) => {
     const target = $("#penalties");
+    const penaltyMetric = $("#metricStudentPenalty");
+    const totalPenalty = snap.docs.reduce((sum, item) => sum + Number(item.data().amount || 0), 0);
+    if (penaltyMetric) penaltyMetric.textContent = String(totalPenalty.toFixed(0));
     if (snap.empty) {
       renderEmpty(target, "No penalties.");
       return;

@@ -20,6 +20,15 @@
         <h1>Librarian Dashboard</h1>
         <p>Review pending issue requests, verify availability, and process returns.</p>
       </section>
+      <section class="admin-metrics">
+        <article class="metric"><span>Total Books</span><strong id="metricTotalBooks">0</strong></article>
+        <article class="metric"><span>Issued</span><strong id="metricIssuedBooks">0</strong></article>
+        <article class="metric"><span>Available</span><strong id="metricAvailableBooks">0</strong></article>
+        <article class="metric"><span>Lost</span><strong id="metricLostBooks">0</strong></article>
+        <article class="metric"><span>Damaged</span><strong id="metricDamagedBooks">0</strong></article>
+        <article class="metric"><span>Pending Requests</span><strong id="metricPendingRequests">0</strong></article>
+        <article class="metric"><span>New Book Requests</span><strong id="metricNewBookRequests">0</strong></article>
+      </section>
       <section class="librarian-grid">
         <article class="panel librarian-add-book">
           <h2>Add Book / Generate Barcode</h2>
@@ -54,7 +63,7 @@
               <button class="btn btn-muted" id="generateBarcodeBtn" type="button">Generate Library Barcode</button>
             </div>
             <p class="helper-text">Use publisher ISBN for metadata. Use generated library barcode for issue and return.</p>
-            <p class="helper-text">Searches Local Database, Google Books, Open Library, Library of Congress, and INDCAT fallback.</p>
+            <p class="helper-text">Searches Local Database, Google Books, Open Library, and Library of Congress.</p>
             <video id="publisherScannerVideo" class="scanner-video compact-video" playsinline autoplay muted hidden></video>
             <span id="metadataSourceBadge" class="badge" hidden></span>
             <div id="bookFetchPreview" class="empty">Fetch details or fill the book manually.</div>

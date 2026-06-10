@@ -4,27 +4,31 @@ import { signOut } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-aut
 const roleLinks = {
   student: [
     ["Dashboard", "student-dashboard.html"],
-    ["Library", "library.html"],
     ["Scan Book", "scan-book.html"],
-    ["Books", "books.html"],
-    ["My Issued Books", "student-dashboard.html#issuedBooks"]
+    ["Issued Books", "student-dashboard.html#issuedBooks"],
+    ["Activity", "student-dashboard.html#activityTimeline"],
+    ["Penalties", "student-dashboard.html#penalties"],
+    ["Library", "library.html"],
   ],
   librarian: [
     ["Dashboard", "librarian-dashboard.html"],
-    ["Library", "library.html"],
-    ["Add/Manage Books", "librarian-dashboard.html#addBookForm"],
-    ["Pending Requests", "librarian-dashboard.html#pendingRequests"],
-    ["Active Issues", "librarian-dashboard.html#activeIssues"],
-    ["Return Scan", "scan-book.html?mode=return"],
-    ["Books", "books.html"]
+    ["Add Book", "librarian-dashboard.html#addBookForm"],
+    ["Book Database", "librarian-dashboard.html#booksTable"],
+    ["Issue History", "librarian-dashboard.html#activeIssues"],
+    ["Return History", "librarian-dashboard.html#returnsList"],
+    ["Import Books", "librarian-dashboard.html#bookImportResult"],
+    ["Export Books", "librarian-dashboard.html#exportBooksExcelBtn"],
+    ["Barcode Manager", "librarian-dashboard.html#barcodePrintTable"],
+    ["Reports", "librarian-dashboard.html#notificationResult"]
   ],
   admin: [
-    ["Admin Dashboard", "admin-dashboard.html"],
-    ["Librarian Dashboard", "librarian-dashboard.html"],
-    ["Library", "library.html"],
+    ["Dashboard", "admin-dashboard.html"],
+    ["Users", "admin-dashboard.html#userManagementModal"],
     ["Books", "books.html"],
-    ["Users", "admin-dashboard.html#usersTable"],
-    ["Reports", "admin-dashboard.html#recentActivity"]
+    ["Reports", "admin-dashboard.html#reportsModal"],
+    ["Email History", "admin-dashboard.html#emailHistoryModal"],
+    ["No Dues", "admin-dashboard.html#noDuesModal"],
+    ["Settings", "admin-dashboard.html#settingsModal"]
   ]
 };
 
@@ -38,36 +42,54 @@ export function renderNavbar(currentRole, currentUserData = {}) {
 
   header.innerHTML = `
     <div class="header-inner">
+      <button class="nav-toggle" id="navToggle" type="button" aria-expanded="false" aria-controls="appSidebar" aria-label="Open menu">
+        <span></span><span></span><span></span>
+      </button>
       <a class="brand" href="${homeForRole(currentRole)}">
         <img class="brand-logo" src="assets/mlsu-logo.png" alt="">
         <span>MLSU Library</span>
       </a>
-      <button class="nav-toggle" id="navToggle" type="button" aria-expanded="false" aria-controls="mainNav">
-        <span></span><span></span><span></span>
-      </button>
-      <nav class="nav" id="mainNav">
-        <div class="nav-links">
-          ${links.map(([label, href]) => `
-            <a href="${href}" ${isCurrentLink(currentPath, href) ? 'aria-current="page"' : ""}>${label}</a>
-          `).join("")}
-        </div>
-        <span class="user-chip">
-          <span class="user-name">${escapeHtml(name)}</span>
-          <span class="badge">${escapeHtml(currentRole)}</span>
-        </span>
-        <button id="signOutBtn" type="button">Sign Out</button>
-      </nav>
+      <span class="current-page-label">${escapeHtml(pageLabel(currentPath))}</span>
+      <span class="user-chip">
+        <span class="user-name">${escapeHtml(name)}</span>
+        <span class="badge">${escapeHtml(currentRole)}</span>
+      </span>
+      <button id="signOutBtn" type="button">Sign Out</button>
     </div>`;
 
+  let sidebar = document.querySelector("#appSidebar");
+  if (!sidebar) {
+    sidebar = document.createElement("aside");
+    sidebar.id = "appSidebar";
+    document.body.append(sidebar);
+  }
+  const startsOpen = !window.matchMedia("(max-width: 768px)").matches;
+  sidebar.className = startsOpen ? "app-sidebar open" : "app-sidebar";
+  document.body.classList.toggle("sidebar-open", startsOpen);
+  sidebar.innerHTML = `
+    <div class="sidebar-brand">
+      <img class="brand-logo" src="assets/mlsu-logo.png" alt="">
+      <div>
+        <strong>MLSU Library</strong>
+        <span>${escapeHtml(currentRole)}</span>
+      </div>
+    </div>
+    <nav class="sidebar-nav" aria-label="Dashboard navigation">
+      ${links.map(([label, href]) => `
+        <a href="${href}" ${isCurrentLink(currentPath, href) ? 'aria-current="page"' : ""}>${label}</a>
+      `).join("")}
+    </nav>`;
+
   const toggle = header.querySelector("#navToggle");
-  const nav = header.querySelector("#mainNav");
   toggle.addEventListener("click", () => {
-    const isOpen = nav.classList.toggle("open");
+    const isOpen = sidebar.classList.toggle("open");
+    document.body.classList.toggle("sidebar-open", isOpen);
     toggle.setAttribute("aria-expanded", String(isOpen));
   });
-  nav.querySelectorAll("a").forEach((link) => {
+  sidebar.querySelectorAll("a").forEach((link) => {
     link.addEventListener("click", () => {
-      nav.classList.remove("open");
+      sidebar.classList.remove("open");
+      document.body.classList.remove("sidebar-open");
       toggle.setAttribute("aria-expanded", "false");
     });
   });
@@ -82,6 +104,7 @@ export function renderNavbarSkeleton() {
   if (!header) return;
   header.innerHTML = `
     <div class="header-inner">
+      <button class="nav-toggle" type="button" disabled aria-label="Loading menu"><span></span><span></span><span></span></button>
       <a class="brand" href="index.html">
         <img class="brand-logo" src="assets/mlsu-logo.png" alt="">
         <span>MLSU Library</span>
@@ -98,6 +121,15 @@ function homeForRole(role) {
 
 function isCurrentLink(currentPath, href) {
   return href.split("#")[0] === currentPath || href.split("?")[0] === currentPath.split("?")[0];
+}
+
+function pageLabel(currentPath) {
+  const clean = currentPath.split("?")[0].split("#")[0] || "index.html";
+  return clean
+    .replace(".html", "")
+    .split("-")
+    .map((word) => word ? word[0].toUpperCase() + word.slice(1) : "")
+    .join(" ");
 }
 
 function escapeHtml(value) {

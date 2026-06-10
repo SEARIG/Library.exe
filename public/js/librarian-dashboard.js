@@ -1067,16 +1067,10 @@ async function fetchGoogleBook(event) {
       const isbnEl = document.getElementById("isbnInput");
       if (isbnEl) isbnEl.value = cleanCode;
       if (barcodeInput) barcodeInput.value = cleanCode;
-      const fallbackUrl = info?.indcatFallback?.fallbackUrl;
       $("#bookFetchPreview").innerHTML = `
         <div class="empty">
           <span>Online metadata not found. Enter details once and this system will remember it.</span>
-          ${fallbackUrl ? `<button class="btn btn-muted" id="openIndcatFallbackBtn" type="button">Search INDCAT Manually</button>` : ""}
         </div>`;
-      const indcatButton = document.getElementById("openIndcatFallbackBtn");
-      if (indcatButton && fallbackUrl) {
-        indcatButton.addEventListener("click", () => window.open(fallbackUrl, "_blank", "noopener,noreferrer"));
-      }
       showToast("No online metadata found. Please enter details once. Future scans will auto-fill from local database.", "warning");
       return;
     }
@@ -1979,6 +1973,10 @@ onSnapshot(
   query(collection(db, "issueRequests"), where("status", "==", "pending")),
   (snap) => {
     latestPendingRequests = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
+    const pendingMetric = $("#metricPendingRequests");
+    const newRequestMetric = $("#metricNewBookRequests");
+    if (pendingMetric) pendingMetric.textContent = String(snap.size);
+    if (newRequestMetric) newRequestMetric.textContent = String(snap.size);
     renderPendingRequests();
   }
 );
@@ -2143,6 +2141,23 @@ onSnapshot(
   query(collection(db, "books"), orderBy("updatedAt", "desc"), limit(500)),
   (snap) => {
     latestBooks = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
+    const counts = latestBooks.reduce((acc, item) => {
+      const status = String(item.data.status || "available").toLowerCase();
+      acc.total += 1;
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, { total: 0, available: 0, issued: 0, lost: 0, damaged: 0 });
+    const metricMap = {
+      metricTotalBooks: counts.total,
+      metricIssuedBooks: counts.issued,
+      metricAvailableBooks: counts.available,
+      metricLostBooks: counts.lost,
+      metricDamagedBooks: counts.damaged
+    };
+    Object.entries(metricMap).forEach(([id, value]) => {
+      const target = document.getElementById(id);
+      if (target) target.textContent = String(value || 0);
+    });
     renderBooksTable();
     renderBarcodePrintManager();
     renderPendingRequests();

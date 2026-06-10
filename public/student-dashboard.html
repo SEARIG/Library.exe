@@ -20,6 +20,13 @@
         <h1>Student Dashboard</h1>
         <p>Track your profile, active issues, due dates, penalties, and issue request history.</p>
       </section>
+      <section class="admin-metrics">
+        <article class="metric"><span>Issued</span><strong id="metricStudentIssued">0</strong></article>
+        <article class="metric"><span>Returned</span><strong id="metricStudentReturned">0</strong></article>
+        <article class="metric"><span>Active Requests</span><strong id="metricStudentRequests">0</strong></article>
+        <article class="metric"><span>Penalty</span><strong id="metricStudentPenalty">0</strong></article>
+        <article class="metric"><span>Days Left</span><strong id="metricStudentDaysLeft">-</strong></article>
+      </section>
       <section class="dashboard-grid">
         <article class="panel span-5">
           <h2>My Profile</h2>
@@ -36,6 +43,14 @@
         <article class="panel span-6">
           <h2>Pending Requests</h2>
           <div id="issueHistory" class="list-stack"></div>
+        </article>
+        <article class="panel span-6">
+          <h2>Activity Timeline</h2>
+          <div id="activityTimeline" class="list-stack"></div>
+        </article>
+        <article class="panel span-6">
+          <h2>Due Countdown</h2>
+          <div id="dueCountdown" class="list-stack"></div>
         </article>
         <article class="panel span-12">
           <a class="btn btn-primary" href="scan-book.html">Scan Book Barcode</a>

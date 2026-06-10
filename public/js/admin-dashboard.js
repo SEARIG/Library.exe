@@ -45,6 +45,51 @@ const testEmailButton = $("#sendTestEmailBtn");
 if (testEmailButton) testEmailButton.title = EMAILJS_SETUP_MESSAGE;
 let pendingStudentImportRows = [];
 
+function openModal(id) {
+  const modal = document.getElementById(id);
+  if (!modal) return;
+  modal.classList.add("open");
+  document.body.classList.add("modal-open");
+}
+
+function closeModal(modal) {
+  modal?.classList.remove("open");
+  document.body.classList.remove("modal-open");
+}
+
+document.addEventListener("click", (event) => {
+  const openButton = event.target.closest("[data-open-modal]");
+  if (openButton) {
+    openModal(openButton.dataset.openModal);
+    return;
+  }
+
+  const closeButton = event.target.closest("[data-close-modal]");
+  if (closeButton) {
+    closeModal(closeButton.closest(".modal-backdrop"));
+    return;
+  }
+
+  const modalBackdrop = event.target.classList?.contains("modal-backdrop") ? event.target : null;
+  if (modalBackdrop) closeModal(modalBackdrop);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    document.querySelectorAll(".modal-backdrop.open").forEach(closeModal);
+  }
+});
+
+document.addEventListener("click", (event) => {
+  const sidebarModalLink = event.target.closest('a[href^="admin-dashboard.html#"]');
+  if (!sidebarModalLink) return;
+  const id = sidebarModalLink.getAttribute("href").split("#")[1];
+  if (document.getElementById(id)?.classList.contains("modal-backdrop")) {
+    event.preventDefault();
+    openModal(id);
+  }
+});
+
 function readWorkbookRows(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

@@ -30,33 +30,85 @@
         <article class="metric"><span>Total Users</span><strong id="metricUsers">0</strong></article>
       </section>
       <section class="dashboard-grid">
-        <article class="panel span-8">
-          <h2>User Access</h2>
-          <div class="toolbar">
-            <button class="btn btn-primary" id="importStudentsBtn" type="button">Import Students</button>
-            <button class="btn btn-muted" id="downloadStudentsTemplateBtn" type="button">Download Students Template</button>
-            <button class="btn btn-muted" id="confirmStudentImportBtn" type="button" disabled>Import Previewed Students</button>
-            <input id="studentImportFile" type="file" accept=".xlsx,.csv" hidden>
+        <article class="panel span-12">
+          <h2>Admin Actions</h2>
+          <div class="dashboard-action-grid">
+            <button class="btn btn-primary" data-open-modal="userManagementModal" type="button">Manage Users</button>
+            <button class="btn btn-muted" data-open-modal="studentImportModal" type="button">Import Students</button>
+            <button class="btn btn-muted" data-open-modal="reportsModal" type="button">Reports</button>
+            <button class="btn btn-muted" data-open-modal="emailHistoryModal" type="button">Email History</button>
+            <button class="btn btn-muted" data-open-modal="noDuesModal" type="button">No Dues</button>
+            <button class="btn btn-muted" data-open-modal="settingsModal" type="button">Settings</button>
           </div>
-          <div id="studentImportResult" class="empty">Upload Students.xlsx to preview and validate rows before import.</div>
-          <div id="studentImportPreview" class="table-wrap"></div>
-          <div id="usersTable" class="table-wrap"></div>
-        </article>
-        <article class="panel span-4">
-          <h2>Recent Activity</h2>
-          <div id="recentActivity" class="list-stack"></div>
-        </article>
-        <article class="panel span-4">
-          <h2>Notification Tools</h2>
-          <p class="helper-text">EmailJS is optional. Configure it to enable free email notifications.</p>
-          <div class="toolbar">
-            <button class="btn btn-muted" id="runReminderCheckBtn" type="button">Run Reminder Check</button>
-            <button class="btn btn-muted" id="sendTestEmailBtn" type="button">Send Test Email</button>
-          </div>
-          <div id="notificationResult" class="empty">No notification check has been run yet.</div>
         </article>
       </section>
     </main>
+    <div class="modal-backdrop" id="userManagementModal" role="dialog" aria-modal="true" aria-labelledby="userManagementTitle">
+      <section class="app-modal">
+        <div class="modal-head">
+          <h2 id="userManagementTitle">User Management</h2>
+          <button class="btn btn-muted" data-close-modal type="button">Close</button>
+        </div>
+        <div id="usersTable" class="table-wrap"></div>
+      </section>
+    </div>
+    <div class="modal-backdrop" id="studentImportModal" role="dialog" aria-modal="true" aria-labelledby="studentImportTitle">
+      <section class="app-modal">
+        <div class="modal-head">
+          <h2 id="studentImportTitle">Student Import</h2>
+          <button class="btn btn-muted" data-close-modal type="button">Close</button>
+        </div>
+        <div class="toolbar">
+          <button class="btn btn-primary" id="importStudentsBtn" type="button">Import Students</button>
+          <button class="btn btn-muted" id="downloadStudentsTemplateBtn" type="button">Download Students Template</button>
+          <button class="btn btn-muted" id="confirmStudentImportBtn" type="button" disabled>Import Previewed Students</button>
+          <input id="studentImportFile" type="file" accept=".xlsx,.csv" hidden>
+        </div>
+        <div id="studentImportResult" class="empty">Upload Students.xlsx to preview and validate rows before import.</div>
+        <div id="studentImportPreview" class="table-wrap"></div>
+      </section>
+    </div>
+    <div class="modal-backdrop" id="reportsModal" role="dialog" aria-modal="true" aria-labelledby="reportsTitle">
+      <section class="app-modal">
+        <div class="modal-head">
+          <h2 id="reportsTitle">Reports</h2>
+          <button class="btn btn-muted" data-close-modal type="button">Close</button>
+        </div>
+        <div id="recentActivity" class="list-stack"></div>
+      </section>
+    </div>
+    <div class="modal-backdrop" id="emailHistoryModal" role="dialog" aria-modal="true" aria-labelledby="emailHistoryTitle">
+      <section class="app-modal">
+        <div class="modal-head">
+          <h2 id="emailHistoryTitle">Email History</h2>
+          <button class="btn btn-muted" data-close-modal type="button">Close</button>
+        </div>
+        <p class="helper-text">EmailJS is optional. Configure it to enable free email notifications.</p>
+        <div class="toolbar">
+          <button class="btn btn-muted" id="runReminderCheckBtn" type="button">Run Reminder Check</button>
+          <button class="btn btn-muted" id="sendTestEmailBtn" type="button">Send Test Email</button>
+        </div>
+        <div id="notificationResult" class="empty">No notification check has been run yet.</div>
+      </section>
+    </div>
+    <div class="modal-backdrop" id="noDuesModal" role="dialog" aria-modal="true" aria-labelledby="noDuesTitle">
+      <section class="app-modal">
+        <div class="modal-head">
+          <h2 id="noDuesTitle">No Dues</h2>
+          <button class="btn btn-muted" data-close-modal type="button">Close</button>
+        </div>
+        <div class="empty">No dues certificate tools will appear here.</div>
+      </section>
+    </div>
+    <div class="modal-backdrop" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <section class="app-modal">
+        <div class="modal-head">
+          <h2 id="settingsTitle">Settings</h2>
+          <button class="btn btn-muted" data-close-modal type="button">Close</button>
+        </div>
+        <div class="empty">System settings will appear here.</div>
+      </section>
+    </div>
     <div id="toast" class="toast"></div>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>

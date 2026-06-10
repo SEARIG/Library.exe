@@ -415,6 +415,28 @@ body::after {
   transform: rotate(-10deg);
 }
 
+.protected-page {
+  background:
+    linear-gradient(rgba(15, 23, 42, 0.82), rgba(15, 23, 42, 0.82)),
+    radial-gradient(circle at 12% 18%, rgba(212, 160, 23, 0.2), transparent 28%),
+    radial-gradient(circle at 82% 8%, rgba(15, 118, 110, 0.22), transparent 30%),
+    linear-gradient(90deg, rgba(92, 64, 51, 0.35) 0 10%, transparent 10% 12%, rgba(92, 64, 51, 0.28) 12% 23%, transparent 23% 25%, rgba(120, 84, 62, 0.32) 25% 38%, transparent 38% 41%, rgba(70, 49, 38, 0.3) 41% 52%, transparent 52% 55%, rgba(103, 70, 45, 0.34) 55% 67%, transparent 67% 70%, rgba(72, 50, 42, 0.3) 70% 82%, transparent 82% 85%, rgba(112, 75, 48, 0.32) 85% 100%),
+    var(--navy);
+  background-size: cover, cover, cover, 180px 100%;
+  overflow-x: hidden;
+}
+
+.protected-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 28px),
+    radial-gradient(circle at 50% 0, rgba(248, 245, 239, 0.1), transparent 46%);
+  pointer-events: none;
+}
+
 a {
   color: inherit;
 }
@@ -456,7 +478,7 @@ canvas {
 .app-header {
   position: sticky;
   top: 0;
-  z-index: 20;
+  z-index: 50;
   background: rgba(255, 255, 255, 0.78);
   border-bottom: 1px solid rgba(229, 231, 235, 0.82);
   box-shadow: 0 8px 30px rgba(15, 23, 42, 0.06);
@@ -464,8 +486,8 @@ canvas {
 }
 
 .header-inner {
-  width: min(1220px, calc(100% - 32px));
-  min-height: 76px;
+  width: min(1400px, calc(100% - 32px));
+  min-height: 72px;
   margin: 0 auto;
   display: flex;
   align-items: center;
@@ -489,12 +511,82 @@ canvas {
 }
 
 .brand-logo {
-  width: 42px;
-  height: 42px;
+  width: 48px;
+  height: 48px;
+  max-height: 48px;
   object-fit: contain;
   border-radius: 12px;
   background: #fff;
   box-shadow: 0 10px 20px rgba(15, 118, 110, 0.14);
+}
+
+.current-page-label {
+  margin-right: auto;
+  color: var(--muted);
+  font-weight: 850;
+}
+
+.app-sidebar {
+  position: fixed;
+  top: 72px;
+  left: 0;
+  z-index: 45;
+  width: 280px;
+  height: calc(100vh - 72px);
+  padding: 22px;
+  overflow-y: auto;
+  background: rgba(255, 255, 255, 0.95);
+  border-right: 1px solid rgba(229, 231, 235, 0.9);
+  box-shadow: 18px 0 44px rgba(0, 0, 0, 0.14);
+  transform: translateX(-100%);
+  transition: transform 0.25s ease;
+  backdrop-filter: blur(20px);
+}
+
+.app-sidebar.open {
+  transform: translateX(0);
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 18px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-brand strong,
+.sidebar-brand span {
+  display: block;
+}
+
+.sidebar-brand span {
+  color: var(--muted);
+  font-size: 0.84rem;
+  text-transform: capitalize;
+}
+
+.sidebar-nav {
+  display: grid;
+  gap: 8px;
+}
+
+.sidebar-nav a {
+  display: flex;
+  align-items: center;
+  min-height: 46px;
+  padding: 0 14px;
+  border-radius: 14px;
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 850;
+}
+
+.sidebar-nav a:hover,
+.sidebar-nav a[aria-current="page"] {
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
 }
 
 .nav {
@@ -542,7 +634,11 @@ canvas {
 }
 
 .nav-toggle {
-  display: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 4px;
   width: 46px;
   min-height: 42px;
   padding: 0;
@@ -580,9 +676,15 @@ canvas {
 }
 
 .app-main {
-  width: min(1220px, calc(100% - 32px));
+  width: min(1400px, calc(100% - 32px));
   margin: 0 auto;
   padding: 30px 0 64px;
+}
+
+.protected-page.auth-ready.sidebar-open .app-main {
+  margin-left: calc(280px + 24px);
+  width: calc(100% - 328px);
+  max-width: 1400px;
 }
 
 .page-title {
@@ -645,7 +747,7 @@ canvas {
 .admin-metrics {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 18px;
+  gap: 24px;
   align-items: start;
 }
 
@@ -679,15 +781,15 @@ canvas {
 .auth-shell {
   min-width: 0;
   border: 1px solid rgba(229, 231, 235, 0.9);
-  border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: var(--soft-shadow);
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.12);
 }
 
 .panel,
 .metric,
 .card {
-  padding: 22px;
+  padding: 24px;
   overflow: hidden;
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
@@ -1378,6 +1480,56 @@ td strong {
   color: var(--muted);
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: none;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.64);
+}
+
+.modal-backdrop.open {
+  display: grid;
+}
+
+.app-modal {
+  width: min(980px, 100%);
+  max-height: min(82vh, 780px);
+  padding: 24px;
+  overflow: auto;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.24);
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.modal-head h2 {
+  margin: 0;
+}
+
+.modal-actions-grid,
+.dashboard-action-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 16px;
+}
+
+.admin-action-card,
+.student-cta-card {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
 @media (max-width: 900px) {
   .auth-shell,
   .scanner-layout,
@@ -1422,6 +1574,43 @@ td strong {
 }
 
 @media (max-width: 768px) {
+  .protected-page.auth-ready.sidebar-open .app-main,
+  .protected-page.auth-ready .app-main {
+    width: min(100% - 28px, 1400px);
+    margin: 0 auto;
+  }
+
+  .app-sidebar {
+    top: 72px;
+    width: min(280px, calc(100vw - 32px));
+    transform: translateX(-110%);
+  }
+
+  .app-sidebar.open {
+    transform: translateX(0);
+  }
+
+  .header-inner {
+    width: min(100% - 20px, 1400px);
+    min-height: 72px;
+    flex-direction: row;
+    align-items: center;
+    padding: 0;
+  }
+
+  .current-page-label {
+    display: none;
+  }
+
+  .user-chip .user-name {
+    display: none;
+  }
+
+  .brand {
+    justify-content: flex-start;
+    font-size: 1rem;
+  }
+
   .page-shell {
     width: min(100% - 24px, 1220px);
     padding: 18px 0 46px;
@@ -1429,16 +1618,6 @@ td strong {
 
   .library-controls {
     grid-template-columns: 1fr;
-  }
-
-  .header-inner {
-    align-items: stretch;
-    flex-direction: column;
-    padding: 12px 0;
-  }
-
-  .brand {
-    justify-content: center;
   }
 
   .nav {
@@ -1456,10 +1635,7 @@ td strong {
     gap: 10px;
   }
 
-  .nav-toggle {
-    display: inline-flex;
-    flex-direction: column;
-  }
+  .nav-toggle { display: inline-flex; }
 
   .nav-links {
     display: grid;
