@@ -31,19 +31,21 @@
             <label>Category
               <select id="category" required>
                 <option value="pyq">pyq</option>
-                <option value="qna">qna</option>
                 <option value="textbook">textbook</option>
+                <option value="qna">qna</option>
                 <option value="reference">reference</option>
                 <option value="notes">notes</option>
+                <option value="journal">journal</option>
                 <option value="other">other</option>
               </select>
             </label>
+            <label>Author<input id="authorInput"></label>
+            <label>Publisher<input id="publisherInput"></label>
             <label>BLegal Number / Inside Book Number<input id="blegalNum"></label>
             <label>Publisher Barcode / ISBN<input id="publisherBarcodeInput"></label>
+            <label>Image URL<input id="imageUrlInput"></label>
+            <label>Library Barcode Value<input id="libraryBarcodeValueInput" readonly></label>
             <input id="isbnInput" type="hidden">
-            <input id="authorInput" type="hidden">
-            <input id="publisherInput" type="hidden">
-            <input id="imageUrlInput" type="hidden">
             <input id="metadataSourceInput" type="hidden">
             <div class="toolbar">
               <button class="btn btn-muted" id="scanPublisherBtn" type="button">Scan Publisher Barcode</button>
@@ -51,6 +53,7 @@
               <button class="btn btn-muted" id="saveMetadataBtn" type="button">Save Metadata for Future</button>
               <button class="btn btn-muted" id="generateBarcodeBtn" type="button">Generate Library Barcode</button>
             </div>
+            <p class="helper-text">Use publisher ISBN for metadata. Use generated library barcode for issue and return.</p>
             <p class="helper-text">Searches Local Database, Google Books, Open Library, Library of Congress, and INDCAT fallback.</p>
             <video id="publisherScannerVideo" class="scanner-video compact-video" playsinline autoplay muted hidden></video>
             <span id="metadataSourceBadge" class="badge" hidden></span>
@@ -75,11 +78,35 @@
             <button class="btn btn-primary" id="importBooksBtn" type="button">Import Books</button>
             <button class="btn btn-muted" id="downloadBooksTemplateBtn" type="button">Download Books Template</button>
             <button class="btn btn-muted" id="confirmBookImportBtn" type="button" disabled>Import Previewed Books</button>
+            <button class="btn btn-muted" id="exportBooksExcelBtn" type="button">Export Books Excel</button>
             <input id="bookImportFile" type="file" accept=".xlsx,.csv" hidden>
           </div>
           <div id="bookImportResult" class="empty">Upload Books.xlsx to preview and validate rows before import.</div>
           <div id="bookImportPreview" class="table-scroll"></div>
-          <label>Search Books<input id="bookSearch" placeholder="Search by B_ID, name, subject, category, inside number, publisher barcode, or library barcode"></label>
+          <div class="library-controls">
+            <label>Search Books<input id="bookSearch" placeholder="Search by B_ID, name, author, subject, ISBN, or library barcode"></label>
+            <label>Category
+              <select id="bookCategoryFilter">
+                <option value="">All Categories</option>
+                <option value="pyq">pyq</option>
+                <option value="textbook">textbook</option>
+                <option value="qna">qna</option>
+                <option value="reference">reference</option>
+                <option value="notes">notes</option>
+                <option value="journal">journal</option>
+                <option value="other">other</option>
+              </select>
+            </label>
+            <label>Availability
+              <select id="bookAvailabilityFilter">
+                <option value="">All</option>
+                <option value="available">Available</option>
+                <option value="issued">Not Available</option>
+                <option value="lost">Lost</option>
+                <option value="damaged">Damaged</option>
+              </select>
+            </label>
+          </div>
           <div id="booksTable" class="table-scroll"></div>
         </article>
         <article class="panel librarian-barcode-manager">

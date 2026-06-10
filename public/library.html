@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Library Catalog | MLSU Library</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0f766e">
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="header-inner">
+        <a class="brand" href="index.html">
+          <img class="brand-logo" src="assets/mlsu-logo.png" alt="">
+          <span>MLSU Library</span>
+        </a>
+        <nav class="nav">
+          <div class="nav-links">
+            <a href="library.html" aria-current="page">Library</a>
+            <a href="login.html">Login</a>
+            <a href="signup.html">Student Signup</a>
+          </div>
+        </nav>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="page-title">
+        <h1>Library Catalog</h1>
+        <p>Search MLSU Library books by title, author, subject, ISBN, or inside book number.</p>
+      </section>
+
+      <section class="card">
+        <div class="library-controls">
+          <label>Search
+            <input id="librarySearch" placeholder="Book name, author, subject, ISBN, BLegal number">
+          </label>
+          <label>Category
+            <select id="libraryCategoryFilter">
+              <option value="">All Categories</option>
+              <option value="pyq">pyq</option>
+              <option value="textbook">textbook</option>
+              <option value="qna">qna</option>
+              <option value="reference">reference</option>
+              <option value="notes">notes</option>
+              <option value="journal">journal</option>
+              <option value="other">other</option>
+            </select>
+          </label>
+          <label>Availability
+            <select id="libraryAvailabilityFilter">
+              <option value="">All</option>
+              <option value="available">Available</option>
+              <option value="issued">Not Available</option>
+              <option value="lost">Lost</option>
+              <option value="damaged">Damaged</option>
+            </select>
+          </label>
+        </div>
+        <div id="librarySummary" class="empty">Loading catalog...</div>
+        <div id="libraryBooks" class="book-card-grid"></div>
+        <div id="libraryPagination" class="pagination"></div>
+      </section>
+    </main>
+
+    <script type="module" src="./js/library.js"></script>
+  </body>
+</html>

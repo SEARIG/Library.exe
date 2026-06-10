@@ -4,12 +4,14 @@ import { signOut } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-aut
 const roleLinks = {
   student: [
     ["Dashboard", "student-dashboard.html"],
+    ["Library", "library.html"],
     ["Scan Book", "scan-book.html"],
     ["Books", "books.html"],
     ["My Issued Books", "student-dashboard.html#issuedBooks"]
   ],
   librarian: [
     ["Dashboard", "librarian-dashboard.html"],
+    ["Library", "library.html"],
     ["Add/Manage Books", "librarian-dashboard.html#addBookForm"],
     ["Pending Requests", "librarian-dashboard.html#pendingRequests"],
     ["Active Issues", "librarian-dashboard.html#activeIssues"],
@@ -19,6 +21,7 @@ const roleLinks = {
   admin: [
     ["Admin Dashboard", "admin-dashboard.html"],
     ["Librarian Dashboard", "librarian-dashboard.html"],
+    ["Library", "library.html"],
     ["Books", "books.html"],
     ["Users", "admin-dashboard.html#usersTable"],
     ["Reports", "admin-dashboard.html#recentActivity"]
@@ -35,7 +38,10 @@ export function renderNavbar(currentRole, currentUserData = {}) {
 
   header.innerHTML = `
     <div class="header-inner">
-      <a class="brand" href="${homeForRole(currentRole)}">MLSU Library</a>
+      <a class="brand" href="${homeForRole(currentRole)}">
+        <img class="brand-logo" src="assets/mlsu-logo.png" alt="">
+        <span>MLSU Library</span>
+      </a>
       <button class="nav-toggle" id="navToggle" type="button" aria-expanded="false" aria-controls="mainNav">
         <span></span><span></span><span></span>
       </button>
@@ -76,7 +82,10 @@ export function renderNavbarSkeleton() {
   if (!header) return;
   header.innerHTML = `
     <div class="header-inner">
-      <a class="brand" href="index.html">MLSU Library</a>
+      <a class="brand" href="index.html">
+        <img class="brand-logo" src="assets/mlsu-logo.png" alt="">
+        <span>MLSU Library</span>
+      </a>
       <div class="nav-skeleton"><span></span><span></span><span></span></div>
     </div>`;
 }

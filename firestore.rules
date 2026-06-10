@@ -84,7 +84,7 @@ service cloud.firestore {
     }
 
     match /books/{bookId} {
-      allow read: if active();
+      allow read: if true;
       allow create, update: if active()
         && (staffRole() || role() == "admin")
         && request.resource.data.status in ["available", "issued", "lost", "damaged"];

@@ -42,6 +42,8 @@ wireSignOut();
 const session = await requireAuth(["librarian", "admin"]);
 const addBookForm = $("#addBookForm");
 const bookSearch = $("#bookSearch");
+const bookCategoryFilter = $("#bookCategoryFilter");
+const bookAvailabilityFilter = $("#bookAvailabilityFilter");
 let nextBookId = "1";
 let editingBookId = null;
 let editingExistingBook = null;
@@ -61,6 +63,7 @@ const INDCAT_CONFIG = {
   enabled: false,
   apiUrl: ""
 };
+const BOOK_CATEGORIES = ["pyq", "textbook", "qna", "reference", "notes", "journal", "other"];
 
 function logLibraryDiagnostics() {
   console.log("XLSX loaded:", typeof XLSX);
@@ -139,6 +142,8 @@ function downloadWorkbookTemplate(filename, rows) {
 
 function normalizeBookImportRows(rows) {
   return rows.map((row, index) => {
+    const rawCategory = valueFor(row, "Category") || "textbook";
+    const category = rawCategory.trim().toLowerCase();
     const normalized = {
       rowNumber: index + 2,
       isbn: valueFor(row, "ISBN"),
@@ -146,7 +151,7 @@ function normalizeBookImportRows(rows) {
       author: valueFor(row, "Author"),
       publisher: valueFor(row, "Publisher"),
       subject: valueFor(row, "Subject"),
-      category: valueFor(row, "Category") || "textbook",
+      category,
       copies: numberValue(valueFor(row, "Copies"), 1),
       blegal_num: valueFor(row, "BLegalNumber", "BLegal Number", "Inside Book Number")
     };
@@ -154,6 +159,9 @@ function normalizeBookImportRows(rows) {
     if (!normalized.bname) errors.push("Book Name is required");
     if (!normalized.subject) errors.push("Subject is required");
     if (!normalized.category) errors.push("Category is required");
+    if (normalized.category && !BOOK_CATEGORIES.includes(normalized.category)) {
+      errors.push(`Category must be one of: ${BOOK_CATEGORIES.join(", ")}`);
+    }
     if (normalized.copies < 1) errors.push("Copies must be at least 1");
     return { ...normalized, errors };
   });
@@ -267,6 +275,7 @@ async function importPreviewedBooks() {
       <strong>Books imported successfully</strong>
       <span>Imported count: ${result.createdIds.length}</span>
       <span>Skipped count: ${skipped}</span>
+      <span>Errors: ${skipped}</span>
       <span>Import batch: ${escapeHtml(result.importBatchId)}</span>
     </div>`;
   $("#confirmBookImportBtn").disabled = true;
@@ -561,6 +570,8 @@ onSnapshot(doc(db, "counters", "books"), (snap) => {
 function renderBarcode(value, bid = $("#autoBId").value || nextBookId) {
   $("#stickerBId").textContent = `B_ID: ${bid || "-"}`;
   $("#stickerBarcodeValue").textContent = value || "BOOK-";
+  const barcodeValueInput = document.getElementById("libraryBarcodeValueInput");
+  if (barcodeValueInput) barcodeValueInput.value = value || "";
   if (!value || !window.JsBarcode) return;
   window.JsBarcode("#libraryBarcodeSvg", value, {
     format: "CODE128",
@@ -1276,17 +1287,27 @@ async function saveBook(event) {
 
 function renderBooksTable() {
   const search = bookSearch.value.trim().toLowerCase();
+  const categoryFilter = String(bookCategoryFilter?.value || "").toLowerCase();
+  const availabilityFilter = String(bookAvailabilityFilter?.value || "").toLowerCase();
   const rows = latestBooks.filter(({ data }) => {
+    const status = String(data.status || "available").toLowerCase();
+    const category = String(data.category || "").toLowerCase();
     const haystack = [
       data.b_id,
       data.bname,
+      data.author,
+      data.publisher,
       data.subject,
       data.category,
       data.blegal_num,
+      data.isbn,
       data.publisherBarcode,
       data.barcodeValue
     ].join(" ").toLowerCase();
-    return !search || haystack.includes(search);
+    if (search && !haystack.includes(search)) return false;
+    if (categoryFilter && category !== categoryFilter) return false;
+    if (availabilityFilter && status !== availabilityFilter) return false;
+    return true;
   });
   const target = $("#booksTable");
   if (!rows.length) {
@@ -1340,6 +1361,15 @@ function renderBooksTable() {
           </tr>`).join("")}
       </tbody>
     </table>`;
+}
+
+function availabilityLabel(status = "") {
+  const value = String(status || "available").toLowerCase();
+  if (value === "available") return "Available";
+  if (value === "issued") return "Not Available";
+  if (value === "lost") return "Lost";
+  if (value === "damaged") return "Damaged";
+  return value || "Available";
 }
 
 function barcodeBookId(item) {
@@ -1618,6 +1648,61 @@ function exportBarcodeExcel() {
   console.log("Excel download triggered:", "barcode_export.xlsx");
 }
 
+function exportBooksExcel() {
+  if (!window.XLSX) throw new Error("XLSX export library is not loaded.");
+  const search = bookSearch.value.trim().toLowerCase();
+  const categoryFilter = String(bookCategoryFilter?.value || "").toLowerCase();
+  const availabilityFilter = String(bookAvailabilityFilter?.value || "").toLowerCase();
+  const rows = latestBooks
+    .filter(({ data }) => {
+      const status = String(data.status || "available").toLowerCase();
+      const category = String(data.category || "").toLowerCase();
+      const haystack = [
+        data.b_id,
+        data.bname,
+        data.author,
+        data.publisher,
+        data.subject,
+        data.category,
+        data.blegal_num,
+        data.isbn,
+        data.publisherBarcode,
+        data.barcodeValue
+      ].join(" ").toLowerCase();
+      if (search && !haystack.includes(search)) return false;
+      if (categoryFilter && category !== categoryFilter) return false;
+      if (availabilityFilter && status !== availabilityFilter) return false;
+      return true;
+    })
+    .map(({ id, data }) => ({
+      B_ID: data.b_id || id,
+      "Book Name": bookTitle(data),
+      Author: data.author || "",
+      Publisher: data.publisher || "",
+      Subject: data.subject || "",
+      Category: data.category || "",
+      BLegalNumber: data.blegal_num || "",
+      ISBN: data.isbn || data.publisherBarcode || "",
+      "Barcode Value": data.barcodeValue || barcodeValueFor(data.b_id || id),
+      Status: data.status || "available",
+      Availability: availabilityLabel(data.status),
+      "Issued To Name": data.issuedToName || "",
+      "Barcode Printed": data.barcodePrinted === true ? "Yes" : "No",
+      "Created At": data.createdAt ? formatDate(data.createdAt) : "",
+      "Updated At": data.updatedAt ? formatDate(data.updatedAt) : ""
+    }));
+  const sheet = window.XLSX.utils.json_to_sheet(rows);
+  const workbook = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(workbook, sheet, "Books");
+  console.log("Books Excel export diagnostics:", {
+    xlsxLoaded: typeof XLSX,
+    rows: rows.length,
+    workbookGenerated: Boolean(workbook)
+  });
+  window.XLSX.writeFile(workbook, "books_export.xlsx");
+  console.log("Excel download triggered:", "books_export.xlsx");
+}
+
 function loadBookIntoForm(id, data) {
   editingBookId = id;
   editingExistingBook = { id, ...data };
@@ -1753,6 +1838,17 @@ $("#confirmBookImportBtn").addEventListener("click", async () => {
   }
 });
 bookSearch.addEventListener("input", renderBooksTable);
+if (bookCategoryFilter) bookCategoryFilter.addEventListener("change", renderBooksTable);
+if (bookAvailabilityFilter) bookAvailabilityFilter.addEventListener("change", renderBooksTable);
+$("#exportBooksExcelBtn").addEventListener("click", () => {
+  try {
+    exportBooksExcel();
+    showToast("Books Excel exported.", "success");
+  } catch (error) {
+    logDetailedError(error);
+    showToast(error.message, "error");
+  }
+});
 
 $("#booksTable").addEventListener("click", async (event) => {
   const button = event.target.closest("button[data-book-action]");

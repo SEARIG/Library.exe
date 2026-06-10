@@ -87,7 +87,8 @@ function normalizeStudentImportRows(rows) {
       email: valueFor(row, "Email").toLowerCase(),
       phone: valueFor(row, "Phone"),
       year: valueFor(row, "Year"),
-      department: valueFor(row, "Department")
+      department: valueFor(row, "Department"),
+      rollNumber: valueFor(row, "RollNumber", "Roll Number")
     };
     const errors = [];
     if (!normalized.name) errors.push("Name is required");
@@ -121,6 +122,7 @@ function renderStudentImportPreview(rows) {
           <th>Phone</th>
           <th>Year</th>
           <th>Department</th>
+          <th>Roll Number</th>
           <th>Status</th>
         </tr>
       </thead>
@@ -133,6 +135,7 @@ function renderStudentImportPreview(rows) {
             <td>${escapeHtml(row.phone)}</td>
             <td>${escapeHtml(row.year)}</td>
             <td>${escapeHtml(row.department)}</td>
+            <td>${escapeHtml(row.rollNumber)}</td>
             <td>${row.errors.length ? escapeHtml(row.errors.join("; ")) : "Ready"}</td>
           </tr>`).join("")}
       </tbody>
@@ -158,6 +161,7 @@ async function importPreviewedStudents() {
         phone: row.phone,
         year: row.year,
         department: row.department,
+        rollNumber: row.rollNumber,
         role: "student",
         active: true,
         imported: true,
@@ -265,7 +269,8 @@ $("#downloadStudentsTemplateBtn").addEventListener("click", () => {
       Email: "student@example.com",
       Phone: "9876543210",
       Year: "1",
-      Department: "Computer Science"
+      Department: "Computer Science",
+      RollNumber: "MLSU-2026-001"
     }]);
   } catch (error) {
     logDetailedError(error);
