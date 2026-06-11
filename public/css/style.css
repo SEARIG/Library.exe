@@ -1,9 +1,10 @@
 :root {
   --primary: #0F766E;
   --primary-dark: #115E59;
-  --navy: #0F172A;
+  --navy: #0B1F3A;
+  --secondary: #0B1F3A;
   --gold: #D4A017;
-  --bg: #F8F5EF;
+  --bg: #F8FAFC;
   --card: #FFFFFF;
   --text: #0F172A;
   --muted: #64748B;
@@ -22,9 +23,7 @@
 .ulc-page {
   min-height: 100vh;
   color: #17221e;
-  background:
-    linear-gradient(180deg, rgba(233, 244, 238, 0.92), rgba(247, 248, 245, 0.96)),
-    url("https://images.unsplash.com/photo-1521587760476-6c12a4b040da?auto=format&fit=crop&w=1800&q=80") center/cover fixed;
+  background: transparent;
 }
 
 .ulc-topbar {
@@ -376,10 +375,7 @@ body {
   margin: 0;
   min-height: 100vh;
   overflow-x: hidden;
-  background:
-    radial-gradient(circle at 12% 18%, rgba(212, 160, 23, 0.16), transparent 26%),
-    radial-gradient(circle at 88% 10%, rgba(15, 118, 110, 0.16), transparent 28%),
-    linear-gradient(135deg, #fffaf0 0%, var(--bg) 44%, #edf7f6 100%);
+  background: var(--bg);
   color: var(--text);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.5;
@@ -388,52 +384,36 @@ body {
 body::before {
   content: "";
   position: fixed;
-  inset: 0;
+  inset: -18px;
   z-index: -2;
   pointer-events: none;
-  background-image:
-    linear-gradient(90deg, rgba(15, 23, 42, 0.035) 1px, transparent 1px),
-    linear-gradient(rgba(15, 23, 42, 0.025) 1px, transparent 1px);
-  background-size: 42px 42px;
-  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.65), transparent 72%);
+  background: url("../assets/library-shelf-bg.png") center/cover fixed no-repeat;
+  filter: blur(10px);
+  transform: scale(1.04);
 }
 
 body::after {
   content: "";
   position: fixed;
-  width: 360px;
-  height: 360px;
-  right: -120px;
-  bottom: -120px;
+  inset: 0;
   z-index: -1;
   pointer-events: none;
-  border-radius: 42px;
-  background:
-    linear-gradient(90deg, rgba(15, 118, 110, 0.12) 0 18%, transparent 18% 25%, rgba(212, 160, 23, 0.12) 25% 42%, transparent 42% 50%, rgba(15, 23, 42, 0.1) 50% 68%, transparent 68%),
-    rgba(255, 255, 255, 0.24);
-  filter: blur(10px);
-  transform: rotate(-10deg);
+  background: rgba(255, 255, 255, 0.88);
 }
 
 .protected-page {
-  background:
-    linear-gradient(rgba(15, 23, 42, 0.82), rgba(15, 23, 42, 0.82)),
-    radial-gradient(circle at 12% 18%, rgba(212, 160, 23, 0.2), transparent 28%),
-    radial-gradient(circle at 82% 8%, rgba(15, 118, 110, 0.22), transparent 30%),
-    linear-gradient(90deg, rgba(92, 64, 51, 0.35) 0 10%, transparent 10% 12%, rgba(92, 64, 51, 0.28) 12% 23%, transparent 23% 25%, rgba(120, 84, 62, 0.32) 25% 38%, transparent 38% 41%, rgba(70, 49, 38, 0.3) 41% 52%, transparent 52% 55%, rgba(103, 70, 45, 0.34) 55% 67%, transparent 67% 70%, rgba(72, 50, 42, 0.3) 70% 82%, transparent 82% 85%, rgba(112, 75, 48, 0.32) 85% 100%),
-    var(--navy);
-  background-size: cover, cover, cover, 180px 100%;
+  background: transparent;
   overflow-x: hidden;
 }
 
 .protected-page::before {
   content: "";
   position: fixed;
-  inset: 0;
-  z-index: -1;
-  background:
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 28px),
-    radial-gradient(circle at 50% 0, rgba(248, 245, 239, 0.1), transparent 46%);
+  inset: -18px;
+  z-index: -2;
+  background: url("../assets/library-shelf-bg.png") center/cover fixed no-repeat;
+  filter: blur(10px);
+  transform: scale(1.04);
   pointer-events: none;
 }
 
@@ -704,24 +684,12 @@ canvas {
   overflow: hidden;
   border: 1px solid rgba(229, 231, 235, 0.92);
   border-radius: var(--radius);
-  background:
-    linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(15, 118, 110, 0.88)),
-    var(--navy);
+  background: linear-gradient(135deg, #0b1f3a, #0f766e);
   box-shadow: var(--shadow);
 }
 
 .page-title::after {
-  content: "";
-  position: absolute;
-  right: 24px;
-  top: 18px;
-  width: 170px;
-  height: 120px;
-  opacity: 0.22;
-  background:
-    linear-gradient(90deg, #fff 0 10%, transparent 10% 16%, #fff 16% 28%, transparent 28% 34%, #fff 34% 48%, transparent 48% 54%, #fff 54% 68%, transparent 68%);
-  border-radius: 16px;
-  transform: rotate(-8deg);
+  content: none;
 }
 
 .page-title h1,
@@ -795,9 +763,10 @@ canvas {
 .auth-shell {
   min-width: 0;
   border: 1px solid rgba(229, 231, 235, 0.9);
-  border-radius: 20px;
-  background: #fff;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 10px 35px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(10px);
 }
 
 .panel,
@@ -864,13 +833,7 @@ canvas {
 
 .library-catalog-page {
   min-height: 100vh;
-  background:
-    linear-gradient(rgba(15, 23, 42, 0.78), rgba(15, 23, 42, 0.78)),
-    radial-gradient(circle at 15% 10%, rgba(212, 160, 23, 0.18), transparent 28%),
-    radial-gradient(circle at 84% 0%, rgba(15, 118, 110, 0.2), transparent 34%),
-    linear-gradient(90deg, rgba(79, 52, 36, 0.48) 0 8%, transparent 8% 10%, rgba(117, 78, 50, 0.42) 10% 19%, transparent 19% 22%, rgba(55, 39, 33, 0.45) 22% 34%, transparent 34% 37%, rgba(126, 82, 48, 0.4) 37% 49%, transparent 49% 52%, rgba(68, 49, 38, 0.45) 52% 64%, transparent 64% 67%, rgba(115, 75, 45, 0.4) 67% 79%, transparent 79% 82%, rgba(58, 41, 35, 0.44) 82% 100%),
-    #0f172a;
-  background-size: cover, cover, cover, 180px 100%;
+  background: transparent;
   color: var(--text);
 }
 
@@ -942,7 +905,7 @@ canvas {
   padding: 32px;
   margin-bottom: 24px;
   border-radius: 22px;
-  background: linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(15, 118, 110, 0.92));
+  background: linear-gradient(135deg, #0b1f3a, #0f766e);
   box-shadow: 0 18px 45px rgba(0, 0, 0, 0.18);
   color: #fff;
 }
@@ -976,8 +939,9 @@ canvas {
 .catalog-card {
   padding: 24px;
   border-radius: 22px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.12);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 10px 35px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(10px);
 }
 
 .catalog-filters {
@@ -1022,8 +986,9 @@ canvas {
   padding: 16px;
   border: 1px solid rgba(229, 231, 235, 0.86);
   border-radius: 18px;
-  background: white;
-  box-shadow: 0 16px 35px rgba(0, 0, 0, 0.12);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 10px 35px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(10px);
 }
 
 .book-card img {
@@ -1150,8 +1115,7 @@ canvas {
 .metric {
   position: relative;
   grid-column: span 3;
-  background:
-    linear-gradient(145deg, #ffffff, #fffaf0);
+  background: rgba(255, 255, 255, 0.95);
 }
 
 .metric::before {
@@ -1354,8 +1318,8 @@ button:disabled,
   display: grid;
   grid-template-columns: 1fr 0.9fr;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.82);
-  backdrop-filter: blur(18px);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
 }
 
 .auth-brand {
@@ -1367,34 +1331,16 @@ button:disabled,
   min-height: 560px;
   padding: 44px;
   overflow: hidden;
-  background:
-    linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(15, 118, 110, 0.78)),
-    radial-gradient(circle at 20% 18%, rgba(212, 160, 23, 0.34), transparent 32%);
+  background: linear-gradient(135deg, #0b1f3a, #0f766e);
   color: #fff;
 }
 
 .auth-brand::before {
-  content: "";
-  position: absolute;
-  inset: 28px;
-  border-radius: 26px;
-  opacity: 0.28;
-  background:
-    linear-gradient(90deg, #fff 0 8%, transparent 8% 13%, #fff 13% 24%, transparent 24% 32%, #fff 32% 45%, transparent 45% 52%, #fff 52% 64%, transparent 64% 70%, #fff 70% 82%, transparent 82%);
-  transform: rotate(-6deg);
+  content: none;
 }
 
 .auth-brand::after {
-  content: "";
-  position: absolute;
-  width: 240px;
-  height: 240px;
-  left: -70px;
-  bottom: -80px;
-  border-radius: 70px;
-  background: rgba(212, 160, 23, 0.24);
-  filter: blur(10px);
-  transform: rotate(18deg);
+  content: none;
 }
 
 .auth-brand h1,
