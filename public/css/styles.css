@@ -30,8 +30,8 @@ body,
 .auth-page {
   background:
     linear-gradient(
-      rgba(245,250,247,0.78),
-      rgba(245,250,247,0.82)
+      rgba(255,255,255,0.15),
+      rgba(255,255,255,0.20)
     ),
     url("../assets/library-shelf-bg.jpg") center center / cover fixed no-repeat !important;
   color: #10201b;
@@ -44,8 +44,8 @@ body::before {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background: rgba(255,255,255,0.18);
-  backdrop-filter: blur(2px);
+  background: rgba(255,255,255,0.05);
+  backdrop-filter: blur(1px);
 }
 
 body > * {
