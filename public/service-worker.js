@@ -1,4 +1,4 @@
-const CACHE_NAME = "mlsu-library-v1";
+const CACHE_NAME = "mlsu-library-v2";
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -26,6 +26,10 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  if (event.request.mode === "navigate" || event.request.destination === "document") {
+    event.respondWith(fetch(event.request));
+    return;
+  }
   event.respondWith(
     caches.match(event.request).then((cached) => cached || fetch(event.request))
   );
