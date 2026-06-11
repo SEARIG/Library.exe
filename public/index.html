@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>MLSU Library</title>
+    <title>MLSU Library Management System</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0f766e">
@@ -15,30 +15,39 @@
         <span>MLSU Library</span>
       </div>
       <nav>
-        <a href="library.html">Library</a>
         <a href="login.html">Login</a>
-        <a href="signup.html">Student Signup</a>
+        <a href="signup.html">Create Account</a>
+        <a href="library.html">Browse Library</a>
       </nav>
     </header>
 
     <main class="library-page">
       <section class="library-hero">
-        <h1>MLSU Smart Library</h1>
-        <p>Barcode-based book issue, return, catalogue, reminders, and inventory workflows for Mohanlal Sukhadia University.</p>
+        <h1>MLSU Library Management System</h1>
+        <p>Smart barcode-based library system for students, librarians, and administrators.</p>
+        <div class="landing-actions">
+          <a class="btn btn-primary" href="login.html">Login</a>
+          <a class="btn btn-muted" href="signup.html">Create Account</a>
+          <a class="btn btn-muted" href="library.html">Browse Library</a>
+        </div>
       </section>
 
-      <section class="catalog-card">
-        <div class="dashboard-action-grid">
-          <a class="btn btn-primary" href="login.html">Login</a>
-          <a class="btn btn-muted" href="signup.html">Student Signup</a>
-          <a class="btn btn-muted" href="library.html">Open Library Catalogue</a>
-        </div>
+      <section class="landing-features">
+        <article class="book-card"><h2>Barcode Issue &amp; Return</h2><p>Scan generated library barcodes for fast circulation workflows.</p></article>
+        <article class="book-card"><h2>Smart Book Catalog</h2><p>Browse, search, filter, and manage the MLSU book collection.</p></article>
+        <article class="book-card"><h2>Email Notifications</h2><p>Notify students about issue, return, penalty, and reminder events.</p></article>
+        <article class="book-card"><h2>Excel Import / Export</h2><p>Move book and student data through practical spreadsheet workflows.</p></article>
+        <article class="book-card"><h2>Bulk Barcode Printing</h2><p>Generate printable barcode sheets for library inventory.</p></article>
+        <article class="book-card"><h2>Admin &amp; Librarian Dashboard</h2><p>Role-based dashboards keep operations organized and secure.</p></article>
       </section>
     </main>
 
     <footer class="library-footer">
-      <strong>MLSU Smart Library Management System</strong>
-      <span>Developed by: Nakul Singh Rajawat, Prakshat Sharma, Puneet Sharma</span>
+      <strong>Developed by:</strong>
+      <span>Nakul Singh Rajawat</span>
+      <span>Prakshat Sharma</span>
+      <span>Puneet Sharma</span>
+      <span>Mohanlal Sukhadia University</span>
       <span>&copy; 2026 MLSU Library. All rights reserved.</span>
     </footer>
     <script type="module" src="./js/push-notifications.js"></script>

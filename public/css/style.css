@@ -18,7 +18,7 @@
   --radius: 18px;
 }
 
-/* ULC V1 */
+/* MLSU Library */
 .ulc-page {
   min-height: 100vh;
   color: #17221e;
@@ -958,6 +958,19 @@ canvas {
   max-width: 740px;
   margin: 10px 0 0;
   color: rgba(255, 255, 255, 0.82);
+}
+
+.landing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.landing-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 22px;
 }
 
 .catalog-card {

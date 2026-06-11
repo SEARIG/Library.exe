@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Login | ULC</title>
+    <title>Login | MLSU Library</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0f8b9d">
@@ -12,7 +12,7 @@
     <main class="auth-shell">
       <section class="auth-brand">
         <h1>Welcome back</h1>
-        <p>Open the correct ULC dashboard for your role and assigned organization.</p>
+        <p>Open the correct MLSU Library dashboard for your role.</p>
       </section>
       <section class="auth-card">
         <h2>Login</h2>
@@ -25,9 +25,11 @@
               <button class="btn btn-muted password-toggle" type="button" data-target="password">Show</button>
             </div>
           </label>
-          <button class="btn btn-primary" type="submit">Login</button>
+          <div class="toolbar">
+            <button class="btn btn-primary" type="submit">Login</button>
+            <a class="btn btn-muted" href="signup.html">Create Account</a>
+          </div>
         </form>
-        <p class="link-line">New organization? <a href="register.html">Start subscription</a></p>
       </section>
     </main>
     <div id="toast" class="toast"></div>

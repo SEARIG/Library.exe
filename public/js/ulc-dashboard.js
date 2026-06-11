@@ -33,7 +33,7 @@ function tenantLabel(profile) {
 
 function renderShell(profile) {
   $("#currentUserRole").textContent = roleLabel(profile.role);
-  $("#dashboardTitle").textContent = profile.name || "ULC Dashboard";
+  $("#dashboardTitle").textContent = profile.name || "MLSU Library Dashboard";
   $("#dashboardSubtitle").textContent = `${tenantLabel(profile)} · ${profile.email || ""}`;
   $("#billingStatus").textContent = profile.billingStatus || profile.status || "active";
 }
@@ -121,7 +121,7 @@ async function refresh() {
 }
 
 function randomBarcode() {
-  return `ULC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  return `MLSU-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 }
 
 async function fetchBookDetails(isbn) {

@@ -1,15 +1,10 @@
-# ULC - Universal Library Cloud
+# MLSU Library Management System
 
-ULC is a Firebase-backed, multi-tenant library SaaS for universities, independent colleges, and private libraries.
+MLSU Library Management System is a Firebase-backed smart library app for students, librarians, and administrators.
 
 ## V1 Scope
 
-- Organization registration for `university`, `independent_college`, and `private_library`.
-- Plan selection for Unlimited or Custom billing.
-- Custom billing formula: `999 + (bookCount * 3) + (studentCount * 3)`.
-- Yearly billing applies a 10% discount.
-- Server-side Razorpay subscription creation with demo fallback when Razorpay env vars are not configured.
-- Server-side organization, subscription, payment, and main-admin creation.
+- Student account creation and role-based access for student, librarian, and admin workflows.
 - Role-aware dashboard entry for:
   - `super_admin`
   - `university_admin`
@@ -25,15 +20,13 @@ ULC is a Firebase-backed, multi-tenant library SaaS for universities, independen
 
 ## Important Files
 
-- `public/index.html` - ULC landing and entry screen.
-- `public/register.html` - organization subscription onboarding.
-- `public/ulc-dashboard.html` - shared role-based ULC dashboard.
-- `public/js/ulc-register.js` - pricing, Razorpay checkout, registration completion.
+- `public/index.html` - MLSU Library landing and entry screen.
+- `public/ulc-dashboard.html` - shared role-based dashboard.
 - `public/js/ulc-dashboard.js` - dashboard actions and external book lookup.
 - `functions/index.js` - callable backend for billing, tenancy, books, people, issue/return/lost/found, email logs, audit logs.
 - `firestore.rules` - strict role and tenant isolation rules.
 
-Legacy MLSU screens remain in `public/*dashboard.html`, `public/signup.html`, and the older dashboard scripts.
+MLSU screens live in `public/*dashboard.html`, `public/signup.html`, and the dashboard scripts.
 
 ## Environment Variables
 
@@ -49,7 +42,7 @@ RESEND_API_KEY=
 EMAIL_FROM=
 ```
 
-If Razorpay variables are missing, registration uses a demo subscription id so local development can continue.
+Razorpay variables are only needed for legacy backend billing experiments and are not part of the MLSU Library landing/signup flow.
 
 ## Local Preview
 
