@@ -5,10 +5,8 @@ const roleLinks = {
   student: [
     ["Dashboard", "student-dashboard.html"],
     ["Scan Book", "scan-book.html"],
-    ["Issued Books", "student-dashboard.html#issuedBooks"],
-    ["Activity", "student-dashboard.html#activityTimeline"],
-    ["Penalties", "student-dashboard.html#penalties"],
     ["Library", "library.html"],
+    ["My Books", "student-dashboard.html#issuedBooks"]
   ],
   librarian: [
     ["Dashboard", "librarian-dashboard.html"],

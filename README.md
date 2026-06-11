@@ -6,25 +6,23 @@ MLSU Library Management System is a Firebase-backed smart library app for studen
 
 - Student account creation and role-based access for student, librarian, and admin workflows.
 - Role-aware dashboard entry for:
-  - `super_admin`
-  - `university_admin`
-  - `college_admin`
-  - `library_admin`
+  - `admin`
   - `librarian`
   - `student`
-- Tenant-scoped book and student/member management.
+- MLSU book and student management.
 - Google Books and Open Library ISBN lookup from the dashboard.
 - Barcode-based issue request, approve/reject, return, lost, and found Cloud Functions.
 - Email event logging plus SendGrid or Resend support.
-- Tenant-aware Firestore security rules.
+- Firestore security rules for MLSU Library roles and workflows.
 
 ## Important Files
 
 - `public/index.html` - MLSU Library landing and entry screen.
-- `public/ulc-dashboard.html` - shared role-based dashboard.
-- `public/js/ulc-dashboard.js` - dashboard actions and external book lookup.
-- `functions/index.js` - callable backend for billing, tenancy, books, people, issue/return/lost/found, email logs, audit logs.
-- `firestore.rules` - strict role and tenant isolation rules.
+- `public/student-dashboard.html` - student issued books, requests, returns, penalties, and activity.
+- `public/librarian-dashboard.html` - librarian book, issue, return, barcode, and import workflows.
+- `public/admin-dashboard.html` - admin users, imports, reports, and notification tools.
+- `functions/index.js` - callable backend experiments and future server-side extensions.
+- `firestore.rules` - strict role and workflow security rules.
 
 MLSU screens live in `public/*dashboard.html`, `public/signup.html`, and the dashboard scripts.
 
@@ -42,7 +40,7 @@ RESEND_API_KEY=
 EMAIL_FROM=
 ```
 
-Razorpay variables are only needed for legacy backend billing experiments and are not part of the MLSU Library landing/signup flow.
+Razorpay variables are not part of the MLSU Library landing/signup flow.
 
 ## Local Preview
 
@@ -73,7 +71,7 @@ Deploy with Firebase CLI after credentials and rules are reviewed:
 firebase deploy --only hosting,functions,firestore:rules
 ```
 
-Firestore composite indexes may be requested for dashboard queries that combine `collectionGroup`, tenant filters, and ordering. Create the index links Firebase reports during testing.
+Firestore composite indexes may be requested for dashboard queries that combine filters and ordering. Create the index links Firebase reports during testing.
 
 ## MLSU Smart Library Management System
 
