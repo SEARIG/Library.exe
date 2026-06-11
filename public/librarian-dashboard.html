@@ -30,6 +30,9 @@
         <article class="metric"><span>Damaged</span><strong id="metricDamagedBooks">0</strong></article>
         <article class="metric"><span>Pending Requests</span><strong id="metricPendingRequests">0</strong></article>
         <article class="metric"><span>New Book Requests</span><strong id="metricNewBookRequests">0</strong></article>
+        <article class="metric metric-action" data-open-modal="penaltyDetailsModal" role="button" tabindex="0">
+          <span>Penalties</span><strong id="metricPenalties">0</strong>
+        </article>
       </section>
 
       <section class="dashboard-grid">
@@ -245,6 +248,34 @@
           <button class="btn btn-muted" data-close-modal type="button">Close</button>
         </div>
         <div id="recentStudents" class="list-stack"></div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="penaltyDetailsModal" role="dialog" aria-modal="true" aria-labelledby="penaltyDetailsTitle">
+      <section class="app-modal">
+        <div class="modal-head">
+          <h2 id="penaltyDetailsTitle">Penalty Details</h2>
+          <button class="btn btn-muted" data-close-modal type="button">Close</button>
+        </div>
+        <section class="admin-metrics compact-metrics">
+          <article class="metric"><span>Total Penalties</span><strong id="penaltyTotalCount">0</strong></article>
+          <article class="metric"><span>Total Unpaid</span><strong id="penaltyUnpaidCount">0</strong></article>
+          <article class="metric"><span>Total Paid</span><strong id="penaltyPaidCount">0</strong></article>
+          <article class="metric"><span>Amount Pending</span><strong id="penaltyPendingAmount">0</strong></article>
+        </section>
+        <div class="toolbar">
+          <label>Filter
+            <select id="penaltyStatusFilter">
+              <option value="all">All</option>
+              <option value="unpaid">Unpaid</option>
+              <option value="paid">Paid</option>
+            </select>
+          </label>
+          <label>Search
+            <input id="penaltySearchInput" placeholder="student, email, book, barcode">
+          </label>
+        </div>
+        <div id="penaltyDetailsList" class="list-stack"></div>
       </section>
     </div>
 

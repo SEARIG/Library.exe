@@ -13,6 +13,8 @@ import {
   wireSignOut
 } from "./app.js";
 import {
+  getUnpaidPenaltySummary,
+  isUnpaidPenaltyRecord,
   returnBook
 } from "./firestore-service.js";
 import {
@@ -49,6 +51,7 @@ let editingBookId = null;
 let editingExistingBook = null;
 let latestBooks = [];
 let latestPendingRequests = [];
+let latestPenalties = [];
 let latestBarcodeDataUrl = "";
 let pendingBookImportRows = [];
 let publisherStream = null;
@@ -392,9 +395,25 @@ async function resolveIssueStudent(issue = {}) {
 
 async function approveRequest(requestId) {
   console.log("Selected requestId:", requestId);
+  const requestRef = doc(db, "issueRequests", requestId);
+  const precheckSnap = await getDoc(requestRef);
+  if (!precheckSnap.exists()) {
+    throw new Error("Issue request not found.");
+  }
+  const precheckData = precheckSnap.data();
+  if (precheckData.status !== "pending") {
+    throw new Error("This request was already processed.");
+  }
+  const penaltySummary = await getUnpaidPenaltySummary(precheckData.studentUid);
+  if (penaltySummary.hasUnpaid) {
+    const error = new Error(`Cannot approve. Student has pending penalty of Rs.${penaltySummary.totalPendingPenalty.toFixed(2)}.`);
+    error.code = "penalty/unpaid";
+    error.totalPendingPenalty = penaltySummary.totalPendingPenalty;
+    throw error;
+  }
+
   let notificationPayload = null;
   const transactionResult = await runTransaction(db, async (transaction) => {
-    const requestRef = doc(db, "issueRequests", requestId);
     const requestSnap = await transaction.get(requestRef);
     if (!requestSnap.exists()) {
       throw new Error("Issue request not found.");
@@ -1969,6 +1988,128 @@ $("#exportBarcodeExcelBtn").addEventListener("click", () => {
   }
 });
 
+function penaltyAmountOf(penalty = {}) {
+  return Number(penalty.remainingAmount ?? penalty.amount ?? penalty.penaltyAmount ?? 0);
+}
+
+function renderPenaltyDetails() {
+  const statusFilter = $("#penaltyStatusFilter")?.value || "all";
+  const search = String($("#penaltySearchInput")?.value || "").trim().toLowerCase();
+  const total = latestPenalties.length;
+  const unpaid = latestPenalties.filter((item) => isUnpaidPenaltyRecord(item.data));
+  const paid = latestPenalties.filter((item) => !isUnpaidPenaltyRecord(item.data));
+  const pendingAmount = unpaid.reduce((sum, item) => sum + Math.max(0, penaltyAmountOf(item.data)), 0);
+
+  const metricMap = {
+    metricPenalties: unpaid.length,
+    penaltyTotalCount: total,
+    penaltyUnpaidCount: unpaid.length,
+    penaltyPaidCount: paid.length,
+    penaltyPendingAmount: `Rs.${pendingAmount.toFixed(2)}`
+  };
+  Object.entries(metricMap).forEach(([id, value]) => {
+    const target = document.getElementById(id);
+    if (target) target.textContent = String(value);
+  });
+
+  const rows = latestPenalties.filter((item) => {
+    const penalty = item.data;
+    const isUnpaid = isUnpaidPenaltyRecord(penalty);
+    if (statusFilter === "unpaid" && !isUnpaid) return false;
+    if (statusFilter === "paid" && isUnpaid) return false;
+    if (!search) return true;
+    return [
+      penalty.studentName,
+      penalty.studentEmail,
+      penalty.studentPhone,
+      penalty.studentUid,
+      penalty.bookTitle,
+      penalty.bookId,
+      penalty.b_id,
+      penalty.bookBarcodeValue
+    ].join(" ").toLowerCase().includes(search);
+  });
+
+  const target = $("#penaltyDetailsList");
+  if (!target) return;
+  if (!rows.length) {
+    renderEmpty(target, "No penalty records found.");
+    return;
+  }
+
+  target.innerHTML = rows
+    .sort((a, b) => timeOf(b.data.createdAt || b.data.returnDate) - timeOf(a.data.createdAt || a.data.returnDate))
+    .map((item) => {
+      const penalty = item.data;
+      const isUnpaid = isUnpaidPenaltyRecord(penalty);
+      const amount = penaltyAmountOf(penalty);
+      return `
+        <article class="list-row penalty-row" data-penalty-id="${escapeHtml(item.id)}">
+          <div>
+            <strong>${escapeHtml(penalty.studentName || "Unknown student")} - Rs.${amount.toFixed(2)}</strong>
+            <span>Email: ${escapeHtml(penalty.studentEmail || "")}</span>
+            <span>Phone: ${escapeHtml(penalty.studentPhone || "")}</span>
+            <span>UID: ${escapeHtml(shortUid(penalty.studentUid || ""))}</span>
+            <span>Book: ${escapeHtml(penalty.bookTitle || penalty.bookId || "")}</span>
+            <span>B_ID: ${escapeHtml(penalty.b_id || penalty.bookId || "")} | Barcode: ${escapeHtml(penalty.bookBarcodeValue || "")}</span>
+            <span>Issue: ${formatDate(penalty.issueDate)} | Due: ${formatDate(penalty.dueDate)} | Return: ${formatDate(penalty.returnDate)}</span>
+            <span>Late Days: ${Number(penalty.lateDays || penalty.daysLate || 0)}</span>
+            <span>Contact Details: ${escapeHtml([penalty.studentEmail, penalty.studentPhone].filter(Boolean).join(" | "))}</span>
+          </div>
+          <div class="row-actions">
+            ${statusBadge(isUnpaid ? "unpaid" : "paid")}
+            <button class="btn btn-primary mark-penalty-paid-btn" data-penalty-id="${escapeHtml(item.id)}" type="button" ${isUnpaid ? "" : "disabled"}>Mark Paid</button>
+            <button class="btn btn-muted view-student-btn" data-student-uid="${escapeHtml(penalty.studentUid || "")}" type="button">View Student</button>
+            <button class="btn btn-muted view-book-btn" data-book-id="${escapeHtml(penalty.b_id || penalty.bookId || "")}" type="button">View Book</button>
+          </div>
+        </article>`;
+    }).join("");
+}
+
+$("#penaltyStatusFilter")?.addEventListener("change", renderPenaltyDetails);
+$("#penaltySearchInput")?.addEventListener("input", renderPenaltyDetails);
+$("#penaltyDetailsList")?.addEventListener("click", async (event) => {
+  const markPaidBtn = event.target.closest(".mark-penalty-paid-btn");
+  const viewStudentBtn = event.target.closest(".view-student-btn");
+  const viewBookBtn = event.target.closest(".view-book-btn");
+
+  if (markPaidBtn) {
+    const penaltyId = markPaidBtn.dataset.penaltyId;
+    const confirmed = await confirmAction("Mark this penalty as paid?");
+    if (!confirmed) return;
+    markPaidBtn.disabled = true;
+    try {
+      await updateDoc(doc(db, "penalties", penaltyId), {
+        paid: true,
+        status: "paid",
+        remainingAmount: 0,
+        paidAt: serverTimestamp(),
+        paidBy: auth.currentUser.uid,
+        updatedAt: serverTimestamp()
+      });
+      showToast("Penalty marked as paid.", "success");
+    } catch (error) {
+      logDetailedError(error);
+      showToast(`${error.code || "error"}: ${error.message}`, "error");
+    } finally {
+      markPaidBtn.disabled = false;
+    }
+    return;
+  }
+
+  if (viewStudentBtn) {
+    const studentUid = viewStudentBtn.dataset.studentUid;
+    showToast(studentUid ? `Student UID: ${studentUid}` : "Student UID not available.", "info");
+    return;
+  }
+
+  if (viewBookBtn) {
+    const bookId = viewBookBtn.dataset.bookId;
+    const book = latestBooks.find((item) => item.id === bookId || item.data.b_id === bookId);
+    showToast(book ? `Book: ${bookTitle(book.data)}` : "Book record not found in loaded list.", book ? "info" : "warning");
+  }
+});
+
 onSnapshot(
   query(collection(db, "issueRequests"), where("status", "==", "pending")),
   (snap) => {
@@ -1978,6 +2119,22 @@ onSnapshot(
     if (pendingMetric) pendingMetric.textContent = String(snap.size);
     if (newRequestMetric) newRequestMetric.textContent = String(snap.size);
     renderPendingRequests();
+  }
+);
+
+onSnapshot(
+  collection(db, "penalties"),
+  (snap) => {
+    latestPenalties = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
+    renderPenaltyDetails();
+  },
+  (error) => {
+    console.error("Penalty details query failed:", {
+      query: "penalties",
+      code: error?.code,
+      message: error?.message
+    });
+    renderEmpty($("#penaltyDetailsList"), "Could not load penalty details.");
   }
 );
 
@@ -2053,6 +2210,8 @@ $("#pendingRequests").addEventListener("click", async (event) => {
     }
     if (error.message === "This request was already processed.") {
       showToast("This request was already processed.", "warning");
+    } else if (error.code === "penalty/unpaid") {
+      showToast(error.message, "warning");
     } else if (error.message.includes("not available")) {
       showToast("This book is already issued or unavailable.", "warning");
     } else {

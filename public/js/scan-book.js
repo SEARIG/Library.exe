@@ -33,6 +33,7 @@ const startCameraBtn = $("#startCameraBtn");
 const stopCameraBtn = $("#stopCameraBtn");
 const manualForm = $("#manualBarcodeForm");
 const issueDialog = $("#issueDialog");
+const penaltyBlockDialog = $("#penaltyBlockDialog");
 const issueForm = $("#issueForm");
 const returnForm = $("#returnBookForm");
 const modeSelect = $("#scanMode");
@@ -119,6 +120,16 @@ function shortUid(uid = "") {
   return `${uid.slice(0, 8)}...${uid.slice(-6)}`;
 }
 
+function showPenaltyBlock(error) {
+  const total = Number(error?.totalPendingPenalty || 0);
+  const totalTarget = $("#pendingPenaltyTotal");
+  if (totalTarget) totalTarget.textContent = `Total pending penalty: Rs.${total.toFixed(2)}`;
+  if (penaltyBlockDialog?.showModal) {
+    penaltyBlockDialog.showModal();
+  }
+  showToast(`Please clear your pending library penalty before requesting another book. Total pending penalty: Rs.${total.toFixed(2)}`, "warning");
+}
+
 manualForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await handleBarcode($("#manualBarcode").value);
@@ -142,13 +153,20 @@ issueForm.addEventListener("submit", async (event) => {
     showToast("Book issue request sent successfully.", "success");
   } catch (error) {
     logDetailedError(error);
-    showToast(error.message, "error");
+    if (error.code === "penalty/unpaid") {
+      showPenaltyBlock(error);
+    } else {
+      showToast(error.message, "error");
+    }
   } finally {
     setLoading(issueForm, false);
   }
 });
 
 $(".dialog-close", issueDialog).addEventListener("click", () => issueDialog.close());
+penaltyBlockDialog?.querySelectorAll(".dialog-close").forEach((button) => {
+  button.addEventListener("click", () => penaltyBlockDialog.close());
+});
 
 returnForm.addEventListener("submit", async (event) => {
   event.preventDefault();

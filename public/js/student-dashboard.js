@@ -1,5 +1,6 @@
 import { db } from "./firebase-config.js";
 import { $, escapeHtml, formatDate, renderEmpty, requireAuth, showToast, statusBadge, wireSignOut } from "./app.js";
+import { isUnpaidPenaltyRecord } from "./firestore-service.js";
 import {
   collection,
   doc,
@@ -56,6 +57,20 @@ function setMetric(id, value) {
 function safeRenderEmpty(id, message) {
   const target = $(id);
   if (target) renderEmpty(target, message);
+}
+
+function setText(id, value) {
+  const target = $(id);
+  if (target) target.textContent = String(value);
+}
+
+function openHashModal() {
+  const id = window.location.hash?.slice(1);
+  if (!id) return;
+  const modal = document.getElementById(id);
+  if (!modal?.classList.contains("modal-backdrop")) return;
+  modal.classList.add("open");
+  document.body.classList.add("modal-open");
 }
 
 function logSectionError(section, error, targetId, message) {
@@ -122,6 +137,7 @@ function renderIssuedBooks(docs) {
     renderEmpty(target, "No active issued books.");
     renderEmpty(dueTarget, "No active due dates.");
     setMetric("#metricStudentDaysLeft", "-");
+    setText("#issuedSummary", "No active issued books.");
     return;
   }
 
@@ -130,6 +146,7 @@ function renderIssuedBooks(docs) {
     .filter((value) => value !== null);
   const nearestDays = remainingValues.length ? Math.min(...remainingValues) : null;
   setMetric("#metricStudentDaysLeft", nearestDays === null ? "-" : nearestDays);
+  setText("#issuedSummary", `${issued.length} active issued book${issued.length === 1 ? "" : "s"}.`);
 
   dueTarget.innerHTML = issued.map((item) => {
     const issue = item.data();
@@ -167,6 +184,9 @@ function renderIssuedBooks(docs) {
 function renderPendingRequests(docs) {
   const target = $("#issueHistory");
   setMetric("#metricStudentRequests", docs.length);
+  setText("#pendingRequestsSummary", docs.length
+    ? `${docs.length} request${docs.length === 1 ? "" : "s"} waiting for librarian review.`
+    : "No pending requests.");
   if (!docs.length) {
     renderEmpty(target, "No pending issue requests.");
     return;
@@ -193,6 +213,7 @@ function renderReturnedBooks(docs) {
   if (!docs.length) {
     renderEmpty(returnTarget, "No returned books yet.");
     renderEmpty(activityTarget, "No activity yet.");
+    renderEmpty($("#activitySummary"), "No recent activity.");
     return;
   }
   const rows = docs
@@ -210,14 +231,22 @@ function renderReturnedBooks(docs) {
     }).join("");
   returnTarget.innerHTML = rows;
   activityTarget.innerHTML = rows;
+  $("#activitySummary").innerHTML = rows;
 }
 
 function renderPenalties(docs) {
   const target = $("#penalties");
-  const totalPenalty = docs.reduce((sum, item) => sum + Number(item.data().amount || 0), 0);
+  const unpaidDocs = docs.filter((item) => isUnpaidPenaltyRecord(item.data()));
+  const totalPenalty = unpaidDocs.reduce((sum, item) => {
+    const penalty = item.data();
+    return sum + Number(penalty.remainingAmount ?? penalty.amount ?? penalty.penaltyAmount ?? 0);
+  }, 0);
   setMetric("#metricStudentPenalty", totalPenalty.toFixed(0));
+  setText("#penaltySummary", totalPenalty > 0
+    ? `Pending penalty due: Rs.${totalPenalty.toFixed(2)}`
+    : "No pending penalties.");
   if (!docs.length) {
-    renderEmpty(target, "No penalties.");
+    renderEmpty(target, "No pending penalties.");
     return;
   }
   target.innerHTML = docs
@@ -227,10 +256,13 @@ function renderPenalties(docs) {
       return `
         <article class="list-row">
           <div>
-            <strong>Rs.${Number(penalty.amount || 0).toFixed(2)}</strong>
-            <span>${penalty.daysLate || 0} late day(s) for ${escapeHtml(penalty.bookId || "")}</span>
+            <strong>${escapeHtml(penalty.bookTitle || penalty.bookId || "Penalty")}</strong>
+            <span>Penalty amount: Rs.${Number(penalty.remainingAmount ?? penalty.amount ?? penalty.penaltyAmount ?? 0).toFixed(2)}</span>
+            <span>Late days: ${penalty.lateDays || penalty.daysLate || 0}</span>
+            <span>Return date: ${formatDate(penalty.returnDate)}</span>
+            <span>Please contact the librarian to clear dues.</span>
           </div>
-          ${statusBadge(penalty.status || "pending")}
+          ${statusBadge(isUnpaidPenaltyRecord(penalty) ? "unpaid" : "paid")}
         </article>`;
     }).join("");
 }
@@ -279,6 +311,8 @@ if (user) {
       "#penalties",
       "Could not load penalty history."
     );
+
+    openHashModal();
   } catch (error) {
     console.error("Student dashboard load failed:", error);
     showToast("Unable to load student dashboard. Please refresh or contact librarian.", "error");

@@ -90,6 +90,25 @@
         </form>
       </div>
     </dialog>
+    <dialog id="penaltyBlockDialog">
+      <div class="dialog-inner">
+        <div class="dialog-top">
+          <div>
+            <h2>Pending Penalty</h2>
+            <p class="link-line">Please clear your pending library penalty before requesting another book.</p>
+          </div>
+          <button class="btn btn-muted dialog-close" type="button" aria-label="Close">X</button>
+        </div>
+        <div class="success-box">
+          <strong id="pendingPenaltyTotal">Total pending penalty: Rs.0.00</strong>
+          <span>Contact the librarian to clear dues and request books again.</span>
+        </div>
+        <div class="toolbar">
+          <a class="btn btn-primary" href="student-dashboard.html#studentPenaltiesModal">View Penalties</a>
+          <button class="btn btn-muted dialog-close" type="button">Close</button>
+        </div>
+      </div>
+    </dialog>
     <div id="toast" class="toast"></div>
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
     <script type="module" src="./js/notifications.js"></script>

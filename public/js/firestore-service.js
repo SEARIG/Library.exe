@@ -21,6 +21,49 @@ const ISSUE_DAYS = 45;
 const PENALTY_PER_DAY = 5;
 const functions = getFunctions(app);
 
+export function isUnpaidPenaltyRecord(penalty = {}) {
+  const amount = Number(penalty.amount ?? penalty.penaltyAmount ?? 0);
+  const hasRemainingAmount = penalty.remainingAmount !== undefined && penalty.remainingAmount !== null;
+  const remainingAmount = Number(penalty.remainingAmount ?? 0);
+  if (remainingAmount > 0) return true;
+  if (hasRemainingAmount && remainingAmount <= 0 && penalty.paid === true && String(penalty.status || "").toLowerCase() === "paid") {
+    return false;
+  }
+  if (penalty.paid === true && String(penalty.status || "").toLowerCase() === "paid") return false;
+  if (amount <= 0) return false;
+  return penalty.paid !== true || String(penalty.status || "").toLowerCase() !== "paid";
+}
+
+export async function getUnpaidPenaltySummary(studentUid) {
+  const cleanUid = String(studentUid || "").trim();
+  if (!cleanUid) {
+    return { hasUnpaid: false, totalPendingPenalty: 0, records: [] };
+  }
+
+  console.log("Checking unpaid penalties for student:", cleanUid);
+  const penaltiesQuery = query(collection(db, "penalties"), where("studentUid", "==", cleanUid));
+  const snap = await getDocs(penaltiesQuery);
+  const records = snap.docs
+    .map((item) => ({ id: item.id, ...item.data() }))
+    .filter(isUnpaidPenaltyRecord);
+  const totalPendingPenalty = records.reduce((sum, penalty) => {
+    const amount = Number(penalty.remainingAmount ?? penalty.amount ?? penalty.penaltyAmount ?? 0);
+    return sum + Math.max(0, amount);
+  }, 0);
+
+  console.log("Unpaid penalty summary:", {
+    studentUid: cleanUid,
+    count: records.length,
+    totalPendingPenalty
+  });
+
+  return {
+    hasUnpaid: records.length > 0,
+    totalPendingPenalty,
+    records
+  };
+}
+
 export function addDays(date, days) {
   const copy = new Date(date);
   copy.setDate(copy.getDate() + days);
@@ -106,6 +149,24 @@ export async function createIssueRequest({ student, book }) {
   }
   if (!book.b_id || !book.barcodeValue) {
     throw new Error("Invalid library book record. Please scan the library barcode sticker.");
+  }
+
+  try {
+    const penaltySummary = await getUnpaidPenaltySummary(auth.currentUser.uid);
+    if (penaltySummary.hasUnpaid) {
+      const error = new Error(`Please clear your pending library penalty before requesting another book. Total pending penalty: Rs.${penaltySummary.totalPendingPenalty.toFixed(2)}`);
+      error.code = "penalty/unpaid";
+      error.totalPendingPenalty = penaltySummary.totalPendingPenalty;
+      throw error;
+    }
+  } catch (error) {
+    if (error.code === "penalty/unpaid") throw error;
+    console.error("Penalty check failed before issue request:", {
+      query: "penalties where studentUid == currentUser.uid",
+      code: error?.code,
+      message: error?.message
+    });
+    throw error;
   }
 
   const issueDate = new Date();
@@ -227,6 +288,7 @@ export async function returnBook(bookId) {
       const daysUsed = Number.isNaN(issueDate.getTime()) ? 0 : daysBetween(issueDate, returnDate);
       const lateDays = Math.max(0, daysUsed - ISSUE_DAYS);
       const penaltyAmount = lateDays * (issue.penaltyPerDay || PENALTY_PER_DAY);
+      const penaltyRef = doc(db, "penalties", issueId);
 
       transaction.update(issueRef, {
         status: "returned",
@@ -234,6 +296,33 @@ export async function returnBook(bookId) {
         returnedAt: serverTimestamp(),
         penaltyAmount
       });
+
+      if (penaltyAmount > 0) {
+        transaction.set(penaltyRef, {
+          penaltyId: penaltyRef.id,
+          issueId,
+          studentUid: issue.studentUid || "",
+          studentName: issue.studentName || "",
+          studentEmail: issue.studentEmail || "",
+          studentPhone: issue.studentPhone || "",
+          bookId: issue.bookId || bookDocId,
+          b_id: issue.b_id || issue.bookId || bookDocId,
+          bookBarcodeValue: issue.bookBarcodeValue || scannedValue,
+          bookTitle: issue.bookTitle || issue.bookId || bookDocId,
+          issueDate: issue.issueDate || null,
+          dueDate: issue.dueDate || null,
+          returnDate: serverTimestamp(),
+          lateDays,
+          daysLate: lateDays,
+          amount: penaltyAmount,
+          penaltyAmount,
+          remainingAmount: penaltyAmount,
+          paid: false,
+          status: "unpaid",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      }
 
       transaction.update(bookRef, {
         status: "available",

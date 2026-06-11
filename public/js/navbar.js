@@ -5,8 +5,12 @@ const roleLinks = {
   student: [
     ["Dashboard", "student-dashboard.html"],
     ["Scan Book", "scan-book.html"],
-    ["Library", "library.html"],
-    ["My Books", "student-dashboard.html#issuedBooks"]
+    ["My Issued Books", "student-dashboard.html#issuedBooksModal"],
+    ["Pending Requests", "student-dashboard.html#pendingRequestsModal"],
+    ["Return History", "student-dashboard.html#returnHistoryModal"],
+    ["Penalties", "student-dashboard.html#studentPenaltiesModal"],
+    ["Activity", "student-dashboard.html#studentActivityModal"],
+    ["Library", "library.html"]
   ],
   librarian: [
     ["Dashboard", "librarian-dashboard.html"],
@@ -83,7 +87,8 @@ export function renderNavbar(currentRole, currentUserData = {}) {
       ${links.map(([label, href]) => `
         <a href="${href}" ${isCurrentLink(currentPath, href) ? 'aria-current="page"' : ""}>${label}</a>
       `).join("")}
-    </nav>`;
+    </nav>
+    <button class="sidebar-signout" id="sidebarSignOutBtn" type="button">Sign Out</button>`;
 
   const toggle = header.querySelector("#navToggle");
   toggle.addEventListener("click", () => {
@@ -104,6 +109,10 @@ export function renderNavbar(currentRole, currentUserData = {}) {
     toggle.setAttribute("aria-expanded", "false");
   });
   header.querySelector("#signOutBtn").addEventListener("click", async () => {
+    await signOut(auth);
+    window.location.href = "login.html";
+  });
+  sidebar.querySelector("#sidebarSignOutBtn")?.addEventListener("click", async () => {
     await signOut(auth);
     window.location.href = "login.html";
   });
