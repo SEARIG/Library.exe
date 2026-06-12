@@ -23,14 +23,15 @@ body {
 }
 
 body,
+.ulc-page,
 .app-page,
 .dashboard-page,
 .library-page,
 .auth-page {
   background:
     linear-gradient(
-      rgba(255,255,255,0.15),
-      rgba(255,255,255,0.20)
+      rgba(255, 255, 255, 0.15),
+      rgba(255, 255, 255, 0.15)
     ),
     url("../assets/library-shelf-bg.jpg") center center / cover fixed no-repeat !important;
   color: #10201b;

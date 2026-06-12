@@ -100,6 +100,7 @@ html {
 }
 
 body,
+.ulc-page,
 .app-page,
 .dashboard-page,
 .library-page,
@@ -108,8 +109,8 @@ body,
   overflow-x: hidden;
   background:
     linear-gradient(
-      rgba(255,255,255,0.15),
-      rgba(255,255,255,0.20)
+      rgba(255, 255, 255, 0.15),
+      rgba(255, 255, 255, 0.15)
     ),
     url("../assets/library-shelf-bg.jpg") center center / cover fixed no-repeat !important;
   color: #10201b;
@@ -691,7 +692,7 @@ canvas {
 .home-page {
   min-height: 100vh;
   background:
-    linear-gradient(rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.82)),
+    linear-gradient(rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0.15)),
     url("../assets/library-shelf-bg.jpg") center center / cover fixed no-repeat !important;
   color: #10201b;
 }
