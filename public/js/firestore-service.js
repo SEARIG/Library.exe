@@ -21,6 +21,27 @@ const ISSUE_DAYS = 45;
 const PENALTY_PER_DAY = 5;
 const functions = getFunctions(app);
 
+export function scheduleApplies(schedule = {}, type = "issue") {
+  if (!schedule?.active) return false;
+  const appliesTo = String(schedule.appliesTo || "both").toLowerCase();
+  return appliesTo === "both" || appliesTo === type;
+}
+
+export function scheduleLabel(schedule = {}) {
+  if (!schedule?.active) return "No active library time slot set.";
+  const startDate = schedule.startDate || "";
+  const endDate = schedule.endDate || "";
+  const dateLabel = startDate && endDate && startDate !== endDate
+    ? `${startDate} to ${endDate}`
+    : startDate || "Until changed";
+  return `${dateLabel}, ${schedule.startTime || "-"} - ${schedule.endTime || "-"}`;
+}
+
+export async function getIssueReturnSchedule() {
+  const snap = await getDoc(doc(db, "librarySettings", "issueReturnSchedule"));
+  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+}
+
 export function isUnpaidPenaltyRecord(penalty = {}) {
   const amount = Number(penalty.amount ?? penalty.penaltyAmount ?? 0);
   const hasRemainingAmount = penalty.remainingAmount !== undefined && penalty.remainingAmount !== null;
@@ -210,6 +231,146 @@ export async function createIssueRequest({ student, book }) {
     issueDate,
     dueDate
   };
+}
+
+export async function createCatalogIssueRequest({ student, book, confirmationChecked = true }) {
+  if (!auth.currentUser) throw new Error("Login is required.");
+  if (auth.currentUser.uid !== student.uid) {
+    throw new Error("You can create issue requests only for your own account.");
+  }
+  if (!confirmationChecked) {
+    throw new Error("Please confirm the selected library time.");
+  }
+
+  const bookDocId = book.b_id || book.bookId || book.id;
+  if (!bookDocId) throw new Error("Invalid book record.");
+
+  const schedule = await getIssueReturnSchedule();
+  if (!scheduleApplies(schedule, "issue")) {
+    throw new Error("Issue request time is not active. Please contact the librarian.");
+  }
+
+  const [freshBookSnap, pendingSnap, penaltySummary] = await Promise.all([
+    getDoc(doc(db, "books", bookDocId)),
+    getDocs(query(
+      collection(db, "issueRequests"),
+      where("studentUid", "==", auth.currentUser.uid),
+      where("status", "==", "pending")
+    )),
+    getUnpaidPenaltySummary(auth.currentUser.uid)
+  ]);
+
+  if (!freshBookSnap.exists()) throw new Error("Book record not found.");
+  const freshBook = { id: freshBookSnap.id, ...freshBookSnap.data() };
+  if (freshBook.status !== "available") {
+    throw new Error("This book is not available.");
+  }
+  if (penaltySummary.hasUnpaid) {
+    const error = new Error(`Please clear your pending library penalty before requesting another book. Total pending penalty: Rs.${penaltySummary.totalPendingPenalty.toFixed(2)}`);
+    error.code = "penalty/unpaid";
+    error.totalPendingPenalty = penaltySummary.totalPendingPenalty;
+    throw error;
+  }
+  const duplicate = pendingSnap.docs.some((item) => {
+    const request = item.data();
+    return (request.b_id || request.bookId) === (freshBook.b_id || freshBookSnap.id);
+  });
+  if (duplicate) {
+    throw new Error("You already have a pending request for this book.");
+  }
+
+  const issueDate = new Date();
+  const dueDate = addDays(issueDate, ISSUE_DAYS);
+  const ref = doc(collection(db, "issueRequests"));
+  const payload = {
+    type: "issue",
+    requestId: ref.id,
+    studentUid: auth.currentUser.uid,
+    studentName: student.name || auth.currentUser.displayName || "",
+    studentEmail: student.email || auth.currentUser.email || "",
+    studentPhone: student.phone || "",
+    rollNumber: student.rollNumber || "",
+    bookId: freshBook.b_id || freshBookSnap.id,
+    b_id: freshBook.b_id || freshBookSnap.id,
+    bookTitle: freshBook.bname || freshBook.title || "",
+    barcodeValue: freshBook.barcodeValue || "",
+    bookBarcodeValue: freshBook.barcodeValue || "",
+    bookImage: freshBook.imageUrl || "",
+    subject: freshBook.subject || "",
+    category: freshBook.category || "",
+    blegal_num: freshBook.blegal_num || "",
+    status: "pending",
+    issueDate: Timestamp.fromDate(issueDate),
+    dueDate: Timestamp.fromDate(dueDate),
+    requestedAt: serverTimestamp(),
+    createdAt: serverTimestamp(),
+    preferredSlot: scheduleLabel(schedule),
+    scheduleSnapshot: schedule || null,
+    confirmationChecked: true,
+    source: "library_catalog",
+    reviewedBy: null,
+    reviewedAt: null
+  };
+  console.log("Catalog issue request payload:", payload);
+  await setDoc(ref, payload);
+  return { requestId: ref.id, payload };
+}
+
+export async function createReturnRequest({ student, issue, confirmationChecked = true }) {
+  if (!auth.currentUser) throw new Error("Login is required.");
+  if (auth.currentUser.uid !== student.uid) {
+    throw new Error("You can create return requests only for your own account.");
+  }
+  if (!confirmationChecked) {
+    throw new Error("Please confirm the selected library time.");
+  }
+  if (!issue?.issueId && !issue?.id) throw new Error("Invalid issued book record.");
+
+  const schedule = await getIssueReturnSchedule();
+  if (!scheduleApplies(schedule, "return")) {
+    throw new Error("Return request time is not active. Please contact the librarian.");
+  }
+
+  const issueId = issue.issueId || issue.id;
+  const pendingSnap = await getDocs(query(
+    collection(db, "returnRequests"),
+    where("studentUid", "==", auth.currentUser.uid),
+    where("status", "==", "pending")
+  ));
+  const duplicate = pendingSnap.docs.some((item) => item.data().currentIssueId === issueId);
+  if (duplicate) throw new Error("You already have a pending return request for this book.");
+
+  const issueDate = issue.issueDate?.toDate ? issue.issueDate.toDate() : new Date(issue.issueDate);
+  const penalty = Number.isNaN(issueDate.getTime())
+    ? { overdueDays: 0, penaltyAmount: 0 }
+    : calculatePenalty(issueDate, new Date());
+  const ref = doc(collection(db, "returnRequests"));
+  const payload = {
+    type: "return",
+    requestId: ref.id,
+    studentUid: auth.currentUser.uid,
+    studentName: student.name || auth.currentUser.displayName || "",
+    studentEmail: student.email || auth.currentUser.email || "",
+    studentPhone: student.phone || "",
+    bookId: issue.bookId || issue.b_id || "",
+    b_id: issue.b_id || issue.bookId || "",
+    bookTitle: issue.bookTitle || issue.bookId || "",
+    barcodeValue: issue.bookBarcodeValue || issue.barcodeValue || "",
+    bookBarcodeValue: issue.bookBarcodeValue || issue.barcodeValue || "",
+    currentIssueId: issueId,
+    status: "pending",
+    requestedAt: serverTimestamp(),
+    createdAt: serverTimestamp(),
+    preferredSlot: scheduleLabel(schedule),
+    scheduleSnapshot: schedule || null,
+    estimatedPenalty: penalty.penaltyAmount || 0,
+    confirmationChecked: true,
+    reviewedBy: null,
+    reviewedAt: null
+  };
+  console.log("Return request payload:", payload);
+  await setDoc(ref, payload);
+  return { requestId: ref.id, payload };
 }
 
 export async function approveIssue(requestId) {

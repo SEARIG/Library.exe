@@ -1,4 +1,12 @@
-import { db } from "./firebase-config.js";
+import { auth, db } from "./firebase-config.js";
+import {
+  createCatalogIssueRequest,
+  getIssueReturnSchedule,
+  getStudentProfile,
+  scheduleApplies,
+  scheduleLabel
+} from "./firestore-service.js";
+import { sendEmailNotification } from "./notifications.js";
 import {
   collection,
   onSnapshot,
@@ -6,15 +14,23 @@ import {
   query
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 import {
+  onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import {
   $,
   escapeHtml,
   formatDate,
-  renderEmpty
+  renderEmpty,
+  showToast
 } from "./app.js";
 
 const pageSize = 25;
 let allBooks = [];
 let currentPage = 1;
+let currentUser = null;
+let selectedBook = null;
+let selectedStudent = null;
+let activeSchedule = null;
 
 const searchInput = $("#librarySearch");
 const categoryFilter = $("#libraryCategoryFilter");
@@ -22,6 +38,10 @@ const availabilityFilter = $("#libraryAvailabilityFilter");
 const booksTarget = $("#libraryBooks");
 const summaryTarget = $("#librarySummary");
 const paginationTarget = $("#libraryPagination");
+const authDialog = $("#catalogAuthDialog");
+const issueDialog = $("#catalogIssueDialog");
+const issueDetails = $("#catalogIssueDetails");
+const issueForm = $("#catalogIssueForm");
 
 function bookTitle(book = {}) {
   return book.bname || book.title || book.bookName || "Untitled book";
@@ -106,11 +126,54 @@ function renderLibrary() {
             <p><strong>Availability:</strong> ${escapeHtml(availabilityLabel(data.status))}</p>
             <p><strong>Updated:</strong> ${data.updatedAt ? escapeHtml(formatDate(data.updatedAt)) : "-"}</p>
           </details>
+          <button class="btn ${status === "available" ? "btn-primary" : "btn-muted"} request-issue-btn" type="button" data-book-id="${escapeHtml(id)}" ${status === "available" ? "" : "disabled"}>
+            ${status === "available" ? "Request Issue" : "Not Available"}
+          </button>
         </article>`;
     }).join("");
   }
 
   renderPagination(totalPages);
+}
+
+function renderIssueDialog(book) {
+  const scheduleText = scheduleLabel(activeSchedule);
+  issueDetails.innerHTML = `
+    <article class="list-row">
+      <div>
+        <strong>${escapeHtml(bookTitle(book.data))}</strong>
+        <span>Author: ${escapeHtml(book.data.author || "Author not listed")}</span>
+        <span>B_ID: ${escapeHtml(book.data.b_id || book.id)}</span>
+        <span>Barcode: ${escapeHtml(book.data.barcodeValue || "-")}</span>
+        <span>Availability: ${escapeHtml(availabilityLabel(book.data.status))}</span>
+        <span>Library time: ${escapeHtml(scheduleText)}</span>
+        <span>Student: ${escapeHtml(selectedStudent?.name || currentUser?.email || "")}</span>
+        <span>Email: ${escapeHtml(selectedStudent?.email || currentUser?.email || "")}</span>
+      </div>
+    </article>`;
+  $("#catalogIssueConfirm").checked = false;
+}
+
+async function openIssueRequest(bookId) {
+  const book = allBooks.find((item) => item.id === bookId);
+  if (!book) return;
+  if (!currentUser) {
+    authDialog.showModal();
+    return;
+  }
+  activeSchedule = await getIssueReturnSchedule();
+  if (!scheduleApplies(activeSchedule, "issue")) {
+    showToast("Issue request time is not active. Please contact the librarian.", "warning");
+    return;
+  }
+  selectedStudent = await getStudentProfile(currentUser.uid);
+  if (!selectedStudent) {
+    showToast("Student profile not found. Complete signup before requesting books.", "error");
+    return;
+  }
+  selectedBook = book;
+  renderIssueDialog(book);
+  issueDialog.showModal();
 }
 
 function renderPagination(totalPages) {
@@ -145,6 +208,61 @@ paginationTarget.addEventListener("click", (event) => {
   currentPage = Number(button.dataset.page);
   renderLibrary();
   window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
+booksTarget.addEventListener("click", (event) => {
+  const button = event.target.closest(".request-issue-btn");
+  if (!button || button.disabled) return;
+  openIssueRequest(button.dataset.bookId).catch((error) => {
+    console.error("Open catalog issue request failed:", error);
+    showToast(error.message || "Could not open issue request.", "error");
+  });
+});
+
+document.querySelectorAll("dialog .dialog-close").forEach((button) => {
+  button.addEventListener("click", () => button.closest("dialog")?.close());
+});
+
+issueForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!selectedBook) return;
+  const button = issueForm.querySelector("button[type='submit']");
+  button.disabled = true;
+  try {
+    const result = await createCatalogIssueRequest({
+      student: selectedStudent,
+      book: { id: selectedBook.id, ...selectedBook.data },
+      confirmationChecked: $("#catalogIssueConfirm").checked
+    });
+    try {
+      await sendEmailNotification("Issue Request Submitted", {
+        studentName: selectedStudent.name || currentUser.email,
+        studentEmail: selectedStudent.email || currentUser.email,
+        bookTitle: result.payload.bookTitle,
+        issueDate: result.payload.issueDate,
+        dueDate: result.payload.dueDate,
+        returnDate: "-",
+        penaltyAmount: 0
+      });
+    } catch (emailError) {
+      console.error("Issue request submitted email failed:", emailError);
+    }
+    issueDialog.close();
+    showToast("Issue request submitted.", "success");
+  } catch (error) {
+    console.error("Catalog issue request failed:", {
+      code: error?.code,
+      message: error?.message,
+      stack: error?.stack
+    });
+    showToast(error.message || "Issue request failed.", error.code === "penalty/unpaid" ? "warning" : "error");
+  } finally {
+    button.disabled = false;
+  }
+});
+
+onAuthStateChanged(auth, (user) => {
+  currentUser = user;
 });
 
 onSnapshot(

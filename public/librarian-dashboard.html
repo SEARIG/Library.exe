@@ -44,13 +44,15 @@
             <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Import Books</button>
             <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Export Books</button>
             <button class="btn btn-muted" data-open-modal="barcodeManagerModal" type="button">Barcode Manager</button>
+            <button class="btn btn-muted" data-open-modal="timeSlotModal" type="button">Set Issue / Return Time</button>
             <button class="btn btn-muted" data-open-modal="returnHistoryModal" type="button">Return History</button>
             <button class="btn btn-muted" data-open-modal="librarianReportsModal" type="button">Reports</button>
           </div>
+          <div id="activeScheduleCard" class="success-box">Loading issue/return timing...</div>
         </article>
 
         <article class="panel span-6 librarian-pending">
-          <h2>Pending Requests</h2>
+          <h2>Pending Issue Requests</h2>
           <div id="pendingRequests" class="list-stack"></div>
         </article>
 
@@ -65,6 +67,11 @@
             <label>Library Barcode<input id="quickReturnBookId" placeholder="BOOK-1" required></label>
             <button class="btn btn-primary" type="submit">Return Book</button>
           </form>
+        </article>
+
+        <article class="panel span-6">
+          <h2>Pending Return Requests</h2>
+          <div id="pendingReturnRequests" class="list-stack"></div>
         </article>
 
         <article class="panel span-6 librarian-active">
@@ -188,6 +195,55 @@
         <div id="booksTable" class="table-scroll"></div>
       </section>
     </div>
+
+    <div class="modal-backdrop" id="timeSlotModal" role="dialog" aria-modal="true" aria-labelledby="timeSlotTitle">
+      <section class="app-modal">
+        <div class="modal-head">
+          <h2 id="timeSlotTitle">Library Time Slots</h2>
+          <button class="btn btn-muted" data-close-modal type="button">Close</button>
+        </div>
+        <form id="timeSlotForm" class="form-grid">
+          <label>Start Date<input id="slotStartDate" type="date" required></label>
+          <label>End Date<input id="slotEndDate" type="date" required></label>
+          <label>Start Time<input id="slotStartTime" type="time" required></label>
+          <label>End Time<input id="slotEndTime" type="time" required></label>
+          <label>Applies To
+            <select id="slotAppliesTo">
+              <option value="issue">Issue</option>
+              <option value="return">Return</option>
+              <option value="both" selected>Both</option>
+            </select>
+          </label>
+          <label>Repeat
+            <select id="slotRepeatMode">
+              <option value="tomorrow">Tomorrow only</option>
+              <option value="week">Whole week</option>
+              <option value="untilChanged" selected>Until changed</option>
+            </select>
+          </label>
+          <label>Max Students Per Slot<input id="slotMaxStudents" type="number" min="1" value="20"></label>
+          <label>Notes<input id="slotNotes" placeholder="Come during lunch break"></label>
+          <button class="btn btn-primary" type="submit">Save Time Slot</button>
+        </form>
+      </section>
+    </div>
+
+    <dialog id="confirmReturnRequestDialog">
+      <div class="dialog-inner">
+        <div class="dialog-top">
+          <div>
+            <h2>Confirm Return Request</h2>
+            <p class="link-line">Scan or enter the matching library barcode.</p>
+          </div>
+          <button class="btn btn-muted dialog-close" type="button" aria-label="Close">X</button>
+        </div>
+        <div id="confirmReturnRequestDetails" class="list-stack"></div>
+        <form id="confirmReturnRequestForm" class="form-grid">
+          <label>Library Barcode<input id="confirmReturnBarcode" placeholder="BOOK-1" required></label>
+          <button class="btn btn-primary" type="submit">Confirm Return</button>
+        </form>
+      </div>
+    </dialog>
 
     <div class="modal-backdrop" id="barcodeManagerModal" role="dialog" aria-modal="true" aria-labelledby="barcodeManagerTitle">
       <section class="app-modal">

@@ -1,6 +1,14 @@
 import { db } from "./firebase-config.js";
 import { $, escapeHtml, formatDate, renderEmpty, requireAuth, showToast, statusBadge, wireSignOut } from "./app.js";
-import { isUnpaidPenaltyRecord } from "./firestore-service.js";
+import { sendEmailNotification } from "./notifications.js";
+import {
+  calculatePenalty,
+  createReturnRequest,
+  getIssueReturnSchedule,
+  isUnpaidPenaltyRecord,
+  scheduleApplies,
+  scheduleLabel
+} from "./firestore-service.js";
 import {
   collection,
   doc,
@@ -21,6 +29,9 @@ try {
 
 const user = session?.user;
 const userProfile = session?.profile || {};
+let latestStudent = {};
+let latestIssuedIssues = [];
+let selectedReturnIssue = null;
 
 function timeOf(value) {
   if (!value) return 0;
@@ -93,6 +104,7 @@ function renderProfile(student = {}) {
     year: userProfile.year || ""
   };
   const profile = { ...fallback, ...student };
+  latestStudent = profile;
   const target = $("#profilePanel");
   if (!target) return;
   target.innerHTML = `
@@ -131,6 +143,7 @@ function renderIssuedBooks(docs) {
   const target = $("#issuedBooks");
   const dueTarget = $("#dueCountdown");
   const issued = docs.sort((a, b) => timeOf(b.data().issueDate) - timeOf(a.data().issueDate));
+  latestIssuedIssues = issued.map((item) => ({ id: item.id, ...item.data() }));
   setMetric("#metricStudentIssued", issued.length);
 
   if (!issued.length) {
@@ -176,7 +189,10 @@ function renderIssuedBooks(docs) {
           <span>Due Date: ${formatDate(issue.dueDate)}</span>
           <span>${isOverdue ? `${Math.abs(remaining)} day(s) overdue` : `${remaining ?? "-"} day(s) remaining`}</span>
         </div>
-        ${isOverdue ? statusBadge("overdue") : statusBadge(issue.status)}
+        <div class="row-actions">
+          ${isOverdue ? statusBadge("overdue") : statusBadge(issue.status)}
+          <button class="btn btn-primary request-return-btn" data-issue-id="${escapeHtml(item.id)}" type="button">Request Return</button>
+        </div>
       </article>`;
   }).join("");
 }
@@ -200,6 +216,32 @@ function renderPendingRequests(docs) {
           <div>
             <strong>${escapeHtml(request.bookTitle || request.bookId || "Issue request")}</strong>
             <span>Requested ${formatDate(request.createdAt)} | Due ${formatDate(request.dueDate)}</span>
+          </div>
+          ${statusBadge(request.status)}
+        </article>`;
+    }).join("");
+}
+
+function renderReturnRequests(docs) {
+  const target = $("#returnRequests");
+  setText("#returnRequestsSummary", docs.length
+    ? `${docs.length} return request${docs.length === 1 ? "" : "s"} waiting for librarian confirmation.`
+    : "No pending return requests.");
+  if (!docs.length) {
+    renderEmpty(target, "No pending return requests.");
+    return;
+  }
+  target.innerHTML = docs
+    .sort((a, b) => timeOf(b.data().requestedAt || b.data().createdAt) - timeOf(a.data().requestedAt || a.data().createdAt))
+    .map((item) => {
+      const request = item.data();
+      return `
+        <article class="list-row">
+          <div>
+            <strong>${escapeHtml(request.bookTitle || request.bookId || "Return request")}</strong>
+            <span>Requested ${formatDate(request.requestedAt || request.createdAt)}</span>
+            <span>Slot: ${escapeHtml(request.preferredSlot || "-")}</span>
+            <span>Estimated penalty: Rs.${Number(request.estimatedPenalty || 0).toFixed(2)}</span>
           </div>
           ${statusBadge(request.status)}
         </article>`;
@@ -305,6 +347,14 @@ if (user) {
     );
 
     listenToQuery(
+      "return requests query",
+      query(collection(db, "returnRequests"), where("studentUid", "==", user.uid), where("status", "==", "pending")),
+      (snap) => renderReturnRequests(snap.docs),
+      "#returnRequests",
+      "Could not load return requests."
+    );
+
+    listenToQuery(
       "penalty history query",
       query(collection(db, "penalties"), where("studentUid", "==", user.uid)),
       (snap) => renderPenalties(snap.docs),
@@ -318,3 +368,79 @@ if (user) {
     showToast("Unable to load student dashboard. Please refresh or contact librarian.", "error");
   }
 }
+
+$("#issuedBooks")?.addEventListener("click", async (event) => {
+  const button = event.target.closest(".request-return-btn");
+  if (!button) return;
+  selectedReturnIssue = latestIssuedIssues.find((issue) => issue.id === button.dataset.issueId || issue.issueId === button.dataset.issueId);
+  if (!selectedReturnIssue) return;
+  try {
+    const schedule = await getIssueReturnSchedule();
+    if (!scheduleApplies(schedule, "return")) {
+      showToast("Return request time is not active. Please contact the librarian.", "warning");
+      return;
+    }
+    const issueDate = selectedReturnIssue.issueDate?.toDate ? selectedReturnIssue.issueDate.toDate() : new Date(selectedReturnIssue.issueDate);
+    const penalty = Number.isNaN(issueDate.getTime())
+      ? { penaltyAmount: 0 }
+      : calculatePenalty(issueDate, new Date());
+    $("#returnRequestDetails").innerHTML = `
+      <article class="list-row">
+        <div>
+          <strong>${escapeHtml(selectedReturnIssue.bookTitle || selectedReturnIssue.bookId || "Issued book")}</strong>
+          <span>B_ID: ${escapeHtml(selectedReturnIssue.b_id || selectedReturnIssue.bookId || "")}</span>
+          <span>Due date: ${formatDate(selectedReturnIssue.dueDate)}</span>
+          <span>Current penalty: Rs.${Number(penalty.penaltyAmount || 0).toFixed(2)}</span>
+          <span>Librarian return time: ${escapeHtml(scheduleLabel(schedule))}</span>
+        </div>
+      </article>`;
+    $("#returnRequestConfirm").checked = false;
+    $("#returnRequestDialog").showModal();
+  } catch (error) {
+    console.error("Open return request failed:", error);
+    showToast(error.message || "Could not open return request.", "error");
+  }
+});
+
+$("#returnRequestDialog")?.querySelector(".dialog-close")?.addEventListener("click", () => {
+  $("#returnRequestDialog").close();
+});
+
+$("#returnRequestForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!selectedReturnIssue) return;
+  const button = event.target.querySelector("button[type='submit']");
+  button.disabled = true;
+  try {
+    const result = await createReturnRequest({
+      student: latestStudent,
+      issue: selectedReturnIssue,
+      confirmationChecked: $("#returnRequestConfirm").checked
+    });
+    try {
+      await sendEmailNotification("Return Request Submitted", {
+        studentName: latestStudent.name || user.email,
+        studentEmail: latestStudent.email || user.email,
+        bookTitle: result.payload.bookTitle,
+        issueDate: selectedReturnIssue.issueDate,
+        dueDate: selectedReturnIssue.dueDate,
+        returnDate: "-",
+        penaltyAmount: result.payload.estimatedPenalty || 0
+      });
+    } catch (emailError) {
+      console.error("Return request submitted email failed:", emailError);
+    }
+    $("#returnRequestDialog").close();
+    showToast("Return request submitted.", "success");
+    console.log("Return request submitted:", result);
+  } catch (error) {
+    console.error("Return request submit failed:", {
+      code: error?.code,
+      message: error?.message,
+      stack: error?.stack
+    });
+    showToast(error.message || "Return request failed.", "error");
+  } finally {
+    button.disabled = false;
+  }
+});

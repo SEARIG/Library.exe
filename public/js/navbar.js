@@ -4,13 +4,14 @@ import { signOut } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-aut
 const roleLinks = {
   student: [
     ["Dashboard", "student-dashboard.html"],
+    ["Browse Library", "library.html"],
     ["Scan Book", "scan-book.html"],
     ["My Issued Books", "student-dashboard.html#issuedBooksModal"],
     ["Pending Requests", "student-dashboard.html#pendingRequestsModal"],
+    ["Return Requests", "student-dashboard.html#returnRequestsModal"],
     ["Return History", "student-dashboard.html#returnHistoryModal"],
     ["Penalties", "student-dashboard.html#studentPenaltiesModal"],
-    ["Activity", "student-dashboard.html#studentActivityModal"],
-    ["Library", "library.html"]
+    ["Activity", "student-dashboard.html#studentActivityModal"]
   ],
   librarian: [
     ["Dashboard", "librarian-dashboard.html"],

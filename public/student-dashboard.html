@@ -43,7 +43,7 @@
           <button class="btn btn-muted" data-open-modal="issuedBooksModal" type="button">View My Issued Books</button>
         </article>
         <article class="panel span-4">
-          <h2>Pending Requests</h2>
+          <h2>My Issue Requests</h2>
           <div id="pendingRequestsSummary" class="summary-card-text">0 pending requests.</div>
           <button class="btn btn-muted" data-open-modal="pendingRequestsModal" type="button">View Pending Requests</button>
         </article>
@@ -51,6 +51,11 @@
           <h2>Penalty Due</h2>
           <div id="penaltySummary" class="summary-card-text">No pending penalties.</div>
           <button class="btn btn-muted" data-open-modal="studentPenaltiesModal" type="button">View Penalties</button>
+        </article>
+        <article class="panel span-6">
+          <h2>My Return Requests</h2>
+          <div id="returnRequestsSummary" class="summary-card-text">0 pending return requests.</div>
+          <button class="btn btn-muted" data-open-modal="returnRequestsModal" type="button">View Return Requests</button>
         </article>
         <article class="panel span-6">
           <h2>Due Timer / Days Left</h2>
@@ -90,6 +95,15 @@
         <div id="returnHistory" class="list-stack"></div>
       </section>
     </div>
+    <div class="modal-backdrop" id="returnRequestsModal" role="dialog" aria-modal="true" aria-labelledby="returnRequestsModalTitle">
+      <section class="app-modal">
+        <div class="modal-head">
+          <h2 id="returnRequestsModalTitle">Return Requests</h2>
+          <button class="btn btn-muted" data-close-modal type="button">Close</button>
+        </div>
+        <div id="returnRequests" class="list-stack"></div>
+      </section>
+    </div>
     <div class="modal-backdrop" id="studentPenaltiesModal" role="dialog" aria-modal="true" aria-labelledby="studentPenaltiesModalTitle">
       <section class="app-modal">
         <div class="modal-head">
@@ -109,7 +123,27 @@
         <div id="activityTimeline" class="list-stack"></div>
       </section>
     </div>
+    <dialog id="returnRequestDialog">
+      <div class="dialog-inner">
+        <div class="dialog-top">
+          <div>
+            <h2>Return Request</h2>
+            <p class="link-line">The book is returned only after librarian confirmation.</p>
+          </div>
+          <button class="btn btn-muted dialog-close" type="button" aria-label="Close">X</button>
+        </div>
+        <div id="returnRequestDetails" class="list-stack"></div>
+        <form id="returnRequestForm" class="form-grid">
+          <label class="checkbox">
+            <input id="returnRequestConfirm" type="checkbox" required>
+            <span>I will return this book during the selected library time.</span>
+          </label>
+          <button class="btn btn-primary" type="submit">Submit Return Request</button>
+        </form>
+      </div>
+    </dialog>
     <div id="toast" class="toast"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
     <script type="module" src="./js/student-dashboard.js"></script>
   </body>
 </html>

@@ -14,8 +14,10 @@ import {
 } from "./app.js";
 import {
   getUnpaidPenaltySummary,
+  getIssueReturnSchedule,
   isUnpaidPenaltyRecord,
-  returnBook
+  returnBook,
+  scheduleLabel
 } from "./firestore-service.js";
 import {
   EMAILJS_SETUP_MESSAGE,
@@ -51,8 +53,10 @@ let editingBookId = null;
 let editingExistingBook = null;
 let latestBooks = [];
 let latestPendingRequests = [];
+let latestReturnRequests = [];
 let latestPenalties = [];
 let latestBarcodeDataUrl = "";
+let selectedReturnRequest = null;
 let pendingBookImportRows = [];
 let publisherStream = null;
 let publisherScanTimer = null;
@@ -545,6 +549,7 @@ async function approveRequest(requestId) {
 
 async function rejectRequest(requestId) {
   console.log("Selected requestId:", requestId);
+  let rejectedRequest = null;
   await runTransaction(db, async (transaction) => {
     const requestRef = doc(db, "issueRequests", requestId);
     const requestSnap = await transaction.get(requestRef);
@@ -553,6 +558,7 @@ async function rejectRequest(requestId) {
     }
 
     const requestData = requestSnap.data();
+    rejectedRequest = requestData;
     console.log("Issue request data:", requestData);
     console.log("Book ID fields:", {
       b_id: requestData.b_id,
@@ -572,6 +578,7 @@ async function rejectRequest(requestId) {
     console.log("Updating issue request:", { requestId, requestUpdate });
     transaction.update(requestRef, requestUpdate);
   });
+  return rejectedRequest;
 }
 
 function setNextBookId(lastId = 0) {
@@ -1988,6 +1995,103 @@ $("#exportBarcodeExcelBtn").addEventListener("click", () => {
   }
 });
 
+function setDefaultSlotDates() {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const weekEnd = new Date(tomorrow);
+  weekEnd.setDate(weekEnd.getDate() + 6);
+  const toInputDate = (date) => date.toISOString().slice(0, 10);
+  if (!$("#slotStartDate").value) $("#slotStartDate").value = toInputDate(tomorrow);
+  if (!$("#slotEndDate").value) $("#slotEndDate").value = toInputDate(weekEnd);
+  if (!$("#slotStartTime").value) $("#slotStartTime").value = "12:30";
+  if (!$("#slotEndTime").value) $("#slotEndTime").value = "14:00";
+}
+
+function renderActiveSchedule(schedule) {
+  const target = $("#activeScheduleCard");
+  if (!target) return;
+  if (!schedule?.active) {
+    target.innerHTML = `<strong>No active issue/return time set.</strong><span>Use Set Issue / Return Time to allow scheduled requests.</span>`;
+    return;
+  }
+  target.innerHTML = `
+    <strong>Issue/Return allowed: ${escapeHtml(schedule.startTime || "-")} - ${escapeHtml(schedule.endTime || "-")}</strong>
+    <span>${escapeHtml(scheduleLabel(schedule))}</span>
+    <span>Applies to: ${escapeHtml(schedule.appliesTo || "both")} | Max students: ${Number(schedule.maxStudentsPerSlot || 0)}</span>
+    ${schedule.notes ? `<span>${escapeHtml(schedule.notes)}</span>` : ""}`;
+}
+
+$("#slotRepeatMode")?.addEventListener("change", () => {
+  const mode = $("#slotRepeatMode").value;
+  const start = $("#slotStartDate").value ? new Date($("#slotStartDate").value) : new Date();
+  $("#slotEndDate").required = mode !== "untilChanged";
+  if (mode === "tomorrow") {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const value = tomorrow.toISOString().slice(0, 10);
+    $("#slotStartDate").value = value;
+    $("#slotEndDate").value = value;
+  } else if (mode === "week") {
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    $("#slotEndDate").value = end.toISOString().slice(0, 10);
+  } else if (mode === "untilChanged") {
+    $("#slotEndDate").value = "";
+    $("#slotEndDate").required = false;
+  }
+});
+
+$("#timeSlotForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  setLoading(event.target, true);
+  try {
+    const repeatMode = $("#slotRepeatMode").value;
+    const payload = {
+      active: true,
+      startDate: $("#slotStartDate").value,
+      endDate: repeatMode === "untilChanged" ? "" : $("#slotEndDate").value,
+      startTime: $("#slotStartTime").value,
+      endTime: $("#slotEndTime").value,
+      appliesTo: $("#slotAppliesTo").value,
+      repeatMode,
+      maxStudentsPerSlot: Number($("#slotMaxStudents").value || 20),
+      notes: $("#slotNotes").value.trim(),
+      updatedAt: serverTimestamp(),
+      updatedBy: auth.currentUser.uid
+    };
+    await setDoc(doc(db, "librarySettings", "issueReturnSchedule"), payload, { merge: true });
+    showToast("Issue/return time slot saved.", "success");
+  } catch (error) {
+    logDetailedError(error);
+    showToast(error.message || "Could not save time slot.", "error");
+  } finally {
+    setLoading(event.target, false);
+  }
+});
+
+setDefaultSlotDates();
+
+onSnapshot(
+  doc(db, "librarySettings", "issueReturnSchedule"),
+  (snap) => {
+    const schedule = snap.exists() ? snap.data() : null;
+    renderActiveSchedule(schedule);
+    if (!schedule) return;
+    $("#slotStartDate").value = schedule.startDate || $("#slotStartDate").value;
+    $("#slotEndDate").value = schedule.endDate || "";
+    $("#slotStartTime").value = schedule.startTime || $("#slotStartTime").value;
+    $("#slotEndTime").value = schedule.endTime || $("#slotEndTime").value;
+    $("#slotAppliesTo").value = schedule.appliesTo || "both";
+    $("#slotRepeatMode").value = schedule.repeatMode || "untilChanged";
+    $("#slotMaxStudents").value = schedule.maxStudentsPerSlot || 20;
+    $("#slotNotes").value = schedule.notes || "";
+  },
+  (error) => {
+    console.error("Issue/return schedule load failed:", error);
+    renderActiveSchedule(null);
+  }
+);
+
 function penaltyAmountOf(penalty = {}) {
   return Number(penalty.remainingAmount ?? penalty.amount ?? penalty.penaltyAmount ?? 0);
 }
@@ -2138,6 +2242,22 @@ onSnapshot(
   }
 );
 
+onSnapshot(
+  query(collection(db, "returnRequests"), where("status", "==", "pending")),
+  (snap) => {
+    latestReturnRequests = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
+    renderReturnRequests();
+  },
+  (error) => {
+    console.error("Pending return requests query failed:", {
+      query: "returnRequests where status == pending",
+      code: error?.code,
+      message: error?.message
+    });
+    renderEmpty($("#pendingReturnRequests"), "Could not load return requests.");
+  }
+);
+
 function renderPendingRequests() {
   const target = $("#pendingRequests");
   if (!latestPendingRequests.length) {
@@ -2154,6 +2274,7 @@ function renderPendingRequests() {
         <div>
           <strong>${escapeHtml(request.bookTitle)}</strong>
           <span>${escapeHtml(request.bookId)} requested by ${escapeHtml(request.studentName)}</span>
+          <span>Requested ${formatDate(request.requestedAt || request.createdAt)} | Slot ${escapeHtml(request.preferredSlot || "-")}</span>
           <span>Issue ${formatDate(request.issueDate)} | Due ${formatDate(request.dueDate)}</span>
           ${unavailable ? `<span class="badge badge-issued">Book already issued</span>` : ""}
         </div>
@@ -2184,7 +2305,7 @@ $("#pendingRequests").addEventListener("click", async (event) => {
         return;
       }
       try {
-        await sendEmailNotification("Book Issued", {
+        await sendEmailNotification("Book Issue Approved", {
           ...result.notificationPayload,
           returnDate: "-",
           penaltyAmount: 0
@@ -2195,7 +2316,20 @@ $("#pendingRequests").addEventListener("click", async (event) => {
         showToast("Book issued successfully but email failed.", "warning");
       }
     } else {
-      await rejectRequest(requestId);
+      const rejected = await rejectRequest(requestId);
+      try {
+        await sendEmailNotification("Issue Request Rejected", {
+          studentName: rejected?.studentName || "Student",
+          studentEmail: rejected?.studentEmail || "",
+          bookTitle: rejected?.bookTitle || "",
+          issueDate: rejected?.issueDate || "-",
+          dueDate: rejected?.dueDate || "-",
+          returnDate: "-",
+          penaltyAmount: 0
+        });
+      } catch (emailError) {
+        console.error("Issue rejected email failed:", emailError);
+      }
       showToast("Issue request rejected.", "success");
     }
   } catch (error) {
@@ -2219,6 +2353,121 @@ $("#pendingRequests").addEventListener("click", async (event) => {
     }
   } finally {
     button.disabled = false;
+  }
+});
+
+$("#pendingReturnRequests")?.addEventListener("click", async (event) => {
+  const confirmBtn = event.target.closest(".confirm-return-request-btn");
+  const rejectBtn = event.target.closest(".reject-return-request-btn");
+  if (!confirmBtn && !rejectBtn) return;
+  const requestId = (confirmBtn || rejectBtn).dataset.requestId;
+  const requestItem = latestReturnRequests.find((item) => item.id === requestId);
+  if (!requestItem) return;
+
+  if (rejectBtn) {
+    const confirmed = await confirmAction("Reject this return request?");
+    if (!confirmed) return;
+    rejectBtn.disabled = true;
+    try {
+      await updateDoc(doc(db, "returnRequests", requestId), {
+        status: "rejected",
+        reviewedBy: auth.currentUser.uid,
+        reviewedAt: serverTimestamp()
+      });
+      try {
+        await sendEmailNotification("Return Rejected", {
+          studentName: requestItem.data.studentName || "Student",
+          studentEmail: requestItem.data.studentEmail || "",
+          bookTitle: requestItem.data.bookTitle || "",
+          issueDate: "-",
+          dueDate: "-",
+          returnDate: "-",
+          penaltyAmount: requestItem.data.estimatedPenalty || 0
+        });
+      } catch (emailError) {
+        console.error("Return rejected email failed:", emailError);
+      }
+      showToast("Return request rejected.", "success");
+    } catch (error) {
+      logDetailedError(error);
+      showToast(`${error.code || "error"}: ${error.message}`, "error");
+    } finally {
+      rejectBtn.disabled = false;
+    }
+    return;
+  }
+
+  selectedReturnRequest = requestItem;
+  $("#confirmReturnRequestDetails").innerHTML = `
+    <article class="list-row">
+      <div>
+        <strong>${escapeHtml(requestItem.data.bookTitle || requestItem.data.bookId || "Return request")}</strong>
+        <span>Student: ${escapeHtml(requestItem.data.studentName || "")}</span>
+        <span>B_ID: ${escapeHtml(requestItem.data.b_id || requestItem.data.bookId || "")}</span>
+        <span>Expected barcode: ${escapeHtml(requestItem.data.bookBarcodeValue || requestItem.data.barcodeValue || "")}</span>
+        <span>Estimated penalty: Rs.${Number(requestItem.data.estimatedPenalty || 0).toFixed(2)}</span>
+      </div>
+    </article>`;
+  $("#confirmReturnBarcode").value = "";
+  $("#confirmReturnRequestDialog").showModal();
+});
+
+$("#confirmReturnRequestDialog")?.querySelector(".dialog-close")?.addEventListener("click", () => {
+  $("#confirmReturnRequestDialog").close();
+});
+
+$("#confirmReturnRequestForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!selectedReturnRequest) return;
+  setLoading(event.target, true);
+  try {
+    const scanned = $("#confirmReturnBarcode").value.trim().replace(/\s+/g, "");
+    const expected = String(selectedReturnRequest.data.bookBarcodeValue || selectedReturnRequest.data.barcodeValue || "").trim();
+    if (!scanned) throw new Error("Scan or enter the library barcode.");
+    if (expected && scanned !== expected) {
+      throw new Error("Scanned barcode does not match this return request.");
+    }
+    const bookDocId = selectedReturnRequest.data.b_id || selectedReturnRequest.data.bookId;
+    if (bookDocId && selectedReturnRequest.data.currentIssueId) {
+      const bookSnap = await getDoc(doc(db, "books", bookDocId));
+      const bookData = bookSnap.exists() ? bookSnap.data() : null;
+      if (!bookData || bookData.currentIssueId !== selectedReturnRequest.data.currentIssueId) {
+        throw new Error("This return request does not match the current active issue.");
+      }
+    }
+    const data = await returnBook(scanned);
+    await updateDoc(doc(db, "returnRequests", selectedReturnRequest.id), {
+      status: "completed",
+      completedAt: serverTimestamp(),
+      reviewedBy: auth.currentUser.uid,
+      reviewedAt: serverTimestamp(),
+      finalPenalty: data.penaltyAmount || 0,
+      returnIssueId: data.issueId || selectedReturnRequest.data.currentIssueId || ""
+    });
+    try {
+      await sendEmailNotification("Book Return Completed", {
+        studentName: selectedReturnRequest.data.studentName || data.studentName || "Student",
+        studentEmail: selectedReturnRequest.data.studentEmail || data.studentEmail || "",
+        bookTitle: selectedReturnRequest.data.bookTitle || data.bookTitle || "",
+        issueDate: data.issueDate,
+        dueDate: data.dueDate,
+        returnDate: data.returnDate,
+        penaltyAmount: data.penaltyAmount || 0
+      });
+    } catch (emailError) {
+      console.error("Return completed email failed:", emailError);
+    }
+    $("#confirmReturnRequestDialog").close();
+    showToast("Book return completed.", "success");
+  } catch (error) {
+    console.error("Confirm return request failed:", {
+      code: error?.code,
+      message: error?.message,
+      stack: error?.stack
+    });
+    showToast(`${error.code || "error"}: ${error.message}`, "error");
+  } finally {
+    setLoading(event.target, false);
   }
 });
 
@@ -2400,6 +2649,35 @@ function renderNotificationResult(result) {
       <span>Overdue books: ${result.overdue || 0}</span>
       <span>Skipped: ${result.skipped}</span>
     </div>`;
+}
+
+function renderReturnRequests() {
+  const target = $("#pendingReturnRequests");
+  if (!target) return;
+  if (!latestReturnRequests.length) {
+    renderEmpty(target, "No pending return requests.");
+    return;
+  }
+  target.innerHTML = latestReturnRequests
+    .sort((a, b) => timeOf(a.data.requestedAt || a.data.createdAt) - timeOf(b.data.requestedAt || b.data.createdAt))
+    .map((item) => {
+      const request = item.data;
+      return `
+        <article class="request-card" data-return-request-id="${escapeHtml(item.id)}">
+          <img src="assets/book-placeholder.svg" alt="">
+          <div>
+            <strong>${escapeHtml(request.bookTitle || request.bookId || "Return request")}</strong>
+            <span>${escapeHtml(request.b_id || request.bookId || "")} requested by ${escapeHtml(request.studentName || "")}</span>
+            <span>Contact: ${escapeHtml([request.studentEmail, request.studentPhone].filter(Boolean).join(" | "))}</span>
+            <span>Requested ${formatDate(request.requestedAt || request.createdAt)} | Slot ${escapeHtml(request.preferredSlot || "-")}</span>
+            <span>Current penalty: Rs.${Number(request.estimatedPenalty || 0).toFixed(2)}</span>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-primary confirm-return-request-btn" data-request-id="${escapeHtml(item.id)}" type="button">Confirm Return</button>
+            <button class="btn btn-muted reject-return-request-btn" data-request-id="${escapeHtml(item.id)}" type="button">Reject</button>
+          </div>
+        </article>`;
+    }).join("");
 }
 
 $("#runReminderCheckBtn").addEventListener("click", async (event) => {
