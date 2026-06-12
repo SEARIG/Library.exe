@@ -251,11 +251,16 @@ issueForm.addEventListener("submit", async (event) => {
     showToast("Issue request submitted.", "success");
   } catch (error) {
     console.error("Catalog issue request failed:", {
+      currentUserUid: currentUser?.uid || "",
       code: error?.code,
       message: error?.message,
       stack: error?.stack
     });
-    showToast(error.message || "Issue request failed.", error.code === "penalty/unpaid" ? "warning" : "error");
+    const isPermissionError = error.code === "permission-denied" || /permission/i.test(error.message || "");
+    showToast(
+      isPermissionError ? "Could not send issue request. Please refresh and try again." : error.message || "Issue request failed.",
+      error.code === "penalty/unpaid" ? "warning" : "error"
+    );
   } finally {
     button.disabled = false;
   }

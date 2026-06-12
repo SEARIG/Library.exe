@@ -36,6 +36,14 @@ service cloud.firestore {
       return role() in ["super_admin", "university_admin", "college_admin", "library_admin", "librarian"];
     }
 
+    function isAdmin() {
+      return superAdmin() || adminRole() || role() == "admin";
+    }
+
+    function isLibrarian() {
+      return staffRole() || role() == "admin";
+    }
+
     function sameTenant(data) {
       return superAdmin()
         || (
@@ -86,9 +94,9 @@ service cloud.firestore {
     match /books/{bookId} {
       allow read: if true;
       allow create, update: if active()
-        && (staffRole() || role() == "admin")
+        && isLibrarian()
         && request.resource.data.status in ["available", "issued", "lost", "damaged"];
-      allow delete: if superAdmin() || role() == "admin";
+      allow delete: if isAdmin();
     }
 
     match /bookMetadata/{isbn} {
@@ -121,11 +129,10 @@ service cloud.firestore {
     }
 
     match /penalties/{penaltyId} {
-      allow read: if active()
-        && (resource.data.studentUid == request.auth.uid || staffRole() || role() == "admin");
-      allow create: if active() && (staffRole() || role() == "admin");
-      allow update: if active() && (staffRole() || role() == "admin");
-      allow delete: if superAdmin() || role() == "admin";
+      allow read: if signedIn()
+        && (resource.data.studentUid == request.auth.uid || isLibrarian());
+      allow create, update: if isLibrarian();
+      allow delete: if isAdmin();
     }
 
     match /counters/{counterId} {
@@ -210,21 +217,32 @@ service cloud.firestore {
     }
 
     match /issueRequests/{requestId} {
-      allow read: if active()
-        && (
-          resource.data.studentUid == request.auth.uid
-          || staffRole()
-          || role() == "admin"
-          || sameTenant(resource.data)
-          || ownStudentRecord(resource.data)
-        );
-      allow create: if active()
+      allow read: if signedIn()
+        && (resource.data.studentUid == request.auth.uid || isLibrarian());
+
+      allow create: if signedIn()
         && role() == "student"
         && request.resource.data.studentUid == request.auth.uid
         && request.resource.data.status == "pending"
-        && request.resource.data.confirmationChecked == true;
-      allow update: if active() && (staffRole() || role() == "admin");
-      allow delete: if superAdmin();
+        && request.resource.data.confirmationChecked == true
+        && request.resource.data.reviewedBy == null
+        && request.resource.data.reviewedAt == null
+        && (!request.resource.data.keys().hasAny(["type"]) || request.resource.data.type == "issue");
+
+      allow update: if isLibrarian()
+        || (signedIn()
+          && resource.data.studentUid == request.auth.uid
+          && resource.data.status == "pending"
+          && request.resource.data.status == "cancelled"
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            "studentUid",
+            "bookId",
+            "b_id",
+            "issueDate",
+            "dueDate"
+          ]));
+
+      allow delete: if isAdmin();
     }
 
     match /returnRequests/{requestId} {

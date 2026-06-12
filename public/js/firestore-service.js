@@ -282,7 +282,9 @@ export async function createCatalogIssueRequest({ student, book, confirmationChe
   const issueDate = new Date();
   const dueDate = addDays(issueDate, ISSUE_DAYS);
   const ref = doc(collection(db, "issueRequests"));
-  const payload = {
+  const userSnap = await getDoc(doc(db, "users", auth.currentUser.uid));
+  const userRole = userSnap.exists() ? userSnap.data().role || "" : "";
+  const requestPayload = {
     type: "issue",
     requestId: ref.id,
     studentUid: auth.currentUser.uid,
@@ -311,9 +313,20 @@ export async function createCatalogIssueRequest({ student, book, confirmationChe
     reviewedBy: null,
     reviewedAt: null
   };
-  console.log("Catalog issue request payload:", payload);
-  await setDoc(ref, payload);
-  return { requestId: ref.id, payload };
+  console.log("Current user uid:", auth.currentUser.uid);
+  console.log("Current user role:", userRole);
+  console.log("Creating issue request from library:", requestPayload);
+  try {
+    await setDoc(ref, requestPayload);
+  } catch (error) {
+    console.error("Library issue request Firestore error:", {
+      code: error?.code,
+      message: error?.message,
+      payload: requestPayload
+    });
+    throw error;
+  }
+  return { requestId: ref.id, payload: requestPayload };
 }
 
 export async function createReturnRequest({ student, issue, confirmationChecked = true }) {
