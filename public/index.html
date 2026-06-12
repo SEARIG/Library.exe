@@ -8,48 +8,119 @@
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0f766e">
   </head>
-  <body class="library-catalog-page">
-    <header class="library-nav">
-      <div class="library-brand">
-        <img src="./assets/mlsu-logo.png" class="library-logo" alt="MLSU logo">
-        <span>MLSU Library</span>
-      </div>
-      <nav>
-        <a href="login.html">Login</a>
-        <a href="signup.html">Create Account</a>
+  <body class="home-page">
+    <header class="home-navbar">
+      <a class="home-brand" href="index.html" aria-label="MLSU Library home">
+        <img src="./assets/mlsu-logo.png" alt="MLSU logo">
+        <span>
+          <strong>Mohanlal Sukhadia University</strong>
+          <small>Institute of Engineering &amp; Technology</small>
+        </span>
+      </a>
+      <nav class="home-nav-links" aria-label="Primary navigation">
         <a href="library.html">Browse Library</a>
+        <a href="login.html">Login</a>
+        <a class="home-nav-cta" href="signup.html">Create Account</a>
       </nav>
     </header>
 
-    <main class="library-page">
-      <section class="library-hero">
-        <h1>MLSU Library Management System</h1>
-        <p>Smart barcode-based library system for students, librarians, and administrators.</p>
-        <div class="landing-actions">
-          <a class="btn btn-primary" href="login.html">Login</a>
+    <main class="home-main">
+      <section class="home-hero" aria-labelledby="homeHeroTitle">
+        <div class="home-hero-copy">
+          <img class="home-hero-logo" src="./assets/mlsu-logo.png" alt="MLSU logo">
+          <h1 id="homeHeroTitle">MLSU Library<br>Management System</h1>
+          <p>Digital library platform for students, librarians and administrators.</p>
+          <div class="home-stats" aria-label="Library statistics">
+            <article>
+              <strong id="homeBooksCount">--</strong>
+              <span>Books Available</span>
+            </article>
+            <article>
+              <strong id="homeStudentsCount">--</strong>
+              <span>Students</span>
+            </article>
+            <article>
+              <strong id="homeIssuesCount">--</strong>
+              <span>Issues Processed</span>
+            </article>
+          </div>
+        </div>
+
+        <aside class="home-login-card" aria-label="Student access">
+          <h2>Student Access</h2>
+          <p>Login to request books, track issued books, and view dues.</p>
+          <a class="btn btn-primary" href="login.html">Student Login</a>
           <a class="btn btn-muted" href="signup.html">Create Account</a>
-          <a class="btn btn-muted" href="library.html">Browse Library</a>
+        </aside>
+      </section>
+
+      <section class="home-features" aria-labelledby="homeFeaturesTitle">
+        <div class="home-section-heading">
+          <h2 id="homeFeaturesTitle">Library Operations</h2>
+          <p>Core tools for circulation, catalog access, communication, and data handling.</p>
+        </div>
+        <div class="home-feature-grid">
+          <article class="home-feature-card">
+            <span class="home-feature-icon">ID</span>
+            <h3>Barcode Issue &amp; Return</h3>
+            <p>Use library barcode stickers for fast book issue and return workflows.</p>
+          </article>
+          <article class="home-feature-card">
+            <span class="home-feature-icon">SR</span>
+            <h3>Smart Book Search</h3>
+            <p>Find books by title, author, subject, category, ISBN, and barcode.</p>
+          </article>
+          <article class="home-feature-card">
+            <span class="home-feature-icon">EM</span>
+            <h3>Email Notifications</h3>
+            <p>Send issue, return, penalty, and reminder updates to students.</p>
+          </article>
+          <article class="home-feature-card">
+            <span class="home-feature-icon">XL</span>
+            <h3>Excel Import / Export</h3>
+            <p>Import books and students, export reports, and manage library records.</p>
+          </article>
         </div>
       </section>
 
-      <section class="landing-features">
-        <article class="book-card"><h2>Barcode Issue &amp; Return</h2><p>Scan generated library barcodes for fast circulation workflows.</p></article>
-        <article class="book-card"><h2>Smart Book Catalog</h2><p>Browse, search, filter, and manage the MLSU book collection.</p></article>
-        <article class="book-card"><h2>Email Notifications</h2><p>Notify students about issue, return, penalty, and reminder events.</p></article>
-        <article class="book-card"><h2>Excel Import / Export</h2><p>Move book and student data through practical spreadsheet workflows.</p></article>
-        <article class="book-card"><h2>Bulk Barcode Printing</h2><p>Generate printable barcode sheets for library inventory.</p></article>
-        <article class="book-card"><h2>Admin &amp; Librarian Dashboard</h2><p>Role-based dashboards keep operations organized and secure.</p></article>
+      <section class="home-catalog-preview" aria-labelledby="homeCatalogTitle">
+        <div class="home-section-heading home-section-row">
+          <div>
+            <h2 id="homeCatalogTitle">Library Collection</h2>
+            <p>Preview recently updated books from the MLSU Library catalog.</p>
+          </div>
+          <a class="btn btn-primary" href="library.html">Browse Full Library</a>
+        </div>
+        <div id="homeCatalogGrid" class="home-catalog-grid">
+          <div class="empty">Loading books...</div>
+        </div>
       </section>
     </main>
 
-    <footer class="library-footer">
-      <strong>Developed by:</strong>
-      <span>Nakul Singh Rajawat</span>
-      <span>Prakshat Sharma</span>
-      <span>Puneet Sharma</span>
-      <span>Mohanlal Sukhadia University</span>
-      <span>&copy; 2026 MLSU Library. All rights reserved.</span>
+    <footer class="home-footer">
+      <section>
+        <h2>MLSU Library Management System</h2>
+        <p>Mohanlal Sukhadia University</p>
+      </section>
+      <section>
+        <h3>Quick Links</h3>
+        <a href="library.html">Browse Library</a>
+        <a href="login.html">Login</a>
+        <a href="signup.html">Create Account</a>
+      </section>
+      <section>
+        <h3>Developed By</h3>
+        <p>Nakul Singh Rajawat</p>
+        <p>Prakshat Sharma</p>
+        <p>Puneet Sharma</p>
+      </section>
+      <div class="home-footer-bottom">
+        <span>&copy; 2026 MLSU Library Management System</span>
+        <span>All Rights Reserved</span>
+      </div>
     </footer>
+
+    <script type="module" src="./js/home.js"></script>
     <script type="module" src="./js/push-notifications.js"></script>
   </body>
 </html>
