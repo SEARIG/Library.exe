@@ -224,9 +224,26 @@ canvas {
   height: 42px;
   max-height: 42px;
   object-fit: contain;
-  border-radius: 12px;
+  border-radius: 50%;
   background: #fff;
   box-shadow: 0 10px 20px rgba(15, 118, 110, 0.14);
+}
+
+.logo-img,
+.brand-logo,
+.nav-logo,
+.library-logo {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+  border-radius: 50%;
+}
+
+.hero-logo {
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+  border-radius: 50%;
 }
 
 .current-page-label {
@@ -620,6 +637,7 @@ canvas {
   width: 42px;
   height: 42px;
   object-fit: contain;
+  border-radius: 50%;
   flex: 0 0 auto;
 }
 
@@ -800,8 +818,14 @@ canvas {
   width: clamp(110px, 13vw, 178px);
   height: clamp(110px, 13vw, 178px);
   object-fit: contain;
+  border-radius: 50%;
   margin-bottom: 24px;
   filter: drop-shadow(0 16px 28px rgba(0, 0, 0, 0.18));
+}
+
+.home-hero-logo.hero-logo {
+  width: 120px;
+  height: 120px;
 }
 
 .home-hero h1 {

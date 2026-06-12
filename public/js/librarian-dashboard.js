@@ -1558,7 +1558,7 @@ async function generateBarcodePdfForBooks(items, batchId) {
     pdf.roundedRect(x, y, stickerWidth - 1.5, stickerHeight - 1.5, 1.5, 1.5);
     pdf.setFont("helvetica", "bold");
     pdf.setFontSize(7);
-    pdf.text("MLSU Library", x + 3, y + 4.5);
+    pdf.text("Mohanlal Sukhadia University LMS", x + 3, y + 4.5);
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(6);
     pdf.text(`B_ID: ${bid}`, x + 3, y + 8);

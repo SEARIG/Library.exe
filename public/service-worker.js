@@ -37,12 +37,12 @@ self.addEventListener("fetch", (event) => {
 
 self.addEventListener("push", (event) => {
   const data = event.data?.json?.() || {
-    title: "MLSU Library",
+    title: "Mohanlal Sukhadia University LMS",
     body: "You have a library notification."
   };
 
   event.waitUntil(
-    self.registration.showNotification(data.title || "MLSU Library", {
+    self.registration.showNotification(data.title || "Mohanlal Sukhadia University LMS", {
       body: data.body || "You have a library notification.",
       icon: "/assets/book-placeholder.svg",
       badge: "/assets/book-placeholder.svg"

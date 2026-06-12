@@ -8,7 +8,7 @@ export async function registerServiceWorker() {
 
   try {
     const registration = await navigator.serviceWorker.register(SERVICE_WORKER_PATH);
-    console.log("MLSU Library service worker registered:", registration.scope);
+    console.log("Mohanlal Sukhadia University LMS service worker registered:", registration.scope);
     return registration;
   } catch (error) {
     console.error("Service worker registration failed:", error);

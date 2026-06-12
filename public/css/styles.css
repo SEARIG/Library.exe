@@ -52,6 +52,23 @@ body > * {
   position: relative;
 }
 
+.logo-img,
+.brand-logo,
+.nav-logo,
+.library-logo {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+  border-radius: 50%;
+}
+
+.hero-logo {
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+  border-radius: 50%;
+}
+
 a {
   color: inherit;
 }

@@ -1,6 +1,6 @@
 {
-  "name": "MLSU Library",
-  "short_name": "MLSU Library",
+  "name": "Mohanlal Sukhadia University LMS",
+  "short_name": "Mohanlal Sukhadia University LMS",
   "description": "Library issue, return, and reminder tools for MLSU.",
   "start_url": "/index.html",
   "display": "standalone",

@@ -49,8 +49,8 @@ export function renderNavbar(currentRole, currentUserData = {}) {
         <span></span><span></span><span></span>
       </button>
       <a class="brand" href="${homeForRole(currentRole)}">
-        <img class="brand-logo" src="assets/mlsu-logo.png" alt="">
-        <span>MLSU Library</span>
+        <img class="brand-logo nav-logo" src="assets/mlsu-logo.png?v=2" alt="Mohanlal Sukhadia University LMS Logo">
+        <span>Mohanlal Sukhadia University LMS</span>
       </a>
       <span class="current-page-label">${escapeHtml(pageLabel(currentPath))}</span>
       <span class="user-chip">
@@ -78,9 +78,9 @@ export function renderNavbar(currentRole, currentUserData = {}) {
   document.body.classList.toggle("sidebar-open", startsOpen);
   sidebar.innerHTML = `
     <div class="sidebar-brand">
-      <img class="brand-logo" src="assets/mlsu-logo.png" alt="">
+      <img class="brand-logo nav-logo" src="assets/mlsu-logo.png?v=2" alt="Mohanlal Sukhadia University LMS Logo">
       <div>
-        <strong>MLSU Library</strong>
+        <strong>Mohanlal Sukhadia University LMS</strong>
         <span>${escapeHtml(currentRole)}</span>
       </div>
     </div>
@@ -126,8 +126,8 @@ export function renderNavbarSkeleton() {
     <div class="header-inner">
       <button class="nav-toggle" type="button" disabled aria-label="Loading menu"><span></span><span></span><span></span></button>
       <a class="brand" href="index.html">
-        <img class="brand-logo" src="assets/mlsu-logo.png" alt="">
-        <span>MLSU Library</span>
+        <img class="brand-logo nav-logo" src="assets/mlsu-logo.png?v=2" alt="Mohanlal Sukhadia University LMS Logo">
+        <span>Mohanlal Sukhadia University LMS</span>
       </a>
       <div class="nav-skeleton"><span></span><span></span><span></span></div>
     </div>`;
