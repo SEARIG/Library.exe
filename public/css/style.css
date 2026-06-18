@@ -2309,11 +2309,6 @@ select {
   background: #fff;
 }
 
-.nav-toggle,
-.dialog-close {
-  min-height: 44px;
-}
-
 .public-nav-toggle span {
   width: 20px;
   height: 2px;
