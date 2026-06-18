@@ -68,7 +68,7 @@
           </div>
           <video id="quickReturnScannerVideo" class="scanner-video compact-video" playsinline autoplay muted hidden></video>
           <form id="quickReturnForm" class="form-grid">
-            <label>Library Barcode<input id="quickReturnBookId" placeholder="BOOK-1" required></label>
+            <label>Accession Number or Library Barcode<input id="quickReturnBookId" placeholder="01, ACC-01, or BOOK-1" required></label>
             <button class="btn btn-primary" type="submit">Return Book</button>
           </form>
         </article>
@@ -108,9 +108,22 @@
         </div>
         <form id="addBookForm" class="form-grid">
           <p class="helper-text" id="bookSaveModeHelp">Availability is controlled only by issue, return, lost, and found actions.</p>
-          <label>Auto B_ID<input id="autoBId" readonly></label>
-          <label>Book Name<input id="bnameInput" required></label>
-          <label>Subject<input id="subjectInput"></label>
+          <input id="autoBId" type="hidden">
+          <label>ISBN / Publisher Barcode<input id="publisherBarcodeInput"></label>
+          <label>Accession Number<input id="accessionNumberInput" required></label>
+          <label>Date<input id="accessionDateInput"></label>
+          <label>Author<input id="authorInput"></label>
+          <label>Title<input id="bnameInput" required></label>
+          <label>Place &amp; Publisher<input id="publisherInput"></label>
+          <label>Year<input id="yearInput"></label>
+          <label>Pages<input id="pagesInput"></label>
+          <label>Vol.<input id="volumeInput"></label>
+          <label>Source<input id="sourceInput"></label>
+          <label>Bill No &amp; Date<input id="billNoDateInput"></label>
+          <label>Cost<input id="costInput"></label>
+          <label>Class No.<input id="classNoInput"></label>
+          <label>Book No.<input id="bookNoInput"></label>
+          <label>Withdrawal No., Date &amp; Remarks<textarea id="withdrawalRemarksInput" rows="2"></textarea></label>
           <label>Category
             <select id="category" required>
               <option value="pyq">pyq</option>
@@ -122,11 +135,10 @@
               <option value="other">other</option>
             </select>
           </label>
-          <label>Author<input id="authorInput"></label>
-          <label>Publisher<input id="publisherInput"></label>
-          <label>BLegal Number / Inside Book Number<input id="blegalNum"></label>
-          <label>Publisher Barcode / ISBN<input id="publisherBarcodeInput"></label>
+          <label>Subject<input id="subjectInput"></label>
+          <label>Total Copies<input id="totalCopiesInput" type="number" min="1" value="1"></label>
           <label>Image URL<input id="imageUrlInput"></label>
+          <label>Notes<textarea id="notesInput" rows="2"></textarea></label>
           <label>Library Barcode Value<input id="libraryBarcodeValueInput" readonly></label>
           <input id="isbnInput" type="hidden">
           <input id="metadataSourceInput" type="hidden">
@@ -144,9 +156,10 @@
           <div id="googleFetchDebug" class="empty" hidden>Online metadata debug details will appear here.</div>
           <div id="barcodeSticker" class="barcode-sticker">
             <strong>Mohanlal Sukhadia University LMS</strong>
-            <span id="stickerBId">B_ID: -</span>
+            <span id="stickerBId">Accession No: -</span>
+            <span id="stickerBookTitle">Title: -</span>
             <svg id="libraryBarcodeSvg"></svg>
-            <span id="stickerBarcodeValue">BOOK-</span>
+            <span id="stickerBarcodeValue">ACC-</span>
           </div>
           <div class="toolbar">
             <button class="btn btn-muted" id="downloadBarcodeBtn" type="button">Download Barcode as PNG</button>
@@ -164,16 +177,20 @@
           <button class="btn btn-muted" data-close-modal type="button">Close</button>
         </div>
         <div class="toolbar">
-          <button class="btn btn-primary" id="importBooksBtn" type="button">Import Books</button>
-          <button class="btn btn-muted" id="downloadBooksTemplateBtn" type="button">Download Books Template</button>
-          <button class="btn btn-muted" id="confirmBookImportBtn" type="button" disabled>Import Previewed Books</button>
-          <button class="btn btn-muted" id="exportBooksExcelBtn" type="button">Export Books Excel</button>
+          <button class="btn btn-primary" id="importBooksBtn" type="button">Import Accession Register</button>
+          <button class="btn btn-muted" id="downloadBooksTemplateBtn" type="button">Download Accession Register Template</button>
+          <button class="btn btn-muted" id="confirmBookImportBtn" type="button" disabled>Confirm Import</button>
+          <button class="btn btn-muted" id="exportBooksExcelBtn" type="button">Export Accession Register</button>
           <input id="bookImportFile" type="file" accept=".xlsx,.csv" hidden>
         </div>
-        <div id="bookImportResult" class="empty">Upload Books.xlsx to preview and validate rows before import.</div>
+        <label class="checkbox-line">
+          <input id="updateExistingBooks" type="checkbox">
+          <span>Update Existing (match by accession number; issue status and history remain unchanged)</span>
+        </label>
+        <div id="bookImportResult" class="empty">Upload an accession register .xlsx or .csv file to preview it before import.</div>
         <div id="bookImportPreview" class="table-scroll"></div>
         <div class="library-controls">
-          <label>Search Books<input id="bookSearch" placeholder="Search by B_ID, name, author, subject, ISBN, or library barcode"></label>
+          <label>Search Books<input id="bookSearch" placeholder="Search by accession number, title, author, publisher, year, ISBN, category, or subject"></label>
           <label>Category
             <select id="bookCategoryFilter">
               <option value="">All Categories</option>
@@ -263,8 +280,8 @@
               <option value="all">All</option>
             </select>
           </label>
-          <label>B_ID From<input id="barcodeRangeFrom" inputmode="numeric" placeholder="1"></label>
-          <label>B_ID To<input id="barcodeRangeTo" inputmode="numeric" placeholder="100"></label>
+          <label>Accession From<input id="barcodeRangeFrom" placeholder="ACC-001"></label>
+          <label>Accession To<input id="barcodeRangeTo" placeholder="ACC-999"></label>
           <label>Category<input id="barcodeCategoryFilter" placeholder="textbook"></label>
           <label>Import Batch<input id="barcodeImportBatchFilter" placeholder="batch id"></label>
           <label>Book Status<input id="barcodeBookStatusFilter" placeholder="available / issued"></label>
@@ -338,6 +355,31 @@
         <div id="penaltyDetailsList" class="list-stack"></div>
       </section>
     </div>
+
+    <dialog id="bookDetailsDialog">
+      <div class="dialog-head">
+        <div>
+          <span class="eyebrow">Staff book record</span>
+          <h2>Book Details</h2>
+        </div>
+        <button class="btn btn-muted dialog-close" type="button">Close</button>
+      </div>
+      <div id="bookDetailsContent" class="detail-grid"></div>
+    </dialog>
+
+    <dialog id="quickReturnDialog">
+      <div class="dialog-head">
+        <div>
+          <span class="eyebrow">Confirm return</span>
+          <h2>Return Book</h2>
+        </div>
+        <button class="btn btn-muted dialog-close" type="button">Close</button>
+      </div>
+      <div id="quickReturnDetails" class="detail-grid"></div>
+      <form id="confirmQuickReturnForm">
+        <button class="btn btn-primary" type="submit">Confirm Return</button>
+      </form>
+    </dialog>
 
     <div id="toast" class="toast"></div>
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>

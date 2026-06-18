@@ -21,6 +21,77 @@ const ISSUE_DAYS = 45;
 const PENALTY_PER_DAY = 5;
 const functions = getFunctions(app);
 
+export function accessionNumberOf(book = {}) {
+  return String(
+    book.accessionNumber
+    || book.blegal_num
+    || book.blegalNumber
+    || book.BLegalNumber
+    || book.b_id
+    || ""
+  ).trim();
+}
+
+export function titleOf(book = {}) {
+  return book.title || book.bname || book.bookTitle || book.bookName || "";
+}
+
+export function accessionBarcode(accessionNumber) {
+  const value = String(accessionNumber || "").trim();
+  return value ? `ACC-${value}` : "";
+}
+
+async function firstBookByField(field, value) {
+  if (!value) return null;
+  const snap = await getDocs(query(collection(db, "books"), where(field, "==", value), limit(1)));
+  if (snap.empty) return null;
+  const item = snap.docs[0];
+  return { id: item.id, ...item.data() };
+}
+
+export async function findBookByLibraryCode(value) {
+  const scannedValue = String(value || "").trim().replace(/\s+/g, "");
+  if (!scannedValue) throw new Error("Enter or scan a library barcode or accession number.");
+
+  const attempts = [];
+  const tryField = async (field, candidate) => {
+    if (!candidate) return null;
+    attempts.push({ field, candidate });
+    return firstBookByField(field, candidate);
+  };
+
+  let book = await tryField("barcodeValue", scannedValue);
+  if (book) return book;
+
+  const accessionCandidate = scannedValue.toUpperCase().startsWith("ACC-")
+    ? scannedValue.slice(4)
+    : scannedValue;
+  book = await tryField("accessionNumber", accessionCandidate);
+  if (book) return book;
+
+  for (const legacyField of ["blegal_num", "blegalNumber", "BLegalNumber"]) {
+    book = await tryField(legacyField, accessionCandidate);
+    if (book) return book;
+  }
+
+  const oldIdCandidate = scannedValue.toUpperCase().startsWith("BOOK-")
+    ? scannedValue.slice(5)
+    : scannedValue;
+  const directSnap = await getDoc(doc(db, "books", oldIdCandidate));
+  attempts.push({ field: "documentId", candidate: oldIdCandidate });
+  if (directSnap.exists()) return { id: directSnap.id, ...directSnap.data() };
+
+  book = await tryField("b_id", oldIdCandidate);
+  if (book) return book;
+  if (/^\d+$/.test(oldIdCandidate)) {
+    book = await tryField("b_id", Number(oldIdCandidate));
+    if (book) return book;
+  }
+
+  console.log("Book lookup attempts:", attempts);
+  throw new Error("Book not found. Scan ACC-{accessionNumber}, enter the accession number, or use an existing BOOK-{b_id} barcode.");
+}
+
 export function scheduleApplies(schedule = {}, type = "issue") {
   if (!schedule?.active) return false;
   const appliesTo = String(schedule.appliesTo || "both").toLowerCase();
@@ -142,21 +213,9 @@ export async function getStudentProfile(uid) {
 export async function findBookByBarcode(value) {
   const barcode = String(value || "").trim().replace(/\s+/g, "");
   console.log("Scanned barcode value:", barcode);
-  if (!barcode) throw new Error("Enter or scan a barcode.");
-
-  const barcodeQuery = query(collection(db, "books"), where("barcodeValue", "==", barcode), limit(1));
-  const matches = await getDocs(barcodeQuery);
-  console.log("Library barcode query result:", {
-    empty: matches.empty,
-    size: matches.size
-  });
-  if (!matches.empty) {
-    const snap = matches.docs[0];
-    console.log("Found book document id:", snap.id);
-    return { id: snap.id, ...snap.data() };
-  }
-
-  throw new Error("Book not found. Please scan the library barcode sticker.");
+  const book = await findBookByLibraryCode(barcode);
+  console.log("Found book document id:", book.id);
+  return book;
 }
 
 export async function createIssueRequest({ student, book }) {
@@ -168,7 +227,9 @@ export async function createIssueRequest({ student, book }) {
   if (book.status !== "available") {
     throw new Error("This book is not available.");
   }
-  if (!book.b_id || !book.barcodeValue) {
+  const bookDocId = book.b_id || book.bookId || book.id;
+  const accessionNumber = accessionNumberOf(book);
+  if (!bookDocId || !accessionNumber) {
     throw new Error("Invalid library book record. Please scan the library barcode sticker.");
   }
 
@@ -198,13 +259,21 @@ export async function createIssueRequest({ student, book }) {
     studentUid: student.uid,
     studentName: student.name,
     rollNumber: student.rollNumber || "",
-    bookId: book.b_id,
-    b_id: book.b_id,
-    bookBarcodeValue: book.barcodeValue,
-    bookTitle: book.bname || "",
+    bookId: bookDocId,
+    b_id: bookDocId,
+    accessionNumber,
+    author: book.author || "",
+    title: titleOf(book),
+    placePublisher: book.placePublisher || book.publisher || "",
+    year: book.year || "",
+    pages: book.pages || "",
+    volume: book.volume || "",
+    imageUrl: book.imageUrl || "",
+    barcodeValue: book.barcodeValue || accessionBarcode(accessionNumber),
+    bookBarcodeValue: book.barcodeValue || accessionBarcode(accessionNumber),
+    bookTitle: titleOf(book),
     subject: book.subject || "",
     category: book.category || "",
-    blegal_num: book.blegal_num || "",
     bookImage: book.imageUrl || "",
     issueDate: Timestamp.fromDate(issueDate),
     dueDate: Timestamp.fromDate(dueDate),
@@ -294,13 +363,20 @@ export async function createCatalogIssueRequest({ student, book, confirmationChe
     rollNumber: student.rollNumber || "",
     bookId: freshBook.b_id || freshBookSnap.id,
     b_id: freshBook.b_id || freshBookSnap.id,
-    bookTitle: freshBook.bname || freshBook.title || "",
-    barcodeValue: freshBook.barcodeValue || "",
-    bookBarcodeValue: freshBook.barcodeValue || "",
+    accessionNumber: accessionNumberOf(freshBook),
+    author: freshBook.author || "",
+    title: titleOf(freshBook),
+    placePublisher: freshBook.placePublisher || freshBook.publisher || "",
+    year: freshBook.year || "",
+    pages: freshBook.pages || "",
+    volume: freshBook.volume || "",
+    imageUrl: freshBook.imageUrl || "",
+    bookTitle: titleOf(freshBook),
+    barcodeValue: freshBook.barcodeValue || accessionBarcode(accessionNumberOf(freshBook)),
+    bookBarcodeValue: freshBook.barcodeValue || accessionBarcode(accessionNumberOf(freshBook)),
     bookImage: freshBook.imageUrl || "",
     subject: freshBook.subject || "",
     category: freshBook.category || "",
-    blegal_num: freshBook.blegal_num || "",
     status: "pending",
     issueDate: Timestamp.fromDate(issueDate),
     dueDate: Timestamp.fromDate(dueDate),
@@ -367,7 +443,13 @@ export async function createReturnRequest({ student, issue, confirmationChecked 
     studentPhone: student.phone || "",
     bookId: issue.bookId || issue.b_id || "",
     b_id: issue.b_id || issue.bookId || "",
-    bookTitle: issue.bookTitle || issue.bookId || "",
+    accessionNumber: issue.accessionNumber || "",
+    author: issue.author || "",
+    title: issue.title || issue.bookTitle || "",
+    placePublisher: issue.placePublisher || "",
+    year: issue.year || "",
+    pages: issue.pages || "",
+    bookTitle: issue.title || issue.bookTitle || issue.bookId || "",
     barcodeValue: issue.bookBarcodeValue || issue.barcodeValue || "",
     bookBarcodeValue: issue.bookBarcodeValue || issue.barcodeValue || "",
     currentIssueId: issueId,
@@ -403,20 +485,9 @@ export async function returnBook(bookId) {
   console.log("Return scanned library barcode:", scannedValue);
   if (!scannedValue) throw new Error("Scan or enter the library barcode.");
 
-  const barcodeQuery = query(collection(db, "books"), where("barcodeValue", "==", scannedValue), limit(1));
-  const matches = await getDocs(barcodeQuery);
-  console.log("Return barcode query result:", {
-    empty: matches.empty,
-    size: matches.size
-  });
-
-  if (matches.empty) {
-    throw new Error("Book not found. Please scan the library barcode sticker.");
-  }
-
-  const bookSnap = matches.docs[0];
-  const bookDocId = bookSnap.id;
-  const bookData = bookSnap.data();
+  const matchedBook = await findBookByLibraryCode(scannedValue);
+  const bookDocId = matchedBook.id;
+  const bookData = matchedBook;
   const issueId = bookData.currentIssueId;
   console.log("Return book document:", {
     bookDocId,
@@ -481,6 +552,7 @@ export async function returnBook(bookId) {
           studentPhone: issue.studentPhone || "",
           bookId: issue.bookId || bookDocId,
           b_id: issue.b_id || issue.bookId || bookDocId,
+          accessionNumber: issue.accessionNumber || accessionNumberOf(freshBook),
           bookBarcodeValue: issue.bookBarcodeValue || scannedValue,
           bookTitle: issue.bookTitle || issue.bookId || bookDocId,
           issueDate: issue.issueDate || null,
@@ -500,6 +572,7 @@ export async function returnBook(bookId) {
 
       transaction.update(bookRef, {
         status: "available",
+        issuedStudentUid: null,
         issuedTo: null,
         issuedToName: null,
         issuedToEmail: null,
@@ -510,7 +583,10 @@ export async function returnBook(bookId) {
       return {
         issueId,
         bookId: bookDocId,
-        barcodeValue: scannedValue,
+        accessionNumber: issue.accessionNumber || accessionNumberOf(freshBook),
+        author: issue.author || freshBook.author || "",
+        title: issue.title || issue.bookTitle || titleOf(freshBook),
+        barcodeValue: freshBook.barcodeValue || accessionBarcode(accessionNumberOf(freshBook)),
         studentUid: issue.studentUid || "",
         studentName: issue.studentName || "",
         studentEmail: issue.studentEmail || "",

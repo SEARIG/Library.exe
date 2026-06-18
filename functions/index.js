@@ -644,6 +644,15 @@ async function approveLegacyIssue(requestId, actor) {
       rollNumber: issueRequest.rollNumber || studentSnap.get("rollNumber") || "",
       b_id: issueRequest.b_id || issueRequest.bookId,
       bookId: issueRequest.b_id || issueRequest.bookId,
+      accessionNumber: issueRequest.accessionNumber || bookSnap.get("accessionNumber") || bookSnap.get("blegal_num") || issueRequest.bookId,
+      author: issueRequest.author || bookSnap.get("author") || "",
+      title: issueRequest.title || issueRequest.bookTitle || bookSnap.get("title") || bookSnap.get("bname") || "",
+      placePublisher: issueRequest.placePublisher || bookSnap.get("placePublisher") || bookSnap.get("publisher") || "",
+      year: issueRequest.year || bookSnap.get("year") || "",
+      pages: issueRequest.pages || bookSnap.get("pages") || "",
+      volume: issueRequest.volume || bookSnap.get("volume") || "",
+      imageUrl: issueRequest.imageUrl || issueRequest.bookImage || bookSnap.get("imageUrl") || "",
+      barcodeValue: issueRequest.barcodeValue || issueRequest.bookBarcodeValue || bookSnap.get("barcodeValue") || "",
       bookBarcodeValue: issueRequest.bookBarcodeValue || bookSnap.get("barcodeValue") || "",
       bookTitle: issueRequest.bookTitle || bookSnap.get("bname") || bookSnap.get("title") || "",
       bookImage: issueRequest.bookImage || bookSnap.get("imageUrl") || "",
@@ -661,8 +670,10 @@ async function approveLegacyIssue(requestId, actor) {
 
     transaction.update(bookRef, {
       status: "issued",
+      issuedStudentUid: issueRequest.studentUid,
       issuedTo: issueRequest.studentUid,
       issuedToName: issueRequest.studentName || studentSnap.get("name") || "",
+      issuedToEmail: issueRequest.studentEmail || studentSnap.get("email") || "",
       currentIssueId: issueRef.id,
       updatedAt: now()
     });
@@ -795,11 +806,34 @@ exports.returnBook = onCall(returnTenantBookHandler);
 async function returnLegacyBook(actor, barcodeValue) {
   const scannedBarcode = normalizeBarcode(barcodeValue);
   if (!scannedBarcode) throw new HttpsError("invalid-argument", "Library barcode is required.");
-  const barcodeMatches = await db.collection("books").where("barcodeValue", "==", scannedBarcode).limit(1).get();
-  if (barcodeMatches.empty) throw new HttpsError("not-found", "Book record not found for this library barcode.");
+  const accession = scannedBarcode.toUpperCase().startsWith("ACC-") ? scannedBarcode.slice(4) : scannedBarcode;
+  const legacyId = scannedBarcode.toUpperCase().startsWith("BOOK-") ? scannedBarcode.slice(5) : scannedBarcode;
+  const candidates = [
+    ["barcodeValue", scannedBarcode],
+    ["accessionNumber", accession],
+    ["blegal_num", accession],
+    ["b_id", legacyId]
+  ];
+  let matchedDoc = null;
+  for (const [field, value] of candidates) {
+    const matches = await db.collection("books").where(field, "==", value).limit(1).get();
+    if (!matches.empty) {
+      matchedDoc = matches.docs[0];
+      break;
+    }
+  }
+  if (!matchedDoc && /^\d+$/.test(legacyId)) {
+    const numericMatches = await db.collection("books").where("b_id", "==", Number(legacyId)).limit(1).get();
+    if (!numericMatches.empty) matchedDoc = numericMatches.docs[0];
+  }
+  if (!matchedDoc) {
+    const direct = await db.doc(`books/${legacyId}`).get();
+    if (direct.exists) matchedDoc = direct;
+  }
+  if (!matchedDoc) throw new HttpsError("not-found", "Book record not found for this accession number or library barcode.");
 
-  const bookRef = barcodeMatches.docs[0].ref;
-  const bookData = barcodeMatches.docs[0].data();
+  const bookRef = matchedDoc.ref;
+  const bookData = matchedDoc.data();
   const issueId = bookData.currentIssueId;
   if (!issueId) throw new HttpsError("not-found", "No active issue found for this book.");
   const issueRef = db.doc(`bookIssues/${issueId}`);
@@ -831,8 +865,10 @@ async function returnLegacyBook(actor, barcodeValue) {
 
     transaction.update(bookRef, {
       status: "available",
+      issuedStudentUid: null,
       issuedTo: null,
       issuedToName: null,
+      issuedToEmail: null,
       currentIssueId: null,
       updatedAt: now()
     });

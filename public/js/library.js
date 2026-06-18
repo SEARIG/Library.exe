@@ -1,10 +1,12 @@
 import { auth, db } from "./firebase-config.js";
 import {
+  accessionNumberOf,
   createCatalogIssueRequest,
   getIssueReturnSchedule,
   getStudentProfile,
   scheduleApplies,
-  scheduleLabel
+  scheduleLabel,
+  titleOf
 } from "./firestore-service.js";
 import { sendEmailNotification } from "./notifications.js";
 import {
@@ -44,7 +46,7 @@ const issueDetails = $("#catalogIssueDetails");
 const issueForm = $("#catalogIssueForm");
 
 function bookTitle(book = {}) {
-  return book.bname || book.title || book.bookName || "Untitled book";
+  return titleOf(book) || book.bookTitle || "Untitled book";
 }
 
 function availabilityLabel(status = "") {
@@ -65,17 +67,20 @@ function filteredBooks() {
     const status = String(data.status || "available").toLowerCase();
     const bookCategory = String(data.category || "").toLowerCase();
     const haystack = [
-      data.b_id,
+      accessionNumberOf(data),
       data.bname,
       data.bookName,
       data.title,
       data.author,
+      data.placePublisher,
       data.publisher,
+      data.year,
+      data.classNo,
+      data.bookNo,
       data.subject,
       data.isbn,
       data.publisherBarcode,
-      data.blegal_num,
-      data.barcodeValue
+      data.blegal_num
     ].join(" ").toLowerCase();
 
     if (search && !haystack.includes(search)) return false;
@@ -106,7 +111,7 @@ function renderLibrary() {
       return `
         <article class="book-card">
           <div class="book-cover">
-            <img src="${escapeHtml(cover)}" alt="">
+            <img class="catalog-cover-image" src="${escapeHtml(cover)}" alt="Cover of ${escapeHtml(bookTitle(data))}">
           </div>
           <div>
             <h2>${escapeHtml(bookTitle(data))}</h2>
@@ -116,15 +121,14 @@ function renderLibrary() {
             <span class="category-badge">${escapeHtml(data.category || "other")}</span>
             <span class="availability-badge availability-${escapeHtml(status)}">${escapeHtml(availabilityLabel(status))}</span>
           </div>
-          <p><strong>Subject:</strong> ${escapeHtml(data.subject || "General")}</p>
-          <p><strong>ISBN:</strong> ${escapeHtml(data.isbn || data.publisherBarcode || "-")}</p>
+          <p><strong>Accession No.:</strong> ${escapeHtml(accessionNumberOf(data) || "-")}</p>
+          <p><strong>Place &amp; Publisher:</strong> ${escapeHtml(data.placePublisher || data.publisher || "-")}</p>
+          <p><strong>Year:</strong> ${escapeHtml(data.year || "-")}</p>
+          <p><strong>Pages:</strong> ${escapeHtml(data.pages || "-")}</p>
           <details>
             <summary>View Details</summary>
-            <p><strong>B_ID:</strong> ${escapeHtml(data.b_id || id)}</p>
-            <p><strong>BLegal Number:</strong> ${escapeHtml(data.blegal_num || "-")}</p>
-            <p><strong>Library Barcode:</strong> ${escapeHtml(data.barcodeValue || "-")}</p>
+            <p><strong>Vol.:</strong> ${escapeHtml(data.volume || "-")}</p>
             <p><strong>Availability:</strong> ${escapeHtml(availabilityLabel(data.status))}</p>
-            <p><strong>Updated:</strong> ${data.updatedAt ? escapeHtml(formatDate(data.updatedAt)) : "-"}</p>
           </details>
           <button class="btn ${status === "available" ? "btn-primary" : "btn-muted"} request-issue-btn" type="button" data-book-id="${escapeHtml(id)}" ${status === "available" ? "" : "disabled"}>
             ${status === "available" ? "Request Issue" : "Not Available"}
@@ -143,8 +147,7 @@ function renderIssueDialog(book) {
       <div>
         <strong>${escapeHtml(bookTitle(book.data))}</strong>
         <span>Author: ${escapeHtml(book.data.author || "Author not listed")}</span>
-        <span>B_ID: ${escapeHtml(book.data.b_id || book.id)}</span>
-        <span>Barcode: ${escapeHtml(book.data.barcodeValue || "-")}</span>
+        <span>Accession No.: ${escapeHtml(accessionNumberOf(book.data) || "-")}</span>
         <span>Availability: ${escapeHtml(availabilityLabel(book.data.status))}</span>
         <span>Library time: ${escapeHtml(scheduleText)}</span>
         <span>Student: ${escapeHtml(selectedStudent?.name || currentUser?.email || "")}</span>
@@ -218,6 +221,10 @@ booksTarget.addEventListener("click", (event) => {
     showToast(error.message || "Could not open issue request.", "error");
   });
 });
+booksTarget.addEventListener("error", (event) => {
+  if (!event.target.matches(".catalog-cover-image")) return;
+  event.target.src = "assets/book-placeholder.svg";
+}, true);
 
 document.querySelectorAll("dialog .dialog-close").forEach((button) => {
   button.addEventListener("click", () => button.closest("dialog")?.close());

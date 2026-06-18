@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "serve": "firebase emulators:start --only hosting,functions,firestore",
-    "lint:functions": "cd functions && npm run lint"
+    "lint:functions": "cd functions && npm run lint",
+    "test": "node --test"
   },
   "dependencies": {
     "firebase-admin": "^12.5.0"

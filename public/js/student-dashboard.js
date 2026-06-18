@@ -184,6 +184,7 @@ function renderIssuedBooks(docs) {
       <article class="list-row">
         <div>
           <strong>${escapeHtml(issue.bookTitle || issue.bookId || "Issued book")}</strong>
+          <span>Accession No.: ${escapeHtml(issue.accessionNumber || issue.b_id || issue.bookId || "-")}</span>
           <span>Barcode: ${escapeHtml(issue.bookBarcodeValue || "")}</span>
           <span>Issue Date: ${formatDate(issue.issueDate)}</span>
           <span>Due Date: ${formatDate(issue.dueDate)}</span>
@@ -388,7 +389,7 @@ $("#issuedBooks")?.addEventListener("click", async (event) => {
       <article class="list-row">
         <div>
           <strong>${escapeHtml(selectedReturnIssue.bookTitle || selectedReturnIssue.bookId || "Issued book")}</strong>
-          <span>B_ID: ${escapeHtml(selectedReturnIssue.b_id || selectedReturnIssue.bookId || "")}</span>
+          <span>Accession No.: ${escapeHtml(selectedReturnIssue.accessionNumber || selectedReturnIssue.b_id || selectedReturnIssue.bookId || "")}</span>
           <span>Due date: ${formatDate(selectedReturnIssue.dueDate)}</span>
           <span>Current penalty: Rs.${Number(penalty.penaltyAmount || 0).toFixed(2)}</span>
           <span>Librarian return time: ${escapeHtml(scheduleLabel(schedule))}</span>

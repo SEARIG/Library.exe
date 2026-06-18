@@ -11,10 +11,12 @@ import {
   wireSignOut
 } from "./app.js";
 import {
+  accessionNumberOf,
   addDays,
   createIssueRequest,
   findBookByBarcode,
   getStudentProfile,
+  titleOf,
   returnBook
 } from "./firestore-service.js";
 import { sendEmailNotification } from "./notifications.js";
@@ -78,8 +80,8 @@ function renderBookPreview(book) {
     <article class="book-preview">
       <img src="${escapeHtml(book.imageUrl || "assets/book-placeholder.svg")}" alt="">
       <div>
-        <strong>${escapeHtml(book.bname || book.title || book.id)}</strong>
-        <span>B_ID: ${escapeHtml(book.b_id || book.id)}</span>
+        <strong>${escapeHtml(titleOf(book) || book.id)}</strong>
+        <span>Accession Number: ${escapeHtml(accessionNumberOf(book) || "-")}</span>
         <span>${escapeHtml(book.subject || "Subject not set")} | ${escapeHtml(book.category || "Uncategorized")}</span>
         <span>${escapeHtml(book.barcodeValue || "")}</span>
         <span class="badge badge-${escapeHtml(book.status)}">${escapeHtml(book.status)}</span>
@@ -102,10 +104,10 @@ async function openIssueDialog(book) {
   $("#requestStudentName").value = currentStudent.name || "";
   $("#requestRollNumber").value = currentStudent.rollNumber || "";
   $("#requestBookId").value = book.b_id || "";
-  $("#requestBookTitle").value = book.bname || "";
+  $("#requestBookTitle").value = titleOf(book);
   $("#requestSubject").value = book.subject || "";
   $("#requestCategory").value = book.category || "";
-  $("#requestBLegalNum").value = book.blegal_num || "";
+  $("#requestAccessionNumber").value = accessionNumberOf(book);
   $("#requestBarcodeValue").value = book.barcodeValue || "";
   $("#dialogBookTitle").textContent = book.bname || book.b_id || book.id;
   $("#requestIssueDate").value = issueDate.toISOString().slice(0, 10);

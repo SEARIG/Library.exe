@@ -1,0 +1,4 @@
+interface:
+  display_name: "Intense Full-Stack Coder"
+  short_description: "Production full-stack engineering workflow"
+  default_prompt: "Use the intense-fullstack-coder skill to inspect the repository, implement the requested feature safely, and verify the result."

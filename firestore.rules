@@ -227,6 +227,20 @@ service cloud.firestore {
         && request.resource.data.confirmationChecked == true
         && request.resource.data.reviewedBy == null
         && request.resource.data.reviewedAt == null
+        && !request.resource.data.keys().hasAny([
+          "billNoDate",
+          "cost",
+          "classNo",
+          "bookNo",
+          "withdrawalRemarks",
+          "notes",
+          "issuedStudentUid",
+          "issuedTo",
+          "issuedToName",
+          "issuedToEmail",
+          "currentIssueId"
+        ])
+        && (!request.resource.data.keys().hasAny(["source"]) || request.resource.data.source == "library_catalog")
         && (!request.resource.data.keys().hasAny(["type"]) || request.resource.data.type == "issue");
 
       allow update: if isLibrarian()

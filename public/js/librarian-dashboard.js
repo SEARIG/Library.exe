@@ -13,11 +13,16 @@ import {
   wireSignOut
 } from "./app.js";
 import {
+  accessionBarcode,
+  accessionNumberOf,
+  calculatePenalty,
+  findBookByLibraryCode,
   getUnpaidPenaltySummary,
   getIssueReturnSchedule,
   isUnpaidPenaltyRecord,
   returnBook,
-  scheduleLabel
+  scheduleLabel,
+  titleOf
 } from "./firestore-service.js";
 import {
   EMAILJS_SETUP_MESSAGE,
@@ -25,6 +30,12 @@ import {
   runReminderCheck,
   sendEmailNotification
 } from "./notifications.js";
+import {
+  ACCESSION_TEMPLATE_HEADERS,
+  accessionBookData,
+  accessionExportRow,
+  parseAccessionRegister
+} from "./accession-register.mjs";
 import {
   collection,
   doc,
@@ -58,10 +69,13 @@ let latestPenalties = [];
 let latestBarcodeDataUrl = "";
 let selectedReturnRequest = null;
 let pendingBookImportRows = [];
+let pendingBookImportMatrix = [];
+let pendingBookImportSheetName = "";
 let publisherStream = null;
 let publisherScanTimer = null;
 let quickReturnStream = null;
 let quickReturnScanTimer = null;
+let selectedQuickReturn = null;
 const showBookDebug = new URLSearchParams(window.location.search).get("debug") === "true"
   || localStorage.debugBooks === "true";
 const testEmailButton = $("#sendTestEmailBtn");
@@ -97,15 +111,15 @@ function shortUid(uid = "") {
 }
 
 function bookTitle(book) {
-  return book.bname || book.title || book.bookName || "";
+  return titleOf(book);
 }
 
 function bookIdOf(book, fallbackId = "") {
   return book.b_id || book.bookId || fallbackId;
 }
 
-function barcodeValueFor(bid) {
-  return `BOOK-${bid}`;
+function barcodeValueFor(accessionNumber, fallbackBid = "") {
+  return accessionBarcode(accessionNumber) || `BOOK-${fallbackBid}`;
 }
 
 function readWorkbookRows(file) {
@@ -113,9 +127,23 @@ function readWorkbookRows(file) {
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const workbook = window.XLSX.read(event.target.result, { type: "array" });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        resolve(window.XLSX.utils.sheet_to_json(sheet, { defval: "" }));
+        const workbook = window.XLSX.read(event.target.result, {
+          type: "array",
+          cellDates: false
+        });
+        const sheetName = workbook.SheetNames.find((name) => name.trim().toLowerCase() === "register data")
+          || workbook.SheetNames[0];
+        if (!sheetName) throw new Error("The workbook does not contain a worksheet.");
+        const sheet = workbook.Sheets[sheetName];
+        resolve({
+          sheetName,
+          matrix: window.XLSX.utils.sheet_to_json(sheet, {
+            header: 1,
+            defval: "",
+            raw: false,
+            blankrows: false
+          })
+        });
       } catch (error) {
         reject(error);
       }
@@ -125,65 +153,54 @@ function readWorkbookRows(file) {
   });
 }
 
-function valueFor(row, ...names) {
-  const entries = Object.entries(row || {});
-  for (const name of names) {
-    const found = entries.find(([key]) => key.trim().toLowerCase() === name.toLowerCase());
-    if (found) return String(found[1] ?? "").trim();
-  }
-  return "";
-}
-
 function numberValue(value, fallback = 1) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }
 
-function downloadWorkbookTemplate(filename, rows) {
+function normalizeAccession(value) {
+  return String(value || "").trim();
+}
+
+function accessionValuesForCopies(base, copies) {
+  return Array.from({ length: copies }, (_, index) => index === 0 ? base : `${base}-${index + 1}`);
+}
+
+function downloadWorkbookTemplate(filename, rows, sheetName = "Template") {
   if (!window.XLSX) throw new Error("XLSX library is not loaded.");
   const sheet = window.XLSX.utils.json_to_sheet(rows);
   const workbook = window.XLSX.utils.book_new();
-  window.XLSX.utils.book_append_sheet(workbook, sheet, "Template");
+  window.XLSX.utils.book_append_sheet(workbook, sheet, sheetName);
   window.XLSX.writeFile(workbook, filename);
 }
 
-function normalizeBookImportRows(rows) {
-  return rows.map((row, index) => {
-    const rawCategory = valueFor(row, "Category") || "textbook";
-    const category = rawCategory.trim().toLowerCase();
-    const normalized = {
-      rowNumber: index + 2,
-      isbn: valueFor(row, "ISBN"),
-      bname: valueFor(row, "Book Name", "BookName", "Title"),
-      author: valueFor(row, "Author"),
-      publisher: valueFor(row, "Publisher"),
-      subject: valueFor(row, "Subject"),
-      category,
-      copies: numberValue(valueFor(row, "Copies"), 1),
-      blegal_num: valueFor(row, "BLegalNumber", "BLegal Number", "Inside Book Number")
-    };
-    const errors = [];
-    if (!normalized.bname) errors.push("Book Name is required");
-    if (!normalized.subject) errors.push("Subject is required");
-    if (!normalized.category) errors.push("Category is required");
-    if (normalized.category && !BOOK_CATEGORIES.includes(normalized.category)) {
-      errors.push(`Category must be one of: ${BOOK_CATEGORIES.join(", ")}`);
-    }
-    if (normalized.copies < 1) errors.push("Copies must be at least 1");
-    return { ...normalized, errors };
-  });
+function existingAccessionMap() {
+  return new Map(latestBooks
+    .map((item) => [accessionNumberOf(item.data).toLowerCase(), item])
+    .filter(([accession]) => accession));
 }
 
-function renderBookImportPreview(rows) {
+function normalizeBookImportRows(matrix) {
+  return parseAccessionRegister(
+    matrix,
+    existingAccessionMap(),
+    $("#updateExistingBooks")?.checked === true
+  );
+}
+
+function renderBookImportPreview(rows, sheetName = "", headerRow = 0) {
   pendingBookImportRows = rows;
-  $("#confirmBookImportBtn").disabled = !rows.length || rows.some((row) => row.errors.length);
-  const totalCopies = rows.reduce((sum, row) => sum + row.copies, 0);
+  const readyCount = rows.filter((row) => !row.errors.length).length;
   const errorCount = rows.filter((row) => row.errors.length).length;
+  const duplicateCount = rows.filter((row) => row.duplicateType).length;
+  $("#confirmBookImportBtn").disabled = readyCount === 0;
   $("#bookImportResult").innerHTML = `
     <div class="${errorCount ? "empty" : "success-box"}">
       <strong>${rows.length} row(s) parsed</strong>
-      <span>Total copies to create: ${totalCopies}</span>
+      <span>Sheet: ${escapeHtml(sheetName || "Register Data")} | Header row: ${headerRow || "-"}</span>
+      <span>Ready to import/update: ${readyCount}</span>
       <span>Validation errors: ${errorCount}</span>
+      <span>Duplicates: ${duplicateCount}</span>
     </div>`;
   if (!rows.length) {
     renderEmpty($("#bookImportPreview"), "No rows found.");
@@ -194,14 +211,14 @@ function renderBookImportPreview(rows) {
       <thead>
         <tr>
           <th>Row</th>
-          <th>ISBN</th>
-          <th>Book Name</th>
+          <th>Accession Number</th>
           <th>Author</th>
-          <th>Publisher</th>
-          <th>Subject</th>
-          <th>Category</th>
-          <th>Copies</th>
-          <th>BLegalNumber</th>
+          <th>Title</th>
+          <th>Place &amp; Publisher</th>
+          <th>Year</th>
+          <th>Pages</th>
+          <th>Cost</th>
+          <th>Image URL</th>
           <th>Status</th>
         </tr>
       </thead>
@@ -209,15 +226,17 @@ function renderBookImportPreview(rows) {
         ${rows.map((row) => `
           <tr>
             <td>${row.rowNumber}</td>
-            <td>${escapeHtml(row.isbn)}</td>
-            <td>${escapeHtml(row.bname)}</td>
+            <td>${escapeHtml(row.accessionNumber)}</td>
             <td>${escapeHtml(row.author)}</td>
-            <td>${escapeHtml(row.publisher)}</td>
-            <td>${escapeHtml(row.subject)}</td>
-            <td>${escapeHtml(row.category)}</td>
-            <td>${row.copies}</td>
-            <td>${escapeHtml(row.blegal_num)}</td>
-            <td>${row.errors.length ? escapeHtml(row.errors.join("; ")) : "Ready"}</td>
+            <td>${escapeHtml(row.title)}</td>
+            <td>${escapeHtml(row.placePublisher)}</td>
+            <td>${escapeHtml(row.year)}</td>
+            <td>${escapeHtml(row.pages)}</td>
+            <td>${escapeHtml(row.cost)}</td>
+            <td>${escapeHtml(row.imageUrl)}</td>
+            <td>${row.errors.length
+              ? escapeHtml(row.errors.join("; "))
+              : row.action === "update" ? "Ready: update existing" : "Ready: import"}</td>
           </tr>`).join("")}
       </tbody>
     </table>`;
@@ -226,31 +245,34 @@ function renderBookImportPreview(rows) {
 async function importPreviewedBooks() {
   const validRows = pendingBookImportRows.filter((row) => !row.errors.length);
   if (!validRows.length) throw new Error("No valid book rows to import.");
-  const totalCopies = validRows.reduce((sum, row) => sum + row.copies, 0);
   const importBatchId = `books_import_${Date.now()}`;
-  const result = await runTransaction(db, async (transaction) => {
-    const counterRef = doc(db, "counters", "books");
-    const counterSnap = await transaction.get(counterRef);
-    let nextId = (counterSnap.exists() ? Number(counterSnap.data().lastId || 0) : 0) + 1;
-    const createdIds = [];
+  let imported = 0;
+  let updated = 0;
 
-    validRows.forEach((row) => {
-      for (let copy = 0; copy < row.copies; copy += 1) {
-        const bId = String(nextId);
+  for (const row of validRows) {
+    const registerData = accessionBookData(row);
+    if (row.action === "update" && row.existingBookId) {
+      await updateDoc(doc(db, "books", row.existingBookId), {
+        ...registerData,
+        bname: registerData.title,
+        publisher: registerData.placePublisher,
+        metadataSource: "accession_register_import",
+        importBatchId,
+        updatedAt: serverTimestamp()
+      });
+      updated += 1;
+    } else {
+      await runTransaction(db, async (transaction) => {
+        const counterRef = doc(db, "counters", "books");
+        const counterSnap = await transaction.get(counterRef);
+        const bId = String((counterSnap.exists() ? Number(counterSnap.data().lastId || 0) : 0) + 1);
         const bookRef = doc(db, "books", bId);
         transaction.set(bookRef, {
+          ...registerData,
           b_id: bId,
-          bname: row.bname,
-          author: row.author,
-          publisher: row.publisher,
-          subject: row.subject,
-          category: row.category,
-          blegal_num: row.blegal_num,
-          publisherBarcode: row.isbn,
-          isbn: row.isbn,
-          imageUrl: "",
-          metadataSource: "import",
-          barcodeValue: barcodeValueFor(bId),
+          bname: registerData.title,
+          publisher: registerData.placePublisher,
+          metadataSource: "accession_register_import",
           barcodeDataUrl: "",
           barcodePrinted: false,
           barcodePrintedAt: null,
@@ -258,49 +280,66 @@ async function importPreviewedBooks() {
           barcodePrintBatchId: null,
           importBatchId,
           status: "available",
+          issuedStudentUid: null,
           issuedTo: null,
           issuedToName: null,
+          issuedToEmail: null,
           currentIssueId: null,
           createdBy: session.user.uid,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
-        createdIds.push(bId);
-        nextId += 1;
-      }
-    });
-
-    transaction.set(counterRef, { lastId: nextId - 1 }, { merge: true });
-    return { createdIds, importBatchId };
-  });
+        transaction.set(counterRef, { lastId: Number(bId) }, { merge: true });
+      });
+      imported += 1;
+    }
+  }
 
   const skipped = pendingBookImportRows.length - validRows.length;
-  $("#barcodeImportBatchFilter").value = result.importBatchId;
+  const duplicateCount = pendingBookImportRows.filter((row) => row.duplicateType).length;
+  $("#barcodeImportBatchFilter").value = importBatchId;
   renderBarcodePrintManager();
   $("#bookImportResult").innerHTML = `
     <div class="success-box">
-      <strong>Books imported successfully</strong>
-      <span>Imported count: ${result.createdIds.length}</span>
+      <strong>Accession register import complete</strong>
+      <span>Imported count: ${imported}</span>
+      <span>Updated count: ${updated}</span>
       <span>Skipped count: ${skipped}</span>
       <span>Errors: ${skipped}</span>
-      <span>Import batch: ${escapeHtml(result.importBatchId)}</span>
+      <span>Duplicate count: ${duplicateCount}</span>
+      <span>Import batch: ${escapeHtml(importBatchId)}</span>
     </div>`;
   $("#confirmBookImportBtn").disabled = true;
   pendingBookImportRows = [];
-  return { imported: totalCopies, skipped, importBatchId: result.importBatchId };
+  return { imported, updated, skipped, duplicateCount, importBatchId };
 }
 
 function collectBookMetadata() {
+  const title = $("#bnameInput").value.trim();
+  const placePublisher = $("#publisherInput").value.trim();
   return {
-    bname: $("#bnameInput").value.trim(),
+    accessionNumber: normalizeAccession($("#accessionNumberInput").value),
+    accessionDate: $("#accessionDateInput").value.trim(),
+    title,
+    bname: title,
+    author: $("#authorInput").value.trim(),
+    placePublisher,
+    publisher: placePublisher,
+    year: $("#yearInput").value.trim(),
+    pages: $("#pagesInput").value.trim(),
+    volume: $("#volumeInput").value.trim(),
+    source: $("#sourceInput").value.trim(),
+    billNoDate: $("#billNoDateInput").value.trim(),
+    cost: $("#costInput").value.trim(),
+    classNo: $("#classNoInput").value.trim(),
+    bookNo: $("#bookNoInput").value.trim(),
+    withdrawalRemarks: $("#withdrawalRemarksInput").value.trim(),
     subject: $("#subjectInput").value.trim(),
     category: $("#category").value,
-    blegal_num: $("#blegalNum").value.trim(),
     publisherBarcode: $("#publisherBarcodeInput").value.trim(),
     isbn: ($("#isbnInput").value || $("#publisherBarcodeInput").value).trim(),
-    author: $("#authorInput").value.trim(),
-    publisher: $("#publisherInput").value.trim(),
     imageUrl: $("#imageUrlInput").value.trim(),
+    notes: $("#notesInput").value.trim(),
     updatedAt: serverTimestamp()
   };
 }
@@ -478,11 +517,19 @@ async function approveRequest(requestId) {
       studentPhone,
       b_id: bookDocId,
       bookId: bookDocId,
-      bookBarcodeValue: requestData.bookBarcodeValue || bookData.barcodeValue || "",
-      bookTitle: requestData.bookTitle || requestData.bname || bookData.bname || "",
+      accessionNumber: requestData.accessionNumber || accessionNumberOf(bookData),
+      author: requestData.author || bookData.author || "",
+      title: requestData.title || requestData.bookTitle || bookTitle(bookData),
+      placePublisher: requestData.placePublisher || bookData.placePublisher || bookData.publisher || "",
+      year: requestData.year || bookData.year || "",
+      pages: requestData.pages || bookData.pages || "",
+      volume: requestData.volume || bookData.volume || "",
+      imageUrl: requestData.imageUrl || requestData.bookImage || bookData.imageUrl || "",
+      barcodeValue: requestData.barcodeValue || requestData.bookBarcodeValue || bookData.barcodeValue || "",
+      bookBarcodeValue: requestData.barcodeValue || requestData.bookBarcodeValue || bookData.barcodeValue || "",
+      bookTitle: requestData.title || requestData.bookTitle || requestData.bname || bookTitle(bookData),
       subject: requestData.subject || bookData.subject || "",
       category: requestData.category || bookData.category || "",
-      blegal_num: requestData.blegal_num || bookData.blegal_num || "",
       issueDate: requestData.issueDate,
       dueDate: requestData.dueDate,
       returnDate: null,
@@ -503,6 +550,7 @@ async function approveRequest(requestId) {
     };
     const bookUpdate = {
       status: "issued",
+      issuedStudentUid: requestData.studentUid,
       issuedTo: requestData.studentUid,
       issuedToName: studentName,
       issuedToEmail: studentEmail,
@@ -585,7 +633,8 @@ function setNextBookId(lastId = 0) {
   nextBookId = String(Number(lastId || 0) + 1);
   if (!editingBookId) {
     $("#autoBId").value = nextBookId;
-    renderBarcode(barcodeValueFor(nextBookId), nextBookId);
+    const accessionNumber = $("#accessionNumberInput")?.value.trim() || "";
+    renderBarcode(barcodeValueFor(accessionNumber, nextBookId), accessionNumber);
   }
 }
 
@@ -593,9 +642,10 @@ onSnapshot(doc(db, "counters", "books"), (snap) => {
   setNextBookId(snap.exists() ? snap.data().lastId : 0);
 });
 
-function renderBarcode(value, bid = $("#autoBId").value || nextBookId) {
-  $("#stickerBId").textContent = `B_ID: ${bid || "-"}`;
-  $("#stickerBarcodeValue").textContent = value || "BOOK-";
+function renderBarcode(value, accessionNumber = $("#accessionNumberInput")?.value.trim() || "") {
+  $("#stickerBId").textContent = `Accession No: ${accessionNumber || "-"}`;
+  $("#stickerBookTitle").textContent = `Title: ${$("#bnameInput")?.value.trim() || "-"}`;
+  $("#stickerBarcodeValue").textContent = value || "ACC-";
   const barcodeValueInput = document.getElementById("libraryBarcodeValueInput");
   if (barcodeValueInput) barcodeValueInput.value = value || "";
   if (!value || !window.JsBarcode) return;
@@ -1218,12 +1268,21 @@ async function saveBook(event) {
   event.preventDefault();
   setLoading(addBookForm, true);
   try {
-    const selectedBid = editingBookId || nextBookId;
-    const barcodeValue = barcodeValueFor(selectedBid);
-    renderBarcode(barcodeValue, selectedBid);
     const metadataUpdate = collectBookMetadata();
+    const totalCopies = editingBookId ? 1 : numberValue($("#totalCopiesInput").value, 1);
 
-    if (!metadataUpdate.bname) throw new Error("Book Name is required.");
+    if (!metadataUpdate.accessionNumber) throw new Error("Accession Number is required.");
+    if (!metadataUpdate.title) throw new Error("Title is required.");
+
+    const requestedAccessions = accessionValuesForCopies(metadataUpdate.accessionNumber, totalCopies);
+    const duplicate = latestBooks.find((item) => {
+      if (editingBookId && item.id === editingBookId) return false;
+      return requestedAccessions.some((accession) => accessionNumberOf(item.data).toLowerCase() === accession.toLowerCase());
+    });
+    if (duplicate) {
+      throw new Error(`Accession Number already exists: ${accessionNumberOf(duplicate.data)}`);
+    }
+    renderBarcode(barcodeValueFor(metadataUpdate.accessionNumber, editingBookId || nextBookId), metadataUpdate.accessionNumber);
 
     if (editingBookId) {
       console.log("Saving existing book metadata only:", editingBookId);
@@ -1236,46 +1295,51 @@ async function saveBook(event) {
       if (currentBook.status !== "available") {
         showToast("Book is currently issued/lost/damaged. Only metadata will be updated. Availability will not change.", "warning");
       }
-      await updateDoc(doc(db, "books", editingBookId), metadataUpdate);
+      await updateDoc(doc(db, "books", editingBookId), {
+        ...metadataUpdate,
+        barcodeValue: barcodeValueFor(metadataUpdate.accessionNumber, currentBook.b_id || editingBookId)
+      });
       showToast("Book details saved. Availability was not changed.", "success");
     } else {
-      const payload = {
-        ...metadataUpdate,
-        metadataSource: $("#metadataSourceInput").value.trim(),
-        barcodeValue,
-        barcodeDataUrl: "",
-        status: "available",
-        issuedTo: null,
-        issuedToName: null,
-        currentIssueId: null,
-        barcodePrinted: false,
-        barcodePrintedAt: null,
-        barcodePrintedBy: null,
-        barcodePrintBatchId: null
-      };
-      const createdBookId = await runTransaction(db, async (transaction) => {
+      const createdBooks = await runTransaction(db, async (transaction) => {
         const counterRef = doc(db, "counters", "books");
         const counterSnap = await transaction.get(counterRef);
         const lastId = counterSnap.exists() ? Number(counterSnap.data().lastId || 0) : 0;
-        const newId = lastId + 1;
-        const bId = String(newId);
-        const bookRef = doc(db, "books", bId);
-        transaction.set(bookRef, {
-          ...payload,
-          b_id: bId,
-          barcodeValue: barcodeValueFor(bId),
-          createdBy: session.user.uid,
-          createdAt: serverTimestamp()
+        const created = requestedAccessions.map((accessionNumber, index) => {
+          const bId = String(lastId + index + 1);
+          const bookRef = doc(db, "books", bId);
+          transaction.set(bookRef, {
+            ...metadataUpdate,
+            accessionNumber,
+            b_id: bId,
+            metadataSource: $("#metadataSourceInput").value.trim(),
+            barcodeValue: barcodeValueFor(accessionNumber, bId),
+            barcodeDataUrl: "",
+            status: "available",
+            issuedStudentUid: null,
+            issuedTo: null,
+            issuedToName: null,
+            issuedToEmail: null,
+            currentIssueId: null,
+            barcodePrinted: false,
+            barcodePrintedAt: null,
+            barcodePrintedBy: null,
+            barcodePrintBatchId: null,
+            createdBy: session.user.uid,
+            createdAt: serverTimestamp()
+          });
+          return { bId, accessionNumber };
         });
-        transaction.set(counterRef, { lastId: newId }, { merge: true });
-        return bId;
+        transaction.set(counterRef, { lastId: lastId + created.length }, { merge: true });
+        return created;
       });
-      renderBarcode(barcodeValueFor(createdBookId), createdBookId);
-      await updateDoc(doc(db, "books", createdBookId), {
+      const firstCreated = createdBooks[0];
+      renderBarcode(barcodeValueFor(firstCreated.accessionNumber, firstCreated.bId), firstCreated.accessionNumber);
+      await updateDoc(doc(db, "books", firstCreated.bId), {
         barcodeDataUrl: await ensureBarcodeDataUrl(),
         updatedAt: serverTimestamp()
       });
-      showToast("Book saved successfully.", "success");
+      showToast(`${createdBooks.length} book record${createdBooks.length === 1 ? "" : "s"} saved successfully.`, "success");
     }
 
     try {
@@ -1289,6 +1353,8 @@ async function saveBook(event) {
     editingExistingBook = null;
     addBookForm.reset();
     $("#category").value = "pyq";
+    $("#totalCopiesInput").value = "1";
+    $("#totalCopiesInput").disabled = false;
     $("#saveBookBtn").textContent = "Save Book";
     $("#bookSaveModeHelp").textContent = "Availability is controlled only by issue, return, lost, and found actions.";
     $("#bookFetchPreview").innerHTML = `<div class="empty">Fetch details or fill the book manually.</div>`;
@@ -1313,16 +1379,18 @@ function renderBooksTable() {
     const status = String(data.status || "available").toLowerCase();
     const category = String(data.category || "").toLowerCase();
     const haystack = [
-      data.b_id,
-      data.bname,
+      accessionNumberOf(data),
+      bookTitle(data),
       data.author,
+      data.placePublisher,
       data.publisher,
+      data.year,
+      data.classNo,
+      data.bookNo,
       data.subject,
       data.category,
-      data.blegal_num,
       data.isbn,
-      data.publisherBarcode,
-      data.barcodeValue
+      data.publisherBarcode
     ].join(" ").toLowerCase();
     if (search && !haystack.includes(search)) return false;
     if (categoryFilter && category !== categoryFilter) return false;
@@ -1339,34 +1407,42 @@ function renderBooksTable() {
     <table>
       <thead>
         <tr>
-          <th>B_ID</th>
-          <th>Book Name</th>
-          <th>Subject</th>
-          <th>Category</th>
-          <th>BLegal Number</th>
-          <th>Publisher Barcode / ISBN</th>
-          <th>Library Barcode</th>
+          <th>Accession Number</th>
+          <th>Date</th>
+          <th>Author</th>
+          <th>Title</th>
+          <th>Place &amp; Publisher</th>
+          <th>Year</th>
+          <th>Pages</th>
+          <th>Vol.</th>
+          <th>Source</th>
+          <th>Bill No &amp; Date</th>
+          <th>Cost</th>
+          <th>Class No.</th>
+          <th>Book No.</th>
           <th>Status</th>
+          <th>Issued Student UID</th>
           <th>Actions</th>
         </tr>
       </thead>
       <tbody>
         ${rows.map(({ id, data }) => `
           <tr data-book-id="${escapeHtml(id)}">
-            <td>${escapeHtml(data.b_id || id)}</td>
-            <td><strong>${escapeHtml(bookTitle(data))}</strong><span>${escapeHtml(data.author || "")}</span></td>
-            <td>${escapeHtml(data.subject || "")}</td>
-            <td>${escapeHtml(data.category || "")}</td>
-            <td>${escapeHtml(data.blegal_num || "")}</td>
-            <td>${escapeHtml(data.publisherBarcode || data.isbn || "")}</td>
-            <td>${escapeHtml(data.barcodeValue || "")}</td>
-            <td>
-              ${statusBadge(data.status)}
-              ${data.status === "issued" ? `
-                <span>Issued to: ${escapeHtml(data.issuedToName || "Unknown student")}</span>
-                <span>Email: ${escapeHtml(data.issuedToEmail || "")}</span>
-              ` : ""}
-            </td>
+            <td>${escapeHtml(accessionNumberOf(data) || "-")}</td>
+            <td>${escapeHtml(data.accessionDate || "-")}</td>
+            <td>${escapeHtml(data.author || "-")}</td>
+            <td><strong>${escapeHtml(bookTitle(data) || "-")}</strong></td>
+            <td>${escapeHtml(data.placePublisher || data.publisher || "-")}</td>
+            <td>${escapeHtml(data.year || "-")}</td>
+            <td>${escapeHtml(data.pages || "-")}</td>
+            <td>${escapeHtml(data.volume || "-")}</td>
+            <td>${escapeHtml(data.source || "-")}</td>
+            <td>${escapeHtml(data.billNoDate || "-")}</td>
+            <td>${escapeHtml(data.cost || "-")}</td>
+            <td>${escapeHtml(data.classNo || "-")}</td>
+            <td>${escapeHtml(data.bookNo || "-")}</td>
+            <td>${statusBadge(data.status)}</td>
+            <td>${escapeHtml(data.status === "issued" ? (data.issuedStudentUid || data.issuedTo || "-") : "-")}</td>
             <td>
               <div class="row-actions">
                 <button class="btn btn-muted" data-book-action="view">View</button>
@@ -1393,7 +1469,7 @@ function availabilityLabel(status = "") {
 }
 
 function barcodeBookId(item) {
-  return item.data.b_id || item.id;
+  return accessionNumberOf(item.data) || item.data.b_id || item.id;
 }
 
 function barcodeBookTitle(data = {}) {
@@ -1416,20 +1492,20 @@ function barcodeFilterValue(id) {
 
 function filteredBarcodeBooks() {
   const printStatus = $("#barcodePrintStatusFilter")?.value || "notPrinted";
-  const rangeFrom = Number($("#barcodeRangeFrom")?.value || 0);
-  const rangeTo = Number($("#barcodeRangeTo")?.value || 0);
+  const rangeFrom = barcodeFilterValue("barcodeRangeFrom");
+  const rangeTo = barcodeFilterValue("barcodeRangeTo");
   const category = barcodeFilterValue("barcodeCategoryFilter");
   const importBatch = barcodeFilterValue("barcodeImportBatchFilter");
   const status = barcodeFilterValue("barcodeBookStatusFilter");
 
   return latestBooks.filter((item) => {
     const data = item.data;
-    const bid = Number(data.b_id || item.id || 0);
+    const accession = accessionNumberOf(data).toLowerCase();
     const printed = data.barcodePrinted === true;
     if (printStatus === "notPrinted" && printed) return false;
     if (printStatus === "printed" && !printed) return false;
-    if (rangeFrom && bid < rangeFrom) return false;
-    if (rangeTo && bid > rangeTo) return false;
+    if (rangeFrom && accession.localeCompare(rangeFrom) < 0) return false;
+    if (rangeTo && accession.localeCompare(rangeTo) > 0) return false;
     if (category && String(data.category || "").toLowerCase() !== category) return false;
     if (importBatch && String(data.importBatchId || "").toLowerCase() !== importBatch) return false;
     if (status && String(data.status || "").toLowerCase() !== status) return false;
@@ -1461,9 +1537,8 @@ function renderBarcodePrintManager() {
       <thead>
         <tr>
           <th><span class="sr-only">Select</span></th>
-          <th>B_ID</th>
+          <th>Accession Number</th>
           <th>Book Name</th>
-          <th>BLegal Number</th>
           <th>Barcode Value</th>
           <th>Print Status</th>
           <th>Action</th>
@@ -1479,8 +1554,7 @@ function renderBarcodePrintManager() {
               <td><input class="barcode-print-select" type="checkbox" value="${escapeHtml(item.id)}" ${printed ? "" : "checked"}></td>
               <td>${escapeHtml(bid)}</td>
               <td><strong>${escapeHtml(barcodeBookTitle(data))}</strong><span>${escapeHtml(data.category || "")}</span></td>
-              <td>${escapeHtml(data.blegal_num || "")}</td>
-              <td>${escapeHtml(data.barcodeValue || barcodeValueFor(bid))}</td>
+              <td>${escapeHtml(data.barcodeValue || barcodeValueFor(bid, data.b_id || item.id))}</td>
               <td>${printed ? `<span class="badge badge-issued">Printed</span>` : `<span class="badge badge-available">Not Printed</span>`}</td>
               <td>${printed ? `<button class="btn btn-muted reprint-barcode-btn" data-book-id="${escapeHtml(item.id)}" type="button">Reprint</button>` : ""}</td>
             </tr>`;
@@ -1549,10 +1623,10 @@ async function generateBarcodePdfForBooks(items, batchId) {
     const x = marginX + col * (stickerWidth + gapX);
     const y = marginY + row * (stickerHeight + gapY);
     const data = items[index].data;
-    const bid = barcodeBookId(items[index]);
-    const barcodeValue = data.barcodeValue || barcodeValueFor(bid);
+    const accessionNumber = barcodeBookId(items[index]);
+    const barcodeValue = data.barcodeValue || barcodeValueFor(accessionNumber, data.b_id || items[index].id);
     const barcodeImage = await barcodeImageDataUrl(barcodeValue);
-    console.log("Barcode image generated:", { bookId: items[index].id, bid, barcodeValue });
+    console.log("Barcode image generated:", { bookId: items[index].id, accessionNumber, barcodeValue });
 
     pdf.setDrawColor(210, 216, 224);
     pdf.roundedRect(x, y, stickerWidth - 1.5, stickerHeight - 1.5, 1.5, 1.5);
@@ -1561,10 +1635,9 @@ async function generateBarcodePdfForBooks(items, batchId) {
     pdf.text("Mohanlal Sukhadia University LMS", x + 3, y + 4.5);
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(6);
-    pdf.text(`B_ID: ${bid}`, x + 3, y + 8);
-    pdf.text(`Legal No: ${data.blegal_num || "-"}`, x + 3, y + 11);
-    pdf.text(`Book: ${shortBookName(barcodeBookTitle(data))}`, x + 3, y + 14);
-    pdf.addImage(barcodeImage, "PNG", x + 5, y + 15.5, stickerWidth - 12, 11);
+    pdf.text(`Accession No: ${accessionNumber}`, x + 3, y + 8);
+    pdf.text(`Title: ${shortBookName(barcodeBookTitle(data))}`, x + 3, y + 12);
+    pdf.addImage(barcodeImage, "PNG", x + 5, y + 14.5, stickerWidth - 12, 11);
     pdf.setFont("helvetica", "bold");
     pdf.setFontSize(7);
     pdf.text(barcodeValue, x + stickerWidth / 2, y + 30, { align: "center" });
@@ -1645,10 +1718,9 @@ function exportBarcodeExcel() {
   const rows = filteredBarcodeBooks().map((item) => {
     const data = item.data;
     return {
-      B_ID: data.b_id || item.id,
-      "Book Name": barcodeBookTitle(data),
-      "BLegal Number": data.blegal_num || "",
-      "Barcode Value": data.barcodeValue || barcodeValueFor(data.b_id || item.id),
+      "Accession Number": accessionNumberOf(data),
+      Title: barcodeBookTitle(data),
+      "Barcode Value": data.barcodeValue || barcodeValueFor(accessionNumberOf(data), data.b_id || item.id),
       "Barcode Printed": data.barcodePrinted === true ? "Yes" : "No",
       "Printed At": data.barcodePrintedAt ? formatDate(data.barcodePrintedAt) : "",
       "Printed By": data.barcodePrintedBy || "",
@@ -1678,64 +1750,66 @@ function exportBooksExcel() {
       const status = String(data.status || "available").toLowerCase();
       const category = String(data.category || "").toLowerCase();
       const haystack = [
-        data.b_id,
-        data.bname,
+        accessionNumberOf(data),
+        bookTitle(data),
         data.author,
+        data.placePublisher,
         data.publisher,
+        data.year,
         data.subject,
         data.category,
-        data.blegal_num,
         data.isbn,
-        data.publisherBarcode,
-        data.barcodeValue
+        data.publisherBarcode
       ].join(" ").toLowerCase();
       if (search && !haystack.includes(search)) return false;
       if (categoryFilter && category !== categoryFilter) return false;
       if (availabilityFilter && status !== availabilityFilter) return false;
       return true;
     })
-    .map(({ id, data }) => ({
-      B_ID: data.b_id || id,
-      "Book Name": bookTitle(data),
-      Author: data.author || "",
-      Publisher: data.publisher || "",
-      Subject: data.subject || "",
-      Category: data.category || "",
-      BLegalNumber: data.blegal_num || "",
-      ISBN: data.isbn || data.publisherBarcode || "",
-      "Barcode Value": data.barcodeValue || barcodeValueFor(data.b_id || id),
-      Status: data.status || "available",
-      Availability: availabilityLabel(data.status),
-      "Issued To Name": data.issuedToName || "",
-      "Barcode Printed": data.barcodePrinted === true ? "Yes" : "No",
-      "Created At": data.createdAt ? formatDate(data.createdAt) : "",
-      "Updated At": data.updatedAt ? formatDate(data.updatedAt) : ""
-    }));
+    .map(({ id, data }) => accessionExportRow({
+      ...data,
+      accessionNumber: accessionNumberOf(data),
+      title: bookTitle(data),
+      barcodeValue: data.barcodeValue || barcodeValueFor(accessionNumberOf(data), data.b_id || id)
+    }, formatDate));
   const sheet = window.XLSX.utils.json_to_sheet(rows);
   const workbook = window.XLSX.utils.book_new();
-  window.XLSX.utils.book_append_sheet(workbook, sheet, "Books");
+  window.XLSX.utils.book_append_sheet(workbook, sheet, "Register Data");
   console.log("Books Excel export diagnostics:", {
     xlsxLoaded: typeof XLSX,
     rows: rows.length,
     workbookGenerated: Boolean(workbook)
   });
-  window.XLSX.writeFile(workbook, "books_export.xlsx");
-  console.log("Excel download triggered:", "books_export.xlsx");
+  window.XLSX.writeFile(workbook, "accession_register_export.xlsx");
+  console.log("Excel download triggered:", "accession_register_export.xlsx");
 }
 
 function loadBookIntoForm(id, data) {
   editingBookId = id;
   editingExistingBook = { id, ...data };
   $("#autoBId").value = data.b_id || id;
+  $("#accessionNumberInput").value = accessionNumberOf(data);
+  $("#accessionDateInput").value = data.accessionDate || "";
   $("#bnameInput").value = bookTitle(data);
   $("#subjectInput").value = data.subject || "";
   $("#category").value = data.category || "other";
-  $("#blegalNum").value = data.blegal_num || "";
   $("#publisherBarcodeInput").value = data.publisherBarcode || data.isbn || "";
   $("#isbnInput").value = data.isbn || data.publisherBarcode || "";
   $("#authorInput").value = data.author || "";
-  $("#publisherInput").value = data.publisher || "";
+  $("#publisherInput").value = data.placePublisher || data.publisher || "";
+  $("#yearInput").value = data.year || "";
+  $("#pagesInput").value = data.pages || "";
+  $("#volumeInput").value = data.volume || "";
+  $("#sourceInput").value = data.source || "";
+  $("#billNoDateInput").value = data.billNoDate || "";
+  $("#costInput").value = data.cost || "";
+  $("#classNoInput").value = data.classNo || "";
+  $("#bookNoInput").value = data.bookNo || "";
+  $("#withdrawalRemarksInput").value = data.withdrawalRemarks || "";
+  $("#totalCopiesInput").value = "1";
+  $("#totalCopiesInput").disabled = true;
   $("#imageUrlInput").value = data.imageUrl || "";
+  $("#notesInput").value = data.notes || "";
   $("#metadataSourceInput").value = data.metadataSource || "";
   setMetadataSourceBadge(data.metadataSource || "");
   $("#bookFetchPreview").innerHTML = `
@@ -1747,14 +1821,26 @@ function loadBookIntoForm(id, data) {
         <span>${escapeHtml(data.publisher || "")}</span>
       </div>
     </article>`;
-  renderBarcode(data.barcodeValue || barcodeValueFor(data.b_id || id), data.b_id || id);
+  renderBarcode(data.barcodeValue || barcodeValueFor(accessionNumberOf(data), data.b_id || id), accessionNumberOf(data));
   $("#saveBookBtn").textContent = "Save Book Details";
   $("#bookSaveModeHelp").textContent = "Availability is controlled only by issue, return, lost, and found actions.";
   showToast("Book loaded for editing.", "success");
 }
 
+function showBookDetails(data) {
+  $("#bookDetailsContent").innerHTML = `
+    <span>Accession Number</span><strong>${escapeHtml(accessionNumberOf(data) || "-")}</strong>
+    <span>Withdrawal No., Date &amp; Remarks</span><strong>${escapeHtml(data.withdrawalRemarks || "-")}</strong>
+    <span>Image URL</span><strong>${escapeHtml(data.imageUrl || "-")}</strong>
+    <span>Notes</span><strong>${escapeHtml(data.notes || "-")}</strong>
+    <span>Barcode Value</span><strong>${escapeHtml(data.barcodeValue || barcodeValueFor(accessionNumberOf(data), data.b_id))}</strong>
+    <span>Created At</span><strong>${data.createdAt ? escapeHtml(formatDate(data.createdAt)) : "-"}</strong>
+    <span>Updated At</span><strong>${data.updatedAt ? escapeHtml(formatDate(data.updatedAt)) : "-"}</strong>`;
+  $("#bookDetailsDialog").showModal();
+}
+
 async function printStickerFor(data) {
-  renderBarcode(data.barcodeValue || barcodeValueFor(data.b_id), data.b_id);
+  renderBarcode(data.barcodeValue || barcodeValueFor(accessionNumberOf(data), data.b_id), accessionNumberOf(data));
   const html = $("#barcodeSticker").outerHTML;
   const printWindow = window.open("", "_blank", "width=420,height=420");
   if (!printWindow) {
@@ -1766,6 +1852,13 @@ async function printStickerFor(data) {
 }
 
 addBookForm.addEventListener("submit", saveBook);
+$("#accessionNumberInput").addEventListener("input", () => {
+  const accessionNumber = $("#accessionNumberInput").value.trim();
+  renderBarcode(barcodeValueFor(accessionNumber, $("#autoBId").value || nextBookId), accessionNumber);
+});
+$("#bnameInput").addEventListener("input", () => {
+  $("#stickerBookTitle").textContent = `Title: ${$("#bnameInput").value.trim() || "-"}`;
+});
 function onDomReady(callback) {
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", callback, { once: true });
@@ -1801,8 +1894,12 @@ $("#saveMetadataBtn").addEventListener("click", async () => {
   }
 });
 $("#generateBarcodeBtn").addEventListener("click", () => {
-  const bid = $("#autoBId").value || nextBookId;
-  renderBarcode(barcodeValueFor(bid), bid);
+  const accessionNumber = $("#accessionNumberInput").value.trim();
+  if (!accessionNumber) {
+    showToast("Enter Accession Number first.", "warning");
+    return;
+  }
+  renderBarcode(barcodeValueFor(accessionNumber, $("#autoBId").value || nextBookId), accessionNumber);
   showToast("Library barcode generated.", "success");
 });
 $("#downloadBarcodeBtn").addEventListener("click", async () => {
@@ -1813,21 +1910,29 @@ $("#downloadBarcodeBtn").addEventListener("click", async () => {
   link.click();
 });
 $("#printBarcodeBtn").addEventListener("click", () => printStickerFor({
+  accessionNumber: $("#accessionNumberInput").value.trim(),
+  title: $("#bnameInput").value.trim(),
   b_id: $("#autoBId").value,
   barcodeValue: $("#stickerBarcodeValue").textContent
 }));
 $("#downloadBooksTemplateBtn").addEventListener("click", () => {
   try {
-    downloadWorkbookTemplate("books_template.xlsx", [{
-      ISBN: "9780132350884",
-      "Book Name": "Clean Code",
-      Author: "Robert C. Martin",
-      Publisher: "Prentice Hall",
-      Subject: "Computer Science",
-      Category: "textbook",
-      Copies: 2,
-      BLegalNumber: "CS-001"
-    }]);
+    const example = Object.fromEntries(ACCESSION_TEMPLATE_HEADERS.map((header) => [header, ""]));
+    Object.assign(example, {
+      "Accession No.": "01",
+      Date: "4/2/21",
+      Author: "Mandot (Vivek)",
+      Title: "An Introduction to Detectors + Accelerators",
+      "Place & Publisher": "Himanshu Pub., Udaipur",
+      Year: "2016",
+      Pages: "80",
+      Source: "Arya's Pub. & Dist.",
+      "Bill No. & Date": "03 / 4/6/21",
+      "Cost (Rs.)": "295",
+      "Image URL": "https://example.com/book-cover.jpg",
+      Notes: "Example note"
+    });
+    downloadWorkbookTemplate("accession_register_template.xlsx", [example], "Register Data");
   } catch (error) {
     logDetailedError(error);
     showToast(error.message, "error");
@@ -1838,14 +1943,27 @@ $("#bookImportFile").addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
   try {
-    const rows = await readWorkbookRows(file);
-    renderBookImportPreview(normalizeBookImportRows(rows));
+    const workbookData = await readWorkbookRows(file);
+    pendingBookImportMatrix = workbookData.matrix;
+    pendingBookImportSheetName = workbookData.sheetName;
+    const parsed = normalizeBookImportRows(pendingBookImportMatrix);
+    renderBookImportPreview(parsed.rows, workbookData.sheetName, parsed.sheetHeaderRow);
     showToast("Book import preview ready.", "success");
   } catch (error) {
     logDetailedError(error);
     showToast("Could not parse book import file.", "error");
   } finally {
     event.target.value = "";
+  }
+});
+$("#updateExistingBooks")?.addEventListener("change", () => {
+  if (!pendingBookImportMatrix.length) return;
+  try {
+    const parsed = normalizeBookImportRows(pendingBookImportMatrix);
+    renderBookImportPreview(parsed.rows, pendingBookImportSheetName, parsed.sheetHeaderRow);
+  } catch (error) {
+    logDetailedError(error);
+    showToast(error.message, "error");
   }
 });
 $("#confirmBookImportBtn").addEventListener("click", async () => {
@@ -1879,13 +1997,16 @@ $("#booksTable").addEventListener("click", async (event) => {
   const data = found.data;
 
   try {
-    if (button.dataset.bookAction === "view" || button.dataset.bookAction === "edit") {
+    if (button.dataset.bookAction === "view") {
+      showBookDetails(data);
+    } else if (button.dataset.bookAction === "edit") {
       loadBookIntoForm(id, data);
     } else if (button.dataset.bookAction === "print") {
       await printStickerFor(data);
     } else if (button.dataset.bookAction === "found") {
       await updateDoc(doc(db, "books", id), {
         status: "available",
+        issuedStudentUid: null,
         issuedTo: null,
         issuedToName: null,
         issuedToEmail: null,
@@ -1904,6 +2025,9 @@ $("#booksTable").addEventListener("click", async (event) => {
     logDetailedError(error);
     showToast(error.message, "error");
   }
+});
+$("#bookDetailsDialog")?.querySelector(".dialog-close")?.addEventListener("click", () => {
+  $("#bookDetailsDialog").close();
 });
 
 [
@@ -2590,11 +2714,41 @@ onSnapshot(
 
 $("#quickReturnForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const confirmed = await confirmAction("Confirm book return?");
-  if (!confirmed) return;
   setLoading(event.target, true);
   try {
-    const data = await returnBook($("#quickReturnBookId").value.trim());
+    const lookupValue = $("#quickReturnBookId").value.trim();
+    const book = await findBookByLibraryCode(lookupValue);
+    if (!book.currentIssueId) throw new Error("No active issue found for this book.");
+    const issueSnap = await getDoc(doc(db, "bookIssues", book.currentIssueId));
+    if (!issueSnap.exists()) throw new Error("Active issue record not found.");
+    const issue = issueSnap.data();
+    const issueDate = issue.issueDate?.toDate ? issue.issueDate.toDate() : new Date(issue.issueDate);
+    const penalty = Number.isNaN(issueDate.getTime()) ? { penaltyAmount: 0 } : calculatePenalty(issueDate, new Date());
+    selectedQuickReturn = { lookupValue, book, issue };
+    $("#quickReturnDetails").innerHTML = `
+      <span>Accession Number</span><strong>${escapeHtml(issue.accessionNumber || accessionNumberOf(book) || "-")}</strong>
+      <span>Author</span><strong>${escapeHtml(issue.author || book.author || "-")}</strong>
+      <span>Title</span><strong>${escapeHtml(issue.title || issue.bookTitle || bookTitle(book) || "-")}</strong>
+      <span>Student UID</span><strong>${escapeHtml(issue.studentUid || "-")}</strong>
+      <span>Student Name</span><strong>${escapeHtml(issue.studentName || "-")}</strong>
+      <span>Issue Date</span><strong>${escapeHtml(formatDate(issue.issueDate))}</strong>
+      <span>Due Date</span><strong>${escapeHtml(formatDate(issue.dueDate))}</strong>
+      <span>Penalty</span><strong>Rs.${Number(penalty.penaltyAmount || 0).toFixed(2)}</strong>`;
+    $("#quickReturnDialog").showModal();
+  } catch (error) {
+    console.error("Quick return lookup failed:", error);
+    showToast(`${error.code || "error"}: ${error.message}`, "error");
+  } finally {
+    setLoading(event.target, false);
+  }
+});
+
+$("#confirmQuickReturnForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!selectedQuickReturn) return;
+  setLoading(event.target, true);
+  try {
+    const data = await returnBook(selectedQuickReturn.lookupValue);
     console.log("Return completed:", data);
     if (data.studentUid) {
       const studentSnap = await getDoc(doc(db, "students", data.studentUid));
@@ -2624,7 +2778,9 @@ $("#quickReturnForm").addEventListener("submit", async (event) => {
     if (Number(data.penaltyAmount || 0) > 0) {
       showToast(`Book returned with Rs.${Number(data.penaltyAmount).toFixed(2)} penalty.`, "success");
     }
-    event.target.reset();
+    $("#quickReturnForm").reset();
+    $("#quickReturnDialog").close();
+    selectedQuickReturn = null;
   } catch (error) {
     console.error("Quick return failed full error:", error);
     console.error("Quick return failed code:", error.code);
@@ -2633,6 +2789,10 @@ $("#quickReturnForm").addEventListener("submit", async (event) => {
   } finally {
     setLoading(event.target, false);
   }
+});
+$("#quickReturnDialog")?.querySelector(".dialog-close")?.addEventListener("click", () => {
+  selectedQuickReturn = null;
+  $("#quickReturnDialog").close();
 });
 $("#startQuickReturnScannerBtn").addEventListener("click", () => startQuickReturnScanner().catch((error) => {
   logDetailedError(error);
