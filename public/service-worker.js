@@ -1,4 +1,4 @@
-const CACHE_NAME = "mlsu-library-v5";
+const CACHE_NAME = "mlsu-library-v6";
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -9,8 +9,8 @@ const APP_SHELL = [
   "/librarian-dashboard.html",
   "/admin-dashboard.html",
   "/scan-book.html",
-  "/css/style.css?v=5",
-  "/js/pwa.js",
+  "/css/style.css?v=6",
+  "/js/pwa.js?v=6",
   "/assets/book-placeholder.svg",
   "/assets/mlsu-logo-192.png",
   "/assets/mlsu-logo-512.png"
