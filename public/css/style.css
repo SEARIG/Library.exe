@@ -100,7 +100,6 @@ html {
 }
 
 body,
-.ulc-page,
 .app-page,
 .dashboard-page,
 .library-page,
@@ -2271,5 +2270,392 @@ td strong {
   .page-title h1,
   .auth-brand h1 {
     font-size: 1.82rem;
+  }
+}
+
+/* Mobile-first PWA/TWA hardening */
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+input,
+select,
+textarea,
+button {
+  font-size: 16px;
+}
+
+button,
+.btn,
+input,
+select {
+  min-height: 44px;
+}
+
+.public-nav-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 4px;
+  width: 46px;
+  min-height: 46px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: #fff;
+}
+
+.nav-toggle,
+.dialog-close {
+  min-height: 44px;
+}
+
+.public-nav-toggle span {
+  width: 20px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--navy);
+}
+
+.scanner-preview,
+#reader,
+#scannerVideo,
+.scanner-video {
+  width: 100%;
+  max-width: 520px;
+  min-height: 300px;
+  margin: 16px auto;
+  display: block;
+  position: relative;
+  overflow: hidden;
+  border-radius: 18px;
+  background: #0f172a;
+  object-fit: cover;
+}
+
+#reader video,
+.scanner-preview video,
+#scannerVideo,
+.scanner-video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.scanner-video[hidden] {
+  display: none !important;
+}
+
+@media (min-width: 641px) and (max-width: 1024px) {
+  .catalog-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-metrics .metric {
+    grid-column: span 6;
+  }
+
+  .dashboard-grid {
+    gap: 18px;
+  }
+
+  .home-feature-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  body,
+  .app-page,
+  .dashboard-page,
+  .library-page,
+  .auth-page,
+  .home-page {
+    background-attachment: scroll !important;
+  }
+}
+
+@media (max-width: 640px) {
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  .public-nav-toggle {
+    display: inline-flex;
+    flex: 0 0 auto;
+  }
+
+  .home-navbar,
+  .library-nav {
+    width: calc(100% - 20px);
+    margin: 10px auto 0;
+    padding: 10px 12px;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .home-brand,
+  .library-brand {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .home-brand strong,
+  .library-brand span {
+    font-size: 0;
+  }
+
+  .home-brand strong::after,
+  .library-brand span::after {
+    content: "MSU LMS";
+    font-size: 1rem;
+  }
+
+  .home-brand small {
+    display: none;
+  }
+
+  .home-nav-links,
+  .library-nav nav {
+    display: none;
+    flex: 1 0 100%;
+    grid-template-columns: 1fr;
+    width: 100%;
+    padding-top: 8px;
+  }
+
+  .home-nav-links.open,
+  .library-nav nav.open {
+    display: grid;
+  }
+
+  .home-nav-links a,
+  .library-nav a {
+    width: 100%;
+    min-height: 46px;
+    justify-content: center;
+  }
+
+  .home-main,
+  .library-page,
+  .app-main,
+  .page-shell {
+    width: calc(100% - 20px);
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .home-hero-copy {
+    text-align: center;
+  }
+
+  .home-hero-logo {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .home-hero h1 {
+    font-size: clamp(2rem, 12vw, 3rem);
+    line-height: 1.04;
+  }
+
+  .home-login-card .btn,
+  .landing-actions .btn,
+  .book-card .request-issue-btn {
+    width: 100%;
+  }
+
+  .home-feature-grid,
+  .home-catalog-grid,
+  .catalog-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .home-features,
+  .home-catalog-preview {
+    margin-top: 22px;
+    padding: 16px;
+  }
+
+  .catalog-card,
+  .catalog-filters,
+  .book-card {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .book-card img {
+    height: min(300px, 72vw);
+  }
+
+  .header-inner {
+    gap: 8px;
+  }
+
+  .header-inner .brand {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .header-inner .brand span {
+    max-width: 105px;
+    overflow: hidden;
+    font-size: 0;
+    white-space: nowrap;
+  }
+
+  .header-inner .brand span::after {
+    content: "MSU LMS";
+    font-size: 0.95rem;
+  }
+
+  .header-inner > #signOutBtn {
+    display: none;
+  }
+
+  .user-chip {
+    display: none;
+  }
+
+  .admin-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .admin-metrics .metric {
+    grid-column: auto;
+    padding: 15px;
+  }
+
+  .metric strong {
+    font-size: 1.7rem;
+  }
+
+  .dashboard-action-grid,
+  .modal-actions-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .app-modal {
+    width: 100%;
+    max-width: none;
+    max-height: calc(100dvh - env(safe-area-inset-top));
+    padding: 18px 14px calc(18px + env(safe-area-inset-bottom));
+    border-radius: 22px 22px 0 0;
+  }
+
+  dialog {
+    position: fixed;
+    inset: auto 0 0;
+    width: 100%;
+    max-width: none;
+    max-height: calc(100dvh - env(safe-area-inset-top));
+    margin: 0;
+    overflow: auto;
+    border-radius: 22px 22px 0 0;
+  }
+
+  .dialog-inner {
+    padding: 18px 14px calc(18px + env(safe-area-inset-bottom));
+  }
+
+  .table-wrap,
+  .table-scroll {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .table-scroll table,
+  .table-wrap table {
+    display: table;
+    width: max-content;
+    min-width: 760px;
+  }
+
+  .table-scroll thead,
+  .table-wrap thead {
+    display: table-header-group;
+  }
+
+  .table-scroll tbody,
+  .table-wrap tbody {
+    display: table-row-group;
+  }
+
+  .table-scroll tr,
+  .table-wrap tr {
+    display: table-row;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .table-scroll th,
+  .table-scroll td,
+  .table-wrap th,
+  .table-wrap td {
+    display: table-cell;
+    width: auto;
+    min-width: 110px;
+    padding: 11px 10px;
+    white-space: normal;
+    vertical-align: top;
+  }
+
+  .table-scroll th:first-child,
+  .table-scroll td:first-child,
+  .table-wrap th:first-child,
+  .table-wrap td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: #fff;
+  }
+
+  .scanner-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .scanner-preview,
+  #reader,
+  #scannerVideo,
+  .scanner-video {
+    min-height: 300px;
+    aspect-ratio: 4 / 3;
+  }
+
+  .compact-video {
+    min-height: 240px;
+  }
+
+  .auth-page {
+    align-items: start;
+  }
+
+  .auth-brand {
+    min-height: 220px;
+    text-align: center;
+  }
+
+  .auth-card,
+  .auth-brand {
+    padding: 22px 18px;
   }
 }

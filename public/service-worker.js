@@ -1,11 +1,19 @@
-const CACHE_NAME = "mlsu-library-v2";
+const CACHE_NAME = "mlsu-library-v4";
 const APP_SHELL = [
   "/",
   "/index.html",
   "/login.html",
   "/signup.html",
-  "/css/style.css",
-  "/assets/book-placeholder.svg"
+  "/library.html",
+  "/student-dashboard.html",
+  "/librarian-dashboard.html",
+  "/admin-dashboard.html",
+  "/scan-book.html",
+  "/css/style.css?v=4",
+  "/js/pwa.js",
+  "/assets/book-placeholder.svg",
+  "/assets/mlsu-logo-192.png",
+  "/assets/mlsu-logo-512.png"
 ];
 
 self.addEventListener("install", (event) => {
@@ -27,11 +35,24 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   if (event.request.mode === "navigate" || event.request.destination === "document") {
-    event.respondWith(fetch(event.request));
+    event.respondWith(
+      fetch(event.request).catch(() => caches.match("/index.html"))
+    );
     return;
   }
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
+    caches.match(event.request).then((cached) => {
+      const network = fetch(event.request)
+        .then((response) => {
+          if (response.ok && event.request.url.startsWith(self.location.origin)) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          }
+          return response;
+        })
+        .catch(() => cached);
+      return cached || network;
+    })
   );
 });
 
@@ -44,8 +65,8 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title || "Mohanlal Sukhadia University LMS", {
       body: data.body || "You have a library notification.",
-      icon: "/assets/book-placeholder.svg",
-      badge: "/assets/book-placeholder.svg"
+      icon: "/assets/mlsu-logo-192.png",
+      badge: "/assets/mlsu-logo-192.png"
     })
   );
 });

@@ -2,12 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Library Catalog | Mohanlal Sukhadia University LMS</title>
-    <link rel="icon" type="image/png" href="./assets/mlsu-logo.png?v=2">
-    <link rel="stylesheet" href="css/style.css">
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#0f766e">
+    <link rel="icon" type="image/png" href="/assets/mlsu-logo.png?v=3">
+    <link rel="stylesheet" href="css/style.css?v=4">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#0F766E">
   </head>
   <body class="library-catalog-page">
     <header class="library-nav">
@@ -15,8 +15,12 @@
         <img src="./assets/mlsu-logo.png?v=2" class="library-logo nav-logo" alt="Mohanlal Sukhadia University LMS Logo">
         <span>Mohanlal Sukhadia University LMS</span>
       </div>
-      <nav>
-        <a href="library.html" aria-current="page">Library</a>
+      <button class="public-nav-toggle" type="button" aria-expanded="false" aria-controls="libraryNavLinks" aria-label="Open menu" data-mobile-menu-toggle>
+        <span></span><span></span><span></span>
+      </button>
+      <nav id="libraryNavLinks">
+        <a href="library.html" aria-current="page">Browse Library</a>
+        <a href="login.html">Dashboard</a>
         <a href="login.html">Login</a>
         <a href="signup.html">Student Signup</a>
       </nav>
@@ -104,6 +108,7 @@
     </dialog>
 
     <div id="toast" class="toast"></div>
+    <script src="./js/pwa.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
     <script type="module" src="./js/library.js"></script>
   </body>
