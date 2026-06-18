@@ -16,6 +16,7 @@ import {
   accessionBarcode,
   accessionNumberOf,
   calculatePenalty,
+  compareAccessionNumbers,
   findBookByLibraryCode,
   getUnpaidPenaltySummary,
   getIssueReturnSchedule,
@@ -1375,28 +1376,32 @@ function renderBooksTable() {
   const search = bookSearch.value.trim().toLowerCase();
   const categoryFilter = String(bookCategoryFilter?.value || "").toLowerCase();
   const availabilityFilter = String(bookAvailabilityFilter?.value || "").toLowerCase();
-  const rows = latestBooks.filter(({ data }) => {
-    const status = String(data.status || "available").toLowerCase();
-    const category = String(data.category || "").toLowerCase();
-    const haystack = [
-      accessionNumberOf(data),
-      bookTitle(data),
-      data.author,
-      data.placePublisher,
-      data.publisher,
-      data.year,
-      data.classNo,
-      data.bookNo,
-      data.subject,
-      data.category,
-      data.isbn,
-      data.publisherBarcode
-    ].join(" ").toLowerCase();
-    if (search && !haystack.includes(search)) return false;
-    if (categoryFilter && category !== categoryFilter) return false;
-    if (availabilityFilter && status !== availabilityFilter) return false;
-    return true;
-  });
+  const rows = latestBooks
+    .filter(({ data }) => {
+      const status = String(data.status || "available").toLowerCase();
+      const category = String(data.category || "").toLowerCase();
+      const haystack = [
+        accessionNumberOf(data),
+        bookTitle(data),
+        data.author,
+        data.placePublisher,
+        data.publisher,
+        data.year,
+        data.classNo,
+        data.bookNo,
+        data.subject,
+        data.category,
+        data.isbn,
+        data.publisherBarcode
+      ].join(" ").toLowerCase();
+      if (search && !haystack.includes(search)) return false;
+      if (categoryFilter && category !== categoryFilter) return false;
+      if (availabilityFilter && status !== availabilityFilter) return false;
+      return true;
+    })
+    .sort((left, right) =>
+      compareAccessionNumbers(accessionNumberOf(left.data), accessionNumberOf(right.data))
+    );
   const target = $("#booksTable");
   if (!rows.length) {
     renderEmpty(target, "No matching books found.");

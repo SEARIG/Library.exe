@@ -1,6 +1,7 @@
 import { auth, db } from "./firebase-config.js";
 import {
   accessionNumberOf,
+  compareAccessionNumbers,
   createCatalogIssueRequest,
   getIssueReturnSchedule,
   getStudentProfile,
@@ -63,31 +64,35 @@ function filteredBooks() {
   const category = String(categoryFilter.value || "").toLowerCase();
   const availability = String(availabilityFilter.value || "").toLowerCase();
 
-  return allBooks.filter(({ data }) => {
-    const status = String(data.status || "available").toLowerCase();
-    const bookCategory = String(data.category || "").toLowerCase();
-    const haystack = [
-      accessionNumberOf(data),
-      data.bname,
-      data.bookName,
-      data.title,
-      data.author,
-      data.placePublisher,
-      data.publisher,
-      data.year,
-      data.classNo,
-      data.bookNo,
-      data.subject,
-      data.isbn,
-      data.publisherBarcode,
-      data.blegal_num
-    ].join(" ").toLowerCase();
+  return allBooks
+    .filter(({ data }) => {
+      const status = String(data.status || "available").toLowerCase();
+      const bookCategory = String(data.category || "").toLowerCase();
+      const haystack = [
+        accessionNumberOf(data),
+        data.bname,
+        data.bookName,
+        data.title,
+        data.author,
+        data.placePublisher,
+        data.publisher,
+        data.year,
+        data.classNo,
+        data.bookNo,
+        data.subject,
+        data.isbn,
+        data.publisherBarcode,
+        data.blegal_num
+      ].join(" ").toLowerCase();
 
-    if (search && !haystack.includes(search)) return false;
-    if (category && bookCategory !== category) return false;
-    if (availability && status !== availability) return false;
-    return true;
-  });
+      if (search && !haystack.includes(search)) return false;
+      if (category && bookCategory !== category) return false;
+      if (availability && status !== availability) return false;
+      return true;
+    })
+    .sort((left, right) =>
+      compareAccessionNumbers(accessionNumberOf(left.data), accessionNumberOf(right.data))
+    );
 }
 
 function renderLibrary() {

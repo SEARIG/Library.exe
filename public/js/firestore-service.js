@@ -41,6 +41,13 @@ export function accessionBarcode(accessionNumber) {
   return value ? `ACC-${value}` : "";
 }
 
+export function compareAccessionNumbers(left, right) {
+  return String(left || "").localeCompare(String(right || ""), undefined, {
+    numeric: true,
+    sensitivity: "base"
+  });
+}
+
 async function firstBookByField(field, value) {
   if (!value) return null;
   const snap = await getDocs(query(collection(db, "books"), where(field, "==", value), limit(1)));
