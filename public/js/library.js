@@ -36,7 +36,6 @@ let selectedStudent = null;
 let activeSchedule = null;
 
 const searchInput = $("#librarySearch");
-const categoryFilter = $("#libraryCategoryFilter");
 const availabilityFilter = $("#libraryAvailabilityFilter");
 const booksTarget = $("#libraryBooks");
 const summaryTarget = $("#librarySummary");
@@ -61,32 +60,17 @@ function availabilityLabel(status = "") {
 
 function filteredBooks() {
   const search = String(searchInput.value || "").trim().toLowerCase();
-  const category = String(categoryFilter.value || "").toLowerCase();
   const availability = String(availabilityFilter.value || "").toLowerCase();
 
   return allBooks
     .filter(({ data }) => {
       const status = String(data.status || "available").toLowerCase();
-      const bookCategory = String(data.category || "").toLowerCase();
       const haystack = [
-        accessionNumberOf(data),
-        data.bname,
-        data.bookName,
-        data.title,
-        data.author,
-        data.placePublisher,
-        data.publisher,
-        data.year,
-        data.classNo,
-        data.bookNo,
-        data.subject,
-        data.isbn,
-        data.publisherBarcode,
-        data.blegal_num
+        bookTitle(data),
+        data.author
       ].join(" ").toLowerCase();
 
       if (search && !haystack.includes(search)) return false;
-      if (category && bookCategory !== category) return false;
       if (availability && status !== availability) return false;
       return true;
     })
@@ -123,7 +107,6 @@ function renderLibrary() {
             <p>${escapeHtml(data.author || "Author not listed")}</p>
           </div>
           <div class="meta-row">
-            <span class="category-badge">${escapeHtml(data.category || "other")}</span>
             <span class="availability-badge availability-${escapeHtml(status)}">${escapeHtml(availabilityLabel(status))}</span>
           </div>
           <p><strong>Accession No.:</strong> ${escapeHtml(accessionNumberOf(data) || "-")}</p>
@@ -208,7 +191,6 @@ function resetAndRender() {
 }
 
 searchInput.addEventListener("input", resetAndRender);
-categoryFilter.addEventListener("change", resetAndRender);
 availabilityFilter.addEventListener("change", resetAndRender);
 paginationTarget.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-page]");

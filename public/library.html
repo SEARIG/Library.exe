@@ -28,25 +28,13 @@
     <main class="library-page">
       <section class="library-hero">
         <h1>Library Catalog</h1>
-        <p>Search Mohanlal Sukhadia University LMS books by accession number, title, author, subject, or ISBN.</p>
+        <p>Search Mohanlal Sukhadia University LMS books by author or title.</p>
       </section>
 
       <section class="catalog-card">
         <div class="catalog-filters">
           <label>Search
-            <input id="librarySearch" placeholder="Accession number, title, author, publisher, year, subject, or ISBN">
-          </label>
-          <label>Category
-            <select id="libraryCategoryFilter">
-              <option value="">All Categories</option>
-              <option value="pyq">pyq</option>
-              <option value="textbook">textbook</option>
-              <option value="qna">qna</option>
-              <option value="reference">reference</option>
-              <option value="notes">notes</option>
-              <option value="journal">journal</option>
-              <option value="other">other</option>
-            </select>
+            <input id="librarySearch" placeholder="Search by author or title">
           </label>
           <label>Availability
             <select id="libraryAvailabilityFilter">
@@ -109,6 +97,6 @@
     <div id="toast" class="toast"></div>
     <script src="./js/pwa.js?v=6" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-    <script type="module" src="./js/library.js"></script>
+    <script type="module" src="./js/library.js?v=7"></script>
   </body>
 </html>
