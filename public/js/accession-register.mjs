@@ -53,6 +53,17 @@ function cellText(value) {
   return String(value ?? "").trim();
 }
 
+function accessionDateText(value) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 1) {
+    return cellText(value);
+  }
+  const date = new Date(Date.UTC(1899, 11, 30) + value * 86400000);
+  if (Number.isNaN(date.getTime())) return cellText(value);
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  return `${day}/${month}/${date.getUTCFullYear()}`;
+}
+
 const ACCESSION_HEADERS = new Set(FIELD_ALIASES.accessionNumber.map(normalizedHeader));
 
 export function findAccessionHeaderRow(matrix = []) {
@@ -81,7 +92,8 @@ export function parseAccessionRegister(matrix = [], existingBooks = new Map(), u
 
     const parsed = { rowNumber: headerRowIndex + offset + 2 };
     Object.keys(FIELD_ALIASES).forEach((field) => {
-      parsed[field] = indexes[field] >= 0 ? cellText(row[indexes[field]]) : "";
+      const value = indexes[field] >= 0 ? row[indexes[field]] : "";
+      parsed[field] = field === "accessionDate" ? accessionDateText(value) : cellText(value);
     });
     parsed.category ||= "";
     parsed.subject ||= "";
@@ -119,7 +131,7 @@ export function accessionBookData(row = {}) {
   const accessionNumber = cellText(row.accessionNumber);
   return {
     accessionNumber,
-    accessionDate: cellText(row.accessionDate),
+    accessionDate: accessionDateText(row.accessionDate),
     author: cellText(row.author),
     title: cellText(row.title),
     placePublisher: cellText(row.placePublisher),

@@ -1418,8 +1418,9 @@ function renderBooksTable() {
           <th>Source</th>
           <th>Bill No &amp; Date</th>
           <th>Cost</th>
-          <th>Class No.</th>
-          <th>Book No.</th>
+          <th>Withdrawal No., Date &amp; Remarks</th>
+          <th>Image URL</th>
+          <th>Notes</th>
           <th>Status</th>
           <th>Issued Student UID</th>
           <th>Actions</th>
@@ -1439,8 +1440,9 @@ function renderBooksTable() {
             <td>${escapeHtml(data.source || "-")}</td>
             <td>${escapeHtml(data.billNoDate || "-")}</td>
             <td>${escapeHtml(data.cost || "-")}</td>
-            <td>${escapeHtml(data.classNo || "-")}</td>
-            <td>${escapeHtml(data.bookNo || "-")}</td>
+            <td>${escapeHtml(data.withdrawalRemarks || "-")}</td>
+            <td class="book-url-cell">${escapeHtml(data.imageUrl || "-")}</td>
+            <td>${escapeHtml(data.notes || "-")}</td>
             <td>${statusBadge(data.status)}</td>
             <td>${escapeHtml(data.status === "issued" ? (data.issuedStudentUid || data.issuedTo || "-") : "-")}</td>
             <td>

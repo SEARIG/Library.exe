@@ -1764,6 +1764,12 @@ td strong {
   color: var(--navy);
 }
 
+.book-url-cell {
+  max-width: 220px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .toast-container {
   position: fixed;
   right: 20px;
