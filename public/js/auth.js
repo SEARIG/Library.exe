@@ -3,6 +3,7 @@ import { showToast } from "./toast.js";
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
@@ -17,6 +18,7 @@ const loginForm = document.querySelector("#loginForm");
 const signupForm = document.querySelector("#signupForm");
 const logoutButton = document.querySelector("#logoutBtn, #signOutBtn");
 const messageBox = document.querySelector("#authMessage");
+const forgotPasswordButton = document.querySelector("#forgotPasswordBtn");
 
 document.querySelectorAll(".password-toggle").forEach((button) => {
   button.addEventListener("click", () => {
@@ -43,11 +45,30 @@ function setLoading(form, isLoading) {
 }
 
 function logError(error) {
+  if (["auth/invalid-credential", "auth/wrong-password", "auth/user-not-found"].includes(error?.code)) {
+    console.warn("Authentication rejected. Check the email/password or reset the password.");
+    return;
+  }
   console.error({
     code: error?.code,
     message: error?.message,
     stack: error?.stack
   });
+}
+
+function authErrorMessage(error, context = "login") {
+  const code = String(error?.code || "");
+  const messages = {
+    "auth/invalid-credential": "The email or password is incorrect. Use Forgot Password if this account was recently reset.",
+    "auth/wrong-password": "The email or password is incorrect. Use Forgot Password to create a new password.",
+    "auth/user-not-found": "No account exists for this email address.",
+    "auth/invalid-email": "Enter a valid email address.",
+    "auth/too-many-requests": "Too many attempts. Wait a few minutes or reset your password.",
+    "auth/network-request-failed": "Unable to reach Firebase. Check your internet connection and try again.",
+    "auth/email-already-in-use": "An account already exists for this email address.",
+    "auth/weak-password": "Use a password with at least 6 characters."
+  };
+  return messages[code] || error?.message || `${context === "signup" ? "Signup" : "Login"} failed. Please try again.`;
 }
 
 function roleRedirect(role) {
@@ -115,8 +136,9 @@ if (signupForm) {
       window.location.href = "student-dashboard.html";
     } catch (error) {
       logError(error);
-      showMessage(error.message || "Signup failed. Please try again.");
-      showToast(error.message || "Signup failed. Please try again.", "error");
+      const message = authErrorMessage(error, "signup");
+      showMessage(message);
+      showToast(message, "error");
     } finally {
       setLoading(signupForm, false);
     }
@@ -137,10 +159,38 @@ if (loginForm) {
       window.location.href = roleRedirect(role);
     } catch (error) {
       logError(error);
-      showMessage(error.message || "Login failed. Please check your credentials.");
-      showToast(error.message || "Login failed. Please check your credentials.", "error");
+      const message = authErrorMessage(error);
+      showMessage(message);
+      showToast(message, "error");
     } finally {
       setLoading(loginForm, false);
+    }
+  });
+}
+
+if (forgotPasswordButton) {
+  forgotPasswordButton.addEventListener("click", async () => {
+    const emailInput = document.querySelector("#email");
+    const email = emailInput?.value.trim() || "";
+    if (!email) {
+      showMessage("Enter your email address, then select Forgot Password.");
+      emailInput?.focus();
+      return;
+    }
+
+    forgotPasswordButton.disabled = true;
+    try {
+      await sendPasswordResetEmail(auth, email);
+      const message = "Password reset email sent. Check your inbox and spam folder.";
+      showMessage(message, "success");
+      showToast(message, "success");
+    } catch (error) {
+      logError(error);
+      const message = authErrorMessage(error);
+      showMessage(message);
+      showToast(message, "error");
+    } finally {
+      forgotPasswordButton.disabled = false;
     }
   });
 }

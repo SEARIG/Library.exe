@@ -1539,6 +1539,23 @@ button:disabled,
 .auth-message.error { color: var(--danger); }
 .auth-message.success { color: var(--success); }
 
+.auth-text-button {
+  width: fit-content;
+  min-height: 44px;
+  padding: 0;
+  justify-content: flex-start;
+  color: var(--primary-dark);
+  background: transparent;
+  box-shadow: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.auth-text-button:hover {
+  transform: none;
+  background: transparent;
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: minmax(110px, auto) minmax(0, 1fr);
