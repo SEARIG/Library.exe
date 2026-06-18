@@ -100,6 +100,7 @@ html {
 }
 
 body,
+.ulc-page,
 .app-page,
 .dashboard-page,
 .library-page,
@@ -2307,6 +2308,11 @@ select {
   border: 1px solid var(--border);
   border-radius: 13px;
   background: #fff;
+}
+
+.nav-toggle,
+.dialog-close {
+  min-height: 44px;
 }
 
 .public-nav-toggle span {

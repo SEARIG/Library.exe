@@ -9,7 +9,7 @@ const APP_SHELL = [
   "/librarian-dashboard.html",
   "/admin-dashboard.html",
   "/scan-book.html",
-  "/css/style.css",
+  "/css/style.css?v=4",
   "/js/pwa.js",
   "/assets/book-placeholder.svg",
   "/assets/mlsu-logo-192.png",
