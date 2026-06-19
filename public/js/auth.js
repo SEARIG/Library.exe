@@ -1,4 +1,4 @@
-import { auth, db } from "./firebase-config.js";
+import { auth, authPersistenceReady, db } from "./firebase-config.js";
 import { showToast } from "./toast.js";
 import {
   createUserWithEmailAndPassword,
@@ -19,6 +19,8 @@ const signupForm = document.querySelector("#signupForm");
 const logoutButton = document.querySelector("#logoutBtn, #signOutBtn");
 const messageBox = document.querySelector("#authMessage");
 const forgotPasswordButton = document.querySelector("#forgotPasswordBtn");
+
+await authPersistenceReady;
 
 document.querySelectorAll(".password-toggle").forEach((button) => {
   button.addEventListener("click", () => {
@@ -75,7 +77,7 @@ function roleRedirect(role) {
   if (role === "admin") return "admin-dashboard.html";
   if (role === "librarian") return "librarian-dashboard.html";
   if (role === "student") return "student-dashboard.html";
-  return "student-dashboard.html";
+  return "login.html";
 }
 
 async function getUserRole(uid) {
@@ -87,7 +89,10 @@ async function getUserRole(uid) {
   if (userData.active === false || userData.status === "suspended" || userData.status === "inactive") {
     throw new Error("Your account is inactive. Contact the library administrator.");
   }
-  return userData.role || "student";
+  if (!["student", "librarian", "admin"].includes(userData.role)) {
+    throw new Error("Your account does not have a supported library role. Contact the library administrator.");
+  }
+  return userData.role;
 }
 
 if (signupForm) {
@@ -154,6 +159,7 @@ if (loginForm) {
     try {
       const email = document.querySelector("#email").value.trim();
       const password = document.querySelector("#password").value;
+      await authPersistenceReady;
       const credential = await signInWithEmailAndPassword(auth, email, password);
       const role = await getUserRole(credential.user.uid);
       window.location.href = roleRedirect(role);
@@ -208,9 +214,19 @@ if (logoutButton) {
   });
 }
 
-onAuthStateChanged(auth, (user) => {
+onAuthStateChanged(auth, async (user) => {
   if (user) {
     console.log("Auth state: signed in", user.uid);
+    if (loginForm) {
+      try {
+        const role = await getUserRole(user.uid);
+        window.location.href = roleRedirect(role);
+      } catch (error) {
+        logError(error);
+        const message = authErrorMessage(error);
+        showMessage(message);
+      }
+    }
   } else {
     console.log("Auth state: signed out");
   }

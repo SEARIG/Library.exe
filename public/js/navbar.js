@@ -136,7 +136,8 @@ export function renderNavbarSkeleton() {
 function homeForRole(role) {
   if (role === "admin") return "admin-dashboard.html";
   if (role === "librarian") return "librarian-dashboard.html";
-  return "student-dashboard.html";
+  if (role === "student") return "student-dashboard.html";
+  return "login.html";
 }
 
 function isCurrentLink(currentPath, href) {

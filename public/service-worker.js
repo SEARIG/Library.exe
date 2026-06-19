@@ -1,4 +1,4 @@
-const CACHE_NAME = "msu-lms-pwa-v1";
+const CACHE_NAME = "mlsu-lms-pwa-v2";
 
 const STATIC_ASSETS = [
   "/",
@@ -48,7 +48,10 @@ function shouldBypassCache(request) {
     || url.pathname.startsWith("/__/auth/")
     || url.pathname.startsWith("/__/firebase/")
     || hostname.includes("firebase")
+    || hostname.includes("firestore")
     || hostname.includes("googleapis")
+    || hostname.includes("identitytoolkit")
+    || hostname.includes("securetoken")
     || hostname.includes("emailjs")
     || hostname.includes("openlibrary")
     || hostname.includes("books.google")

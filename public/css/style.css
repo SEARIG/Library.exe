@@ -2433,7 +2433,7 @@ select {
 
   .home-brand strong::after,
   .library-brand span::after {
-    content: "MSU LMS";
+    content: "MLSU LMS";
     font-size: 1rem;
   }
 
@@ -2531,7 +2531,7 @@ select {
   }
 
   .header-inner .brand span::after {
-    content: "MSU LMS";
+    content: "MLSU LMS";
     font-size: 0.95rem;
   }
 
@@ -2675,5 +2675,77 @@ select {
   .auth-card,
   .auth-brand {
     padding: 22px 18px;
+  }
+}
+
+/* Fixed navigation for browser and installed-PWA use */
+.home-page,
+.library-catalog-page,
+.protected-page {
+  padding-top: 92px;
+}
+
+.navbar,
+.app-header,
+.app-navbar,
+.library-nav,
+.home-navbar,
+.main-navbar,
+.top-nav {
+  position: fixed;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  width: min(96%, 1400px);
+  margin: 0;
+  transform: translateX(-50%);
+  z-index: 9999;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.app-header {
+  min-height: 64px;
+}
+
+.app-sidebar {
+  top: 92px;
+  height: calc(100dvh - 92px);
+  z-index: 9998;
+}
+
+.sidebar-overlay {
+  inset: 82px 0 0;
+  z-index: 9997;
+}
+
+@media (max-width: 768px) {
+  .home-page,
+  .library-catalog-page,
+  .protected-page {
+    padding-top: 82px;
+  }
+
+  .navbar,
+  .app-header,
+  .app-navbar,
+  .library-nav,
+  .home-navbar,
+  .main-navbar,
+  .top-nav {
+    top: max(8px, env(safe-area-inset-top));
+    width: calc(100% - 20px);
+  }
+
+  .app-sidebar {
+    top: 82px;
+    height: calc(100dvh - 82px);
+  }
+
+  .sidebar-overlay {
+    inset: 72px 0 0;
   }
 }

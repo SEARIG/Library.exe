@@ -1,4 +1,4 @@
-import { auth, db } from "./firebase-config.js";
+import { auth, authPersistenceReady, db } from "./firebase-config.js";
 import "./push-notifications.js";
 import { renderNavbar, renderNavbarSkeleton } from "./navbar.js";
 import { showToast } from "./toast.js";
@@ -106,7 +106,7 @@ export function roleHome(role) {
   if (role === "admin") return "admin-dashboard.html";
   if (role === "librarian") return "librarian-dashboard.html";
   if (role === "student") return "student-dashboard.html";
-  return "student-dashboard.html";
+  return "login.html";
 }
 
 export async function redirectForRole(user) {
@@ -121,7 +121,7 @@ export async function redirectForRole(user) {
 export function requireAuth(allowedRoles = []) {
   ensureAuthLoadingScreen();
   return new Promise((resolve) => {
-    onAuthStateChanged(auth, async (user) => {
+    authPersistenceReady.then(() => onAuthStateChanged(auth, async (user) => {
       if (!user) {
         window.location.href = "login.html";
         return;
@@ -154,6 +154,9 @@ export function requireAuth(allowedRoles = []) {
       renderNavbar(profile.role, { ...profile, email: user.email });
       revealProtectedContent();
       resolve({ user, profile });
+    })).catch((error) => {
+      logDetailedError(error);
+      window.location.href = "login.html";
     });
   });
 }

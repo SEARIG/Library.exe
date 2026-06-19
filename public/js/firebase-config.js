@@ -1,5 +1,9 @@
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-import { getAuth } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import {
+  browserLocalPersistence,
+  getAuth,
+  setPersistence
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -15,6 +19,11 @@ const firebaseConfig = {
 export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const authPersistenceReady = setPersistence(auth, browserLocalPersistence)
+  .catch((error) => {
+    console.error("Firebase local auth persistence setup failed:", error);
+    throw error;
+  });
 
 console.log("Firebase config loaded successfully:", {
   projectId: firebaseConfig.projectId,
