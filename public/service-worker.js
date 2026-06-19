@@ -1,5 +1,6 @@
-const CACHE_NAME = "mlsu-library-v8";
-const APP_SHELL = [
+const CACHE_NAME = "msu-lms-pwa-v1";
+
+const STATIC_ASSETS = [
   "/",
   "/index.html",
   "/login.html",
@@ -9,16 +10,20 @@ const APP_SHELL = [
   "/librarian-dashboard.html",
   "/admin-dashboard.html",
   "/scan-book.html",
-  "/css/style.css?v=6",
-  "/js/pwa.js?v=6",
-  "/assets/book-placeholder.svg",
+  "/manifest.json",
+  "/assets/mlsu-logo.png",
   "/assets/mlsu-logo-192.png",
-  "/assets/mlsu-logo-512.png"
+  "/assets/mlsu-logo-512.png",
+  "/assets/library-shelf-bg.jpg",
+  "/assets/book-placeholder.svg",
+  "/css/style.css",
+  "/css/styles.css",
+  "/js/pwa.js"
 ];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS).catch(console.warn))
   );
   self.skipWaiting();
 });
@@ -32,54 +37,57 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") return;
-  if (event.request.mode === "navigate" || event.request.destination === "document") {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          if (response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          }
-          return response;
-        })
-        .catch(() => caches.match(event.request).then((cached) => cached || caches.match("/index.html")))
-    );
-    return;
-  }
+function shouldBypassCache(request) {
+  const url = new URL(request.url);
+  const hostname = url.hostname.toLowerCase();
 
-  if (
-    event.request.url.startsWith(self.location.origin)
-    && ["script", "style", "manifest"].includes(event.request.destination)
-  ) {
+  return (
+    request.method !== "GET"
+    || url.origin !== self.location.origin
+    || url.pathname.startsWith("/api/")
+    || url.pathname.startsWith("/__/auth/")
+    || url.pathname.startsWith("/__/firebase/")
+    || hostname.includes("firebase")
+    || hostname.includes("googleapis")
+    || hostname.includes("emailjs")
+    || hostname.includes("openlibrary")
+    || hostname.includes("books.google")
+    || hostname.includes("gstatic")
+  );
+}
+
+self.addEventListener("fetch", (event) => {
+  const request = event.request;
+  if (shouldBypassCache(request)) return;
+
+  const accept = request.headers.get("accept") || "";
+  const isHtml = request.mode === "navigate"
+    || request.destination === "document"
+    || accept.includes("text/html");
+
+  if (isHtml) {
     event.respondWith(
-      fetch(event.request)
+      fetch(request)
         .then((response) => {
           if (response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
           }
           return response;
         })
-        .catch(() => caches.match(event.request))
+        .catch(() => caches.match(request).then((cached) => cached || caches.match("/index.html")))
     );
     return;
   }
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const network = fetch(event.request)
-        .then((response) => {
-          if (response.ok && event.request.url.startsWith(self.location.origin)) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          }
-          return response;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
+    caches.match(request).then((cached) => cached || fetch(request).then((response) => {
+      if (response.ok) {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+      }
+      return response;
+    }))
   );
 });
 

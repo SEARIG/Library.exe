@@ -4,10 +4,15 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Mohanlal Sukhadia University LMS</title>
-    <link rel="icon" type="image/png" href="/assets/mlsu-logo.png?v=3">
+    <link rel="icon" type="image/png" href="/assets/mlsu-logo.png?v=5">
+    <link rel="apple-touch-icon" href="/assets/mlsu-logo-192.png">
     <link rel="stylesheet" href="css/style.css?v=6">
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#0F766E">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="MSU LMS">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
   </head>
   <body class="home-page">
     <header class="home-navbar">
@@ -55,6 +60,7 @@
           <p>Login to request books, track issued books, and view dues.</p>
           <a class="btn btn-primary" href="login.html">Student Login</a>
           <a class="btn btn-muted" href="signup.html">Create Account</a>
+          <button class="btn btn-muted" id="installAppBtn" type="button" onclick="installPWA()" style="display:none;">Install App</button>
         </aside>
       </section>
 
@@ -124,7 +130,7 @@
       </div>
     </footer>
 
-    <script src="./js/pwa.js?v=6" defer></script>
+    <script src="/js/pwa.js?v=9"></script>
     <script type="module" src="./js/home.js"></script>
     <script type="module" src="./js/push-notifications.js"></script>
   </body>
