@@ -10,6 +10,9 @@ import {
   scheduleLabel
 } from "./firestore-service.js";
 import {
+  findMatchingPenaltyForIssue
+} from "./penalty-utils.mjs";
+import {
   collection,
   doc,
   onSnapshot,
@@ -31,6 +34,7 @@ const user = session?.user;
 const userProfile = session?.profile || {};
 let latestStudent = {};
 let latestIssuedIssues = [];
+let latestPenaltyDocs = [];
 let selectedReturnIssue = null;
 
 function timeOf(value) {
@@ -144,6 +148,7 @@ function renderIssuedBooks(docs) {
   const dueTarget = $("#dueCountdown");
   const issued = docs.sort((a, b) => timeOf(b.data().issueDate) - timeOf(a.data().issueDate));
   latestIssuedIssues = issued.map((item) => ({ id: item.id, ...item.data() }));
+  renderPenalties(latestPenaltyDocs);
   setMetric("#metricStudentIssued", issued.length);
 
   if (!issued.length) {
@@ -279,30 +284,92 @@ function renderReturnedBooks(docs) {
 
 function renderPenalties(docs) {
   const target = $("#penalties");
-  const unpaidDocs = docs.filter((item) => isUnpaidPenaltyRecord(item.data()));
-  const totalPenalty = unpaidDocs.reduce((sum, item) => {
-    const penalty = item.data();
+  const persistedRows = docs.map((item) => {
+    const data = item.data();
+    const activeIssue = latestIssuedIssues.find((issue) => findMatchingPenaltyForIssue([{ id: item.id, data }], issue, issue.id));
+    const calculation = activeIssue ? calculatePenalty(activeIssue, new Date()) : null;
+    const currentAmount = calculation?.calculatedPenalty || 0;
+    const persistedAmount = Number(data.remainingAmount ?? data.amount ?? data.penaltyAmount ?? 0) || 0;
+    return {
+      id: item.id,
+      data: calculation && isUnpaidPenaltyRecord(data) && currentAmount > persistedAmount
+        ? {
+            ...data,
+            dueDate: data.dueDate || calculation.dueDate,
+            lateDays: calculation.overdueDays,
+            daysLate: calculation.overdueDays,
+            ratePerDay: calculation.ratePerDay,
+            amount: currentAmount,
+            penaltyAmount: currentAmount,
+            remainingAmount: currentAmount
+          }
+        : data,
+      source: "persisted"
+    };
+  });
+  const persistedUnpaidIssueIds = new Set(
+    persistedRows
+      .filter((item) => isUnpaidPenaltyRecord(item.data))
+      .map((item) => item.data.issueId || item.data.currentIssueId || item.id)
+      .filter(Boolean)
+  );
+  const calculatedRows = latestIssuedIssues
+    .map((issue) => {
+      const calculation = calculatePenalty(issue, new Date());
+      const persistedPenalty = findMatchingPenaltyForIssue(persistedRows, issue, issue.id);
+      if (!calculation.isOverdue || calculation.calculatedPenalty <= 0) return null;
+      if (persistedPenalty && !isUnpaidPenaltyRecord(persistedPenalty.data)) return null;
+      if (persistedUnpaidIssueIds.has(issue.id) || persistedPenalty) return null;
+      return {
+        id: issue.id,
+        source: "calculated",
+        data: {
+          issueId: issue.id,
+          bookId: issue.bookId || issue.b_id || "",
+          b_id: issue.b_id || issue.bookId || "",
+          accessionNumber: issue.accessionNumber || "",
+          bookTitle: issue.bookTitle || issue.title || issue.bookId || "Issued book",
+          issueDate: issue.issueDate || issue.issuedAt || null,
+          dueDate: issue.dueDate || calculation.dueDate || null,
+          lateDays: calculation.overdueDays,
+          daysLate: calculation.overdueDays,
+          ratePerDay: calculation.ratePerDay,
+          amount: calculation.calculatedPenalty,
+          penaltyAmount: calculation.calculatedPenalty,
+          remainingAmount: calculation.calculatedPenalty,
+          paid: false,
+          status: "unpaid",
+          paymentStatus: "unpaid"
+        }
+      };
+    })
+    .filter(Boolean);
+  const rows = [...persistedRows, ...calculatedRows];
+  const unpaidRows = rows.filter((item) => isUnpaidPenaltyRecord(item.data));
+  const totalPenalty = unpaidRows.reduce((sum, item) => {
+    const penalty = item.data;
     return sum + Number(penalty.remainingAmount ?? penalty.amount ?? penalty.penaltyAmount ?? 0);
   }, 0);
   setMetric("#metricStudentPenalty", totalPenalty.toFixed(0));
   setText("#penaltySummary", totalPenalty > 0
     ? `Pending penalty due: Rs.${totalPenalty.toFixed(2)}`
     : "No pending penalties.");
-  if (!docs.length) {
+  if (!rows.length) {
     renderEmpty(target, "No pending penalties.");
     return;
   }
-  target.innerHTML = docs
-    .sort((a, b) => timeOf(b.data().createdAt) - timeOf(a.data().createdAt))
+  target.innerHTML = rows
+    .sort((a, b) => timeOf(b.data.createdAt || b.data.dueDate) - timeOf(a.data.createdAt || a.data.dueDate))
     .map((item) => {
-      const penalty = item.data();
+      const penalty = item.data;
       return `
         <article class="list-row">
           <div>
             <strong>${escapeHtml(penalty.bookTitle || penalty.bookId || "Penalty")}</strong>
             <span>Penalty amount: Rs.${Number(penalty.remainingAmount ?? penalty.amount ?? penalty.penaltyAmount ?? 0).toFixed(2)}</span>
             <span>Late days: ${penalty.lateDays || penalty.daysLate || 0}</span>
-            <span>Return date: ${formatDate(penalty.returnDate)}</span>
+            <span>Due date: ${formatDate(penalty.dueDate)}</span>
+            <span>${penalty.returnDate ? `Return date: ${formatDate(penalty.returnDate)}` : "Active overdue issue"}</span>
             <span>Please contact the librarian to clear dues.</span>
           </div>
           ${statusBadge(isUnpaidPenaltyRecord(penalty) ? "unpaid" : "paid")}
@@ -358,7 +425,10 @@ if (user) {
     listenToQuery(
       "penalty history query",
       query(collection(db, "penalties"), where("studentUid", "==", user.uid)),
-      (snap) => renderPenalties(snap.docs),
+      (snap) => {
+        latestPenaltyDocs = snap.docs;
+        renderPenalties(snap.docs);
+      },
       "#penalties",
       "Could not load penalty history."
     );
@@ -381,17 +451,14 @@ $("#issuedBooks")?.addEventListener("click", async (event) => {
       showToast("Return request time is not active. Please contact the librarian.", "warning");
       return;
     }
-    const issueDate = selectedReturnIssue.issueDate?.toDate ? selectedReturnIssue.issueDate.toDate() : new Date(selectedReturnIssue.issueDate);
-    const penalty = Number.isNaN(issueDate.getTime())
-      ? { penaltyAmount: 0 }
-      : calculatePenalty(issueDate, new Date());
+    const penalty = calculatePenalty(selectedReturnIssue, new Date());
     $("#returnRequestDetails").innerHTML = `
       <article class="list-row">
         <div>
           <strong>${escapeHtml(selectedReturnIssue.bookTitle || selectedReturnIssue.bookId || "Issued book")}</strong>
           <span>Accession No.: ${escapeHtml(selectedReturnIssue.accessionNumber || selectedReturnIssue.b_id || selectedReturnIssue.bookId || "")}</span>
           <span>Due date: ${formatDate(selectedReturnIssue.dueDate)}</span>
-          <span>Current penalty: Rs.${Number(penalty.penaltyAmount || 0).toFixed(2)}</span>
+          <span>Current penalty: Rs.${Number(penalty.calculatedPenalty || 0).toFixed(2)}</span>
           <span>Librarian return time: ${escapeHtml(scheduleLabel(schedule))}</span>
         </div>
       </article>`;

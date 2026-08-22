@@ -28,6 +28,14 @@ import {
   runReminderCheck,
   sendEmailNotification
 } from "./notifications.js";
+import {
+  calculatePenalty,
+  findMatchingPenaltyForIssue,
+  isActiveIssue,
+  isUnpaidPenaltyRecord,
+  issueIdOf,
+  penaltyAmountOf
+} from "./penalty-utils.mjs";
 
 wireSignOut();
 const session = await requireAuth(["admin"]);
@@ -48,6 +56,7 @@ let latestNoDuesUsers = [];
 let latestNoDuesStudents = [];
 let latestNoDuesIssues = [];
 let latestNoDuesPenalties = [];
+let latestNoDuesBooks = [];
 
 const noDuesControls = {
   search: $("#noDuesSearch"),
@@ -137,20 +146,6 @@ function downloadWorkbookTemplate(filename, rows) {
   window.XLSX.writeFile(workbook, filename);
 }
 
-function amountOfPenalty(penalty = {}) {
-  return Number(penalty.remainingAmount ?? penalty.amount ?? penalty.penaltyAmount ?? 0) || 0;
-}
-
-function isUnpaidPenalty(penalty = {}) {
-  if (penalty.paid === true && String(penalty.status || "").toLowerCase() === "paid") return false;
-  return amountOfPenalty(penalty) > 0 || penalty.paid !== true || String(penalty.status || "").toLowerCase() !== "paid";
-}
-
-function isActiveIssue(issue = {}) {
-  const status = String(issue.status || "").toLowerCase();
-  return !issue.returnDate && !["returned", "closed", "cancelled"].includes(status);
-}
-
 function studentUidOf(record = {}, fallback = "") {
   return record.uid || record.studentUid || record.firebaseAuthUid || fallback;
 }
@@ -186,30 +181,108 @@ function noDuesRows() {
     const uid = student.uid || student.id;
     const user = usersByUid.get(uid) || {};
     const issues = latestNoDuesIssues
-      .filter((item) => item.data.studentUid === uid || item.data.issuedTo === uid)
+      .filter((item) => item.data.studentUid === uid || item.data.userId === uid || item.data.issuedTo === uid)
       .filter((item) => isActiveIssue(item.data));
-    const penalties = latestNoDuesPenalties
+    const persistedPenalties = latestNoDuesPenalties
       .filter((item) => item.data.studentUid === uid)
-      .filter((item) => isUnpaidPenalty(item.data));
-    const penaltyAmount = penalties.reduce((sum, item) => sum + Math.max(0, amountOfPenalty(item.data)), 0);
+      .filter((item) => isUnpaidPenaltyRecord(item.data));
+    const paidPenaltyIssueIds = new Set(
+      latestNoDuesPenalties
+        .filter((item) => item.data.studentUid === uid && !isUnpaidPenaltyRecord(item.data))
+        .map((item) => issueIdOf(item.data, item.id))
+        .filter(Boolean)
+    );
+    const calculatedPenalties = issues
+      .map((item) => {
+        const calculation = calculatePenalty(item.data, new Date());
+        if (!calculation.isOverdue || calculation.calculatedPenalty <= 0) return null;
+        const persistedPenalty = findMatchingPenaltyForIssue(latestNoDuesPenalties.filter((penalty) => penalty.data.studentUid === uid), item.data, item.id);
+        if (persistedPenalty || paidPenaltyIssueIds.has(item.id)) return null;
+        return {
+          issueId: item.id,
+          issue: item.data,
+          calculation
+        };
+      })
+      .filter(Boolean);
+    const overdueBooks = issues
+      .map((item) => {
+        const calculation = calculatePenalty(item.data, new Date());
+        if (!calculation.isOverdue) return null;
+        return {
+          issueId: item.id,
+          bookTitle: item.data.bookTitle || item.data.title || item.data.bookId || "Issued book",
+          accessionNumber: item.data.accessionNumber || item.data.b_id || item.data.bookId || "-",
+          issueDate: item.data.issueDate || item.data.issuedAt || null,
+          dueDate: item.data.dueDate || calculation.dueDate || null,
+          overdueDays: calculation.overdueDays,
+          ratePerDay: calculation.ratePerDay,
+          currentPenalty: calculation.calculatedPenalty
+        };
+      })
+      .filter(Boolean);
+    const unresolvedCopyLiabilities = latestNoDuesBooks.filter((item) => {
+      const book = item.data;
+      const status = String(book.status || "").toLowerCase();
+      const holderUid = book.issuedStudentUid || book.issuedTo || book.studentUid || "";
+      return ["lost", "damaged"].includes(status) && holderUid === uid;
+    });
+    const persistedPenaltyAmount = persistedPenalties.reduce((sum, item) => {
+      const activeIssue = issues.find((issueItem) => findMatchingPenaltyForIssue([item], issueItem.data, issueItem.id));
+      const calculatedAmount = activeIssue ? calculatePenalty(activeIssue.data, new Date()).calculatedPenalty : 0;
+      return sum + Math.max(0, penaltyAmountOf(item.data), calculatedAmount);
+    }, 0);
+    const calculatedPenaltyAmount = calculatedPenalties.reduce((sum, item) => sum + item.calculation.calculatedPenalty, 0);
+    const penaltyAmount = persistedPenaltyAmount + calculatedPenaltyAmount;
     const hasActiveBooks = issues.length > 0;
     const hasPenalty = penaltyAmount > 0;
-    const blocked = hasActiveBooks || hasPenalty;
+    const hasCopyLiability = unresolvedCopyLiabilities.length > 0;
+    const blocked = hasActiveBooks || hasPenalty || hasCopyLiability;
     const name = student.name || user.name || "Unknown Student";
+    const overdueBlockers = calculatedPenalties.map((item) => {
+      const issue = item.issue;
+      const calculation = item.calculation;
+      return `NO DUES BLOCKED - Book: ${issue.bookTitle || issue.title || issue.bookId || "Issued book"}; Accession: ${issue.accessionNumber || issue.b_id || issue.bookId || "-"}; Due: ${formatDate(issue.dueDate || calculation.dueDate)}; Overdue: ${calculation.overdueDays} days; Outstanding Penalty: ₹${calculation.calculatedPenalty.toFixed(0)}`;
+    });
+    const activeBookBlockers = issues.map((item) => {
+      const issue = item.data;
+      return `Book not returned: ${issue.bookTitle || issue.title || issue.bookId || "Issued book"} (${issue.accessionNumber || issue.b_id || issue.bookId || "-"})`;
+    });
+    const persistedPenaltyBlockers = persistedPenalties.map((item) => {
+      const penalty = item.data;
+      const activeIssue = issues.find((issueItem) => findMatchingPenaltyForIssue([item], issueItem.data, issueItem.id));
+      const amount = Math.max(0, penaltyAmountOf(penalty), activeIssue ? calculatePenalty(activeIssue.data, new Date()).calculatedPenalty : 0);
+      return `Persisted unpaid penalty: ${penalty.bookTitle || penalty.bookId || "Book"} - ₹${amount.toFixed(0)}`;
+    });
+    const copyLiabilityBlockers = unresolvedCopyLiabilities.map((item) => {
+      const book = item.data;
+      return `Unresolved ${String(book.status || "copy").toLowerCase()} liability: ${book.title || book.bname || book.bookTitle || item.id}`;
+    });
+    const blockers = [...overdueBlockers, ...persistedPenaltyBlockers, ...activeBookBlockers, ...copyLiabilityBlockers];
 
     return {
       uid,
       name,
       email: student.email || user.email || "",
       phone: student.phone || user.phone || "",
-      rollNumber: student.rollNumber || student.rollNo || student.roll || student.enrollmentNumber || student.enrollmentNo || "-",
+      rollNumber: student.rollNumber || student.rollNo || student.roll || "-",
+      enrollmentNumber: student.enrollmentNumber || student.enrollmentNo || "",
       department: student.department || student.branch || student.course || "",
       activeBooks: issues.length,
       activeBookTitles: issues.map((item) => item.data.bookTitle || item.data.title || item.data.bookId || "Book"),
-      unpaidPenalties: penalties.length,
+      activeIssueDetails: issues.map((item) => ({
+        issueId: item.id,
+        bookTitle: item.data.bookTitle || item.data.title || item.data.bookId || "Issued book",
+        accessionNumber: item.data.accessionNumber || item.data.b_id || item.data.bookId || "-",
+        issueDate: item.data.issueDate || item.data.issuedAt || null,
+        dueDate: item.data.dueDate || calculatePenalty(item.data, new Date()).dueDate || null
+      })),
+      overdueBooks,
+      unpaidPenalties: persistedPenalties.length + calculatedPenalties.length,
       penaltyAmount,
       status: blocked ? "blocked" : "eligible",
-      dueType: hasPenalty ? "penalty" : hasActiveBooks ? "books" : "clear",
+      dueType: hasPenalty ? "penalty" : (hasActiveBooks || hasCopyLiability) ? "books" : "clear",
+      blockers,
       active: student.active !== false && user.active !== false
     };
   }).sort((left, right) => {
@@ -228,9 +301,11 @@ function filteredNoDuesRows() {
       row.email,
       row.phone,
       row.rollNumber,
+      row.enrollmentNumber,
       row.department,
       row.uid,
-      row.activeBookTitles.join(" ")
+      row.activeBookTitles.join(" "),
+      row.blockers.join(" ")
     ].join(" ").toLowerCase();
     if (search && !haystack.includes(search)) return false;
     if (status && row.status !== status) return false;
@@ -252,6 +327,9 @@ function renderNoDues() {
   $("#noDuesBlockedStudents").textContent = String(blocked);
   $("#noDuesActiveIssues").textContent = String(activeIssues);
   $("#noDuesPendingAmount").textContent = `₹ ${pendingAmount.toFixed(0)}`;
+  if (metrics.penalties) {
+    metrics.penalties.textContent = String(allRows.reduce((sum, row) => sum + row.unpaidPenalties, 0));
+  }
 
   noDuesControls.summary.innerHTML = `
     <div><span>Total Students</span><strong>${allRows.length}</strong></div>
@@ -283,8 +361,10 @@ function renderNoDues() {
           <th>#</th>
           <th>Student Details</th>
           <th>Roll No.</th>
+          <th>Enrollment</th>
           <th>Active Books</th>
           <th>Pending Penalty</th>
+          <th>Blocker</th>
           <th>Clearance Status</th>
           <th>Action</th>
         </tr>
@@ -303,8 +383,10 @@ function renderNoDues() {
               </div>
             </td>
             <td>${escapeHtml(row.rollNumber)}</td>
+            <td>${escapeHtml(row.enrollmentNumber || "-")}</td>
             <td><strong class="${row.activeBooks ? "danger-text" : "success-text"}">${row.activeBooks}</strong><span>${escapeHtml(row.activeBookTitles.slice(0, 2).join(", ") || "No books pending")}</span></td>
             <td><strong class="${row.penaltyAmount ? "danger-text" : "success-text"}">₹ ${row.penaltyAmount.toFixed(2)}</strong><span>${row.unpaidPenalties} unpaid record${row.unpaidPenalties === 1 ? "" : "s"}</span></td>
+            <td><span>${escapeHtml(row.blockers[0] || "No blockers")}</span></td>
             <td>${row.status === "eligible" ? statusBadge("eligible") : statusBadge("blocked")}</td>
             <td>
               <button class="btn ${row.status === "eligible" ? "btn-primary" : "btn-muted"}" data-no-dues-action="review" data-student-uid="${escapeHtml(row.uid)}" type="button">
@@ -317,11 +399,61 @@ function renderNoDues() {
     <div class="table-footer-note">Showing ${rows.length} of ${allRows.length} student entries</div>`;
 }
 
+function renderNoDuesReview(row) {
+  const target = $("#noDuesReviewContent");
+  if (!target) {
+    const message = row.status === "eligible"
+      ? `${row.name} is eligible for no dues clearance.`
+      : `${row.name} is blocked: ${row.blockers.join("; ")}.`;
+    showToast(message, row.status === "eligible" ? "success" : "warning");
+    return;
+  }
+
+  const activeBooks = row.activeIssueDetails || [];
+  const overdueBooks = row.overdueBooks || [];
+  target.innerHTML = `
+    <section class="detail-grid">
+      <span>Student</span><strong>${escapeHtml(row.name)}</strong>
+      <span>Roll No.</span><strong>${escapeHtml(row.rollNumber || "-")}</strong>
+      <span>Enrollment No.</span><strong>${escapeHtml(row.enrollmentNumber || "-")}</strong>
+      <span>Student UID</span><strong>${escapeHtml(row.uid)}</strong>
+      <span>Active Books</span><strong>${row.activeBooks}</strong>
+      <span>Total Pending Penalty</span><strong class="${row.penaltyAmount ? "danger-text" : "success-text"}">₹ ${row.penaltyAmount.toFixed(2)}</strong>
+      <span>Status</span><strong>${row.status === "eligible" ? "Eligible" : "Blocked"}</strong>
+    </section>
+    <h3>Active books</h3>
+    ${activeBooks.length ? activeBooks.map((book) => `
+      <article class="list-row">
+        <div>
+          <strong>${escapeHtml(book.bookTitle)}</strong>
+          <span>Accession: ${escapeHtml(book.accessionNumber)}</span>
+          <span>Issue: ${formatDate(book.issueDate)} | Due: ${formatDate(book.dueDate)}</span>
+        </div>
+      </article>`).join("") : `<div class="empty">No active issued books.</div>`}
+    <h3>Overdue penalty details</h3>
+    ${overdueBooks.length ? overdueBooks.map((book) => `
+      <article class="list-row">
+        <div>
+          <strong>${escapeHtml(book.bookTitle)}</strong>
+          <span>Accession number: ${escapeHtml(book.accessionNumber)}</span>
+          <span>Issue date: ${formatDate(book.issueDate)}</span>
+          <span>Due date: ${formatDate(book.dueDate)}</span>
+          <span>Overdue days: ${book.overdueDays}</span>
+          <span>Rate: ₹${book.ratePerDay}/day</span>
+          <span>Current penalty: ₹${book.currentPenalty.toFixed(2)}</span>
+        </div>
+        ${statusBadge("unpaid")}
+      </article>`).join("") : `<div class="empty">No overdue penalty on active books.</div>`}
+    ${row.blockers.length ? `<h3>Blockers</h3><ul class="rules-list">${row.blockers.map((blocker) => `<li>${escapeHtml(blocker)}</li>`).join("")}</ul>` : ""}`;
+  openModal("noDuesReviewModal");
+}
+
 function exportNoDuesReport() {
   if (!window.XLSX) throw new Error("XLSX library is not loaded.");
   const rows = filteredNoDuesRows().map((row) => ({
     "Student Name": row.name,
     "Roll No.": row.rollNumber,
+    "Enrollment Number": row.enrollmentNumber,
     Email: row.email,
     Phone: row.phone,
     Department: row.department,
@@ -330,10 +462,7 @@ function exportNoDuesReport() {
     "Clearance Status": row.status === "eligible" ? "Eligible" : "Blocked",
     "Blocking Reason": row.status === "eligible"
       ? "No active books or unpaid dues"
-      : [
-          row.activeBooks ? `${row.activeBooks} active book(s)` : "",
-          row.penaltyAmount ? `₹ ${row.penaltyAmount.toFixed(2)} unpaid penalty` : ""
-        ].filter(Boolean).join("; ")
+      : row.blockers.join("; ")
   }));
   const sheet = window.XLSX.utils.json_to_sheet(rows);
   const workbook = window.XLSX.utils.book_new();
@@ -455,7 +584,11 @@ onSnapshot(collection(db, "users"), (snap) => {
   metrics.librarians.textContent = snap.docs.filter((item) => item.data().role === "librarian").length;
   renderNoDues();
 });
-onSnapshot(collection(db, "books"), (snap) => metrics.books.textContent = snap.size);
+onSnapshot(collection(db, "books"), (snap) => {
+  latestNoDuesBooks = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
+  metrics.books.textContent = snap.size;
+  renderNoDues();
+});
 onSnapshot(collection(db, "issueRequests"), (snap) => {
   metrics.pending.textContent = snap.docs.filter((item) => item.data().status === "pending").length;
 });
@@ -470,7 +603,6 @@ onSnapshot(collection(db, "students"), (snap) => {
 });
 onSnapshot(collection(db, "penalties"), (snap) => {
   latestNoDuesPenalties = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
-  metrics.penalties.textContent = snap.size;
   renderNoDues();
 });
 
@@ -602,13 +734,7 @@ $("#noDuesTable")?.addEventListener("click", (event) => {
   if (!button) return;
   const row = noDuesRows().find((item) => item.uid === button.dataset.studentUid);
   if (!row) return;
-  const message = row.status === "eligible"
-    ? `${row.name} is eligible for no dues clearance.`
-    : `${row.name} is blocked: ${[
-        row.activeBooks ? `${row.activeBooks} active book(s)` : "",
-        row.penaltyAmount ? `₹ ${row.penaltyAmount.toFixed(2)} unpaid penalty` : ""
-      ].filter(Boolean).join("; ")}.`;
-  showToast(message, row.status === "eligible" ? "success" : "warning");
+  renderNoDuesReview(row);
 });
 
 onSnapshot(query(collection(db, "issueRequests"), orderBy("createdAt", "desc"), limit(8)), (snap) => {

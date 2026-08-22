@@ -16,9 +16,22 @@ import {
   getFunctions,
   httpsCallable
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js";
+import {
+  ISSUE_PERIOD_DAYS,
+  PENALTY_RATE_PER_DAY,
+  addCalendarDays,
+  calculatePenalty as calculateIssuePenalty,
+  completedCalendarDaysBetween,
+  findMatchingPenaltyForIssue,
+  isActiveIssue,
+  isPenaltyPaid,
+  isUnpaidPenaltyRecord as isUnpaidPenaltyRecordUtil,
+  issueIdOf,
+  penaltyAmountOf
+} from "./penalty-utils.mjs";
 
-const ISSUE_DAYS = 45;
-const PENALTY_PER_DAY = 5;
+const ISSUE_DAYS = ISSUE_PERIOD_DAYS;
+const PENALTY_PER_DAY = PENALTY_RATE_PER_DAY;
 const functions = getFunctions(app);
 
 export function accessionNumberOf(book = {}) {
@@ -121,16 +134,7 @@ export async function getIssueReturnSchedule() {
 }
 
 export function isUnpaidPenaltyRecord(penalty = {}) {
-  const amount = Number(penalty.amount ?? penalty.penaltyAmount ?? 0);
-  const hasRemainingAmount = penalty.remainingAmount !== undefined && penalty.remainingAmount !== null;
-  const remainingAmount = Number(penalty.remainingAmount ?? 0);
-  if (remainingAmount > 0) return true;
-  if (hasRemainingAmount && remainingAmount <= 0 && penalty.paid === true && String(penalty.status || "").toLowerCase() === "paid") {
-    return false;
-  }
-  if (penalty.paid === true && String(penalty.status || "").toLowerCase() === "paid") return false;
-  if (amount <= 0) return false;
-  return penalty.paid !== true || String(penalty.status || "").toLowerCase() !== "paid";
+  return isUnpaidPenaltyRecordUtil(penalty);
 }
 
 export async function getUnpaidPenaltySummary(studentUid) {
@@ -141,12 +145,78 @@ export async function getUnpaidPenaltySummary(studentUid) {
 
   console.log("Checking unpaid penalties for student:", cleanUid);
   const penaltiesQuery = query(collection(db, "penalties"), where("studentUid", "==", cleanUid));
-  const snap = await getDocs(penaltiesQuery);
-  const records = snap.docs
-    .map((item) => ({ id: item.id, ...item.data() }))
+  const activeIssuesQuery = query(collection(db, "bookIssues"), where("studentUid", "==", cleanUid), where("status", "==", "issued"));
+  const [penaltiesSnap, activeIssuesSnap] = await Promise.all([
+    getDocs(penaltiesQuery),
+    getDocs(activeIssuesQuery)
+  ]);
+  const activeIssues = activeIssuesSnap.docs.map((item) => ({ id: item.id, ...item.data() }));
+  const penaltyRows = penaltiesSnap.docs.map((item) => ({ id: item.id, data: item.data() }));
+  const penaltyRecords = penaltiesSnap.docs
+    .map((item) => {
+      const penalty = item.data();
+      const matchedIssue = activeIssues.find((issue) => findMatchingPenaltyForIssue([{ id: item.id, data: penalty }], issue, issue.id));
+      const activeIssue = matchedIssue || null;
+      const calculation = activeIssue ? calculatePenalty(activeIssue, new Date()) : null;
+      const currentAmount = calculation?.calculatedPenalty || 0;
+      const persistedAmount = penaltyAmountOf(penalty);
+      return calculation && isUnpaidPenaltyRecord(penalty) && currentAmount > persistedAmount
+        ? {
+            id: item.id,
+            ...penalty,
+            dueDate: penalty.dueDate || calculation.dueDate,
+            lateDays: calculation.overdueDays,
+            daysLate: calculation.overdueDays,
+            ratePerDay: calculation.ratePerDay,
+            amount: currentAmount,
+            penaltyAmount: currentAmount,
+            remainingAmount: currentAmount
+          }
+        : { id: item.id, ...penalty };
+    })
     .filter(isUnpaidPenaltyRecord);
+  const existingUnpaidIssueIds = new Set(penaltyRecords.map((penalty) => issueIdOf(penalty, penalty.id)));
+
+  const calculatedIssueRecords = activeIssues
+    .filter(isActiveIssue)
+    .map((issue) => {
+      const calculation = calculatePenalty(issue, new Date());
+      const persistedPenaltyRow = findMatchingPenaltyForIssue(penaltyRows, issue, issue.id);
+      const persistedPenalty = persistedPenaltyRow?.data || null;
+      if (!calculation.isOverdue || calculation.calculatedPenalty <= 0 || isPenaltyPaid(persistedPenalty || {})) return null;
+      if (existingUnpaidIssueIds.has(issue.id) || persistedPenaltyRow) return null;
+      return {
+        id: issue.id,
+        penaltyId: issue.id,
+        issueId: issue.id,
+        calculated: true,
+        studentUid: cleanUid,
+        studentName: issue.studentName || "",
+        studentEmail: issue.studentEmail || "",
+        studentPhone: issue.studentPhone || "",
+        bookId: issue.bookId || issue.b_id || "",
+        b_id: issue.b_id || issue.bookId || "",
+        accessionNumber: issue.accessionNumber || "",
+        bookBarcodeValue: issue.bookBarcodeValue || issue.barcodeValue || "",
+        bookTitle: issue.bookTitle || issue.title || issue.bookId || "",
+        issueDate: issue.issueDate || issue.issuedAt || null,
+        dueDate: issue.dueDate || calculation.dueDate || null,
+        lateDays: calculation.overdueDays,
+        daysLate: calculation.overdueDays,
+        ratePerDay: calculation.ratePerDay,
+        amount: calculation.calculatedPenalty,
+        penaltyAmount: calculation.calculatedPenalty,
+        remainingAmount: calculation.calculatedPenalty,
+        paid: false,
+        status: "unpaid",
+        paymentStatus: "unpaid"
+      };
+    })
+    .filter(Boolean);
+
+  const records = [...penaltyRecords, ...calculatedIssueRecords];
   const totalPendingPenalty = records.reduce((sum, penalty) => {
-    const amount = Number(penalty.remainingAmount ?? penalty.amount ?? penalty.penaltyAmount ?? 0);
+    const amount = penaltyAmountOf(penalty);
     return sum + Math.max(0, amount);
   }, 0);
 
@@ -164,27 +234,15 @@ export async function getUnpaidPenaltySummary(studentUid) {
 }
 
 export function addDays(date, days) {
-  const copy = new Date(date);
-  copy.setDate(copy.getDate() + days);
-  return copy;
+  return addCalendarDays(date, days);
 }
 
 export function daysBetween(start, end) {
-  const startDate = new Date(start);
-  const endDate = new Date(end);
-  startDate.setHours(0, 0, 0, 0);
-  endDate.setHours(0, 0, 0, 0);
-  return Math.max(0, Math.floor((endDate - startDate) / 86400000));
+  return completedCalendarDaysBetween(start, end);
 }
 
-export function calculatePenalty(issueDate, returnDate = new Date()) {
-  const totalDays = daysBetween(issueDate, returnDate);
-  const overdueDays = Math.max(0, totalDays - ISSUE_DAYS);
-  return {
-    totalDays,
-    overdueDays,
-    penaltyAmount: overdueDays * PENALTY_PER_DAY
-  };
+export function calculatePenalty(issue, currentDate = new Date()) {
+  return calculateIssuePenalty(issue, currentDate);
 }
 
 export async function createStudentProfile(uid, profile) {
@@ -436,10 +494,7 @@ export async function createReturnRequest({ student, issue, confirmationChecked 
   const duplicate = pendingSnap.docs.some((item) => item.data().currentIssueId === issueId);
   if (duplicate) throw new Error("You already have a pending return request for this book.");
 
-  const issueDate = issue.issueDate?.toDate ? issue.issueDate.toDate() : new Date(issue.issueDate);
-  const penalty = Number.isNaN(issueDate.getTime())
-    ? { overdueDays: 0, penaltyAmount: 0 }
-    : calculatePenalty(issueDate, new Date());
+  const penalty = calculatePenalty(issue, new Date());
   const ref = doc(collection(db, "returnRequests"));
   const payload = {
     type: "return",
@@ -465,7 +520,7 @@ export async function createReturnRequest({ student, issue, confirmationChecked 
     createdAt: serverTimestamp(),
     preferredSlot: scheduleLabel(schedule),
     scheduleSnapshot: schedule || null,
-    estimatedPenalty: penalty.penaltyAmount || 0,
+    estimatedPenalty: penalty.calculatedPenalty || 0,
     confirmationChecked: true,
     reviewedBy: null,
     reviewedAt: null
@@ -536,10 +591,10 @@ export async function returnBook(bookId) {
         throw new Error("This issue is already closed.");
       }
 
-      const issueDate = issue.issueDate?.toDate ? issue.issueDate.toDate() : new Date(issue.issueDate);
-      const daysUsed = Number.isNaN(issueDate.getTime()) ? 0 : daysBetween(issueDate, returnDate);
-      const lateDays = Math.max(0, daysUsed - ISSUE_DAYS);
-      const penaltyAmount = lateDays * (issue.penaltyPerDay || PENALTY_PER_DAY);
+      const penalty = calculatePenalty(issue, returnDate);
+      const daysUsed = daysBetween(issue.issueDate || issue.issuedAt, returnDate);
+      const lateDays = penalty.overdueDays;
+      const penaltyAmount = penalty.calculatedPenalty;
       const penaltyRef = doc(db, "penalties", issueId);
 
       transaction.update(issueRef, {
@@ -563,15 +618,18 @@ export async function returnBook(bookId) {
           bookBarcodeValue: issue.bookBarcodeValue || scannedValue,
           bookTitle: issue.bookTitle || issue.bookId || bookDocId,
           issueDate: issue.issueDate || null,
-          dueDate: issue.dueDate || null,
+          dueDate: issue.dueDate || penalty.dueDate || null,
           returnDate: serverTimestamp(),
           lateDays,
           daysLate: lateDays,
+          ratePerDay: penalty.ratePerDay,
           amount: penaltyAmount,
           penaltyAmount,
           remainingAmount: penaltyAmount,
           paid: false,
           status: "unpaid",
+          paymentStatus: "unpaid",
+          penaltyStatus: "unpaid",
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         }, { merge: true });
@@ -599,7 +657,7 @@ export async function returnBook(bookId) {
         studentEmail: issue.studentEmail || "",
         bookTitle: issue.bookTitle || issue.bookId || bookDocId,
         issueDate: issue.issueDate || null,
-        dueDate: issue.dueDate || null,
+        dueDate: issue.dueDate || penalty.dueDate || null,
         returnDate,
         daysUsed,
         lateDays,

@@ -1787,6 +1787,16 @@ td span,
   margin: -4px 0 12px;
 }
 
+.detail-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.detail-panel h3 {
+  margin: 8px 0 0;
+  color: var(--primary-dark);
+}
+
 .uid-box {
   max-width: 100%;
   display: flex;

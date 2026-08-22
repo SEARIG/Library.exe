@@ -41,6 +41,7 @@ import {
   collection,
   doc,
   addDoc,
+  arrayUnion,
   getDoc,
   getDocs,
   limit,
@@ -65,6 +66,10 @@ import {
   reusableMetadataPayload,
   titleKeywords
 } from "./book-metadata-utils.mjs";
+import {
+  findMatchingPenaltyForIssue,
+  issueIdOf
+} from "./penalty-utils.mjs";
 
 wireSignOut();
 const session = await requireAuth(["librarian", "admin"]);
@@ -79,6 +84,7 @@ let latestBooks = [];
 let latestPendingRequests = [];
 let latestReturnRequests = [];
 let latestPenalties = [];
+let latestActiveIssues = [];
 let latestBarcodeDataUrl = "";
 let selectedReturnRequest = null;
 let pendingBookImportRows = [];
@@ -2434,12 +2440,96 @@ function penaltyAmountOf(penalty = {}) {
   return Number(penalty.remainingAmount ?? penalty.amount ?? penalty.penaltyAmount ?? 0);
 }
 
+function penaltyIssueIdOf(penalty = {}, fallback = "") {
+  return issueIdOf(penalty, penalty.penaltyId || fallback);
+}
+
+function buildPenaltyRows() {
+  const persistedUnpaidIssueIds = new Set(
+    latestPenalties
+      .filter((item) => isUnpaidPenaltyRecord(item.data))
+      .map((item) => penaltyIssueIdOf(item.data, item.id))
+      .filter(Boolean)
+  );
+
+  const persistedRows = latestPenalties.map((item) => {
+    const activeIssue = latestActiveIssues.find((issueItem) => findMatchingPenaltyForIssue([item], issueItem.data, issueItem.id));
+    const calculation = activeIssue ? calculatePenalty(activeIssue.data, new Date()) : null;
+    const currentAmount = calculation?.calculatedPenalty || 0;
+    const persistedAmount = penaltyAmountOf(item.data);
+    const data = calculation && isUnpaidPenaltyRecord(item.data) && currentAmount > persistedAmount
+      ? {
+          ...item.data,
+          dueDate: item.data.dueDate || calculation.dueDate,
+          lateDays: calculation.overdueDays,
+          daysLate: calculation.overdueDays,
+          ratePerDay: calculation.ratePerDay,
+          amount: currentAmount,
+          penaltyAmount: currentAmount,
+          remainingAmount: currentAmount
+        }
+      : item.data;
+    return {
+      ...item,
+      data,
+      source: "persisted"
+    };
+  });
+
+  const calculatedRows = latestActiveIssues
+    .map((item) => {
+      const issue = item.data;
+      const calculation = calculatePenalty(issue, new Date());
+      const persistedPenalty = findMatchingPenaltyForIssue(latestPenalties, issue, item.id);
+      if (!calculation.isOverdue || calculation.calculatedPenalty <= 0) return null;
+      if (persistedPenalty && !isUnpaidPenaltyRecord(persistedPenalty.data)) return null;
+      if (persistedUnpaidIssueIds.has(item.id) || persistedPenalty) return null;
+
+      return {
+        id: item.id,
+        source: "calculated",
+        data: {
+          penaltyId: item.id,
+          issueId: item.id,
+          studentUid: issue.studentUid || issue.userId || "",
+          studentName: issue.studentName || issue.issuedToName || "Unknown student",
+          studentEmail: issue.studentEmail || issue.issuedToEmail || "",
+          studentPhone: issue.studentPhone || "",
+          rollNumber: issue.rollNumber || issue.rollNo || "",
+          enrollmentNumber: issue.enrollmentNumber || issue.enrollmentNo || "",
+          bookId: issue.bookId || issue.b_id || "",
+          b_id: issue.b_id || issue.bookId || "",
+          accessionNumber: issue.accessionNumber || "",
+          bookBarcodeValue: issue.bookBarcodeValue || issue.barcodeValue || "",
+          bookTitle: issue.bookTitle || issue.title || issue.bookId || "Issued book",
+          issueDate: issue.issueDate || issue.issuedAt || null,
+          dueDate: issue.dueDate || calculation.dueDate || null,
+          lateDays: calculation.overdueDays,
+          daysLate: calculation.overdueDays,
+          ratePerDay: calculation.ratePerDay,
+          amount: calculation.calculatedPenalty,
+          penaltyAmount: calculation.calculatedPenalty,
+          remainingAmount: calculation.calculatedPenalty,
+          paid: false,
+          status: "unpaid",
+          paymentStatus: "unpaid",
+          penaltyStatus: "unpaid",
+          calculated: true
+        }
+      };
+    })
+    .filter(Boolean);
+
+  return [...persistedRows, ...calculatedRows];
+}
+
 function renderPenaltyDetails() {
   const statusFilter = $("#penaltyStatusFilter")?.value || "all";
   const search = String($("#penaltySearchInput")?.value || "").trim().toLowerCase();
-  const total = latestPenalties.length;
-  const unpaid = latestPenalties.filter((item) => isUnpaidPenaltyRecord(item.data));
-  const paid = latestPenalties.filter((item) => !isUnpaidPenaltyRecord(item.data));
+  const allPenaltyRows = buildPenaltyRows();
+  const total = allPenaltyRows.length;
+  const unpaid = allPenaltyRows.filter((item) => isUnpaidPenaltyRecord(item.data));
+  const paid = allPenaltyRows.filter((item) => !isUnpaidPenaltyRecord(item.data));
   const pendingAmount = unpaid.reduce((sum, item) => sum + Math.max(0, penaltyAmountOf(item.data)), 0);
 
   const metricMap = {
@@ -2454,7 +2544,7 @@ function renderPenaltyDetails() {
     if (target) target.textContent = String(value);
   });
 
-  const rows = latestPenalties.filter((item) => {
+  const rows = allPenaltyRows.filter((item) => {
     const penalty = item.data;
     const isUnpaid = isUnpaidPenaltyRecord(penalty);
     if (statusFilter === "unpaid" && !isUnpaid) return false;
@@ -2465,9 +2555,14 @@ function renderPenaltyDetails() {
       penalty.studentEmail,
       penalty.studentPhone,
       penalty.studentUid,
+      penalty.rollNumber,
+      penalty.rollNo,
+      penalty.enrollmentNumber,
+      penalty.enrollmentNo,
       penalty.bookTitle,
       penalty.bookId,
       penalty.b_id,
+      penalty.accessionNumber,
       penalty.bookBarcodeValue
     ].join(" ").toLowerCase().includes(search);
   });
@@ -2486,16 +2581,17 @@ function renderPenaltyDetails() {
       const isUnpaid = isUnpaidPenaltyRecord(penalty);
       const amount = penaltyAmountOf(penalty);
       return `
-        <article class="list-row penalty-row" data-penalty-id="${escapeHtml(item.id)}">
+        <article class="list-row penalty-row" data-penalty-id="${escapeHtml(item.id)}" data-issue-id="${escapeHtml(penaltyIssueIdOf(penalty, item.id))}">
           <div>
             <strong>${escapeHtml(penalty.studentName || "Unknown student")} - Rs.${amount.toFixed(2)}</strong>
+            <span>Student UID: ${escapeHtml(shortUid(penalty.studentUid || ""))}</span>
+            <span>Roll No.: ${escapeHtml(penalty.rollNumber || penalty.rollNo || "-")} | Enrollment: ${escapeHtml(penalty.enrollmentNumber || penalty.enrollmentNo || "-")}</span>
             <span>Email: ${escapeHtml(penalty.studentEmail || "")}</span>
             <span>Phone: ${escapeHtml(penalty.studentPhone || "")}</span>
-            <span>UID: ${escapeHtml(shortUid(penalty.studentUid || ""))}</span>
             <span>Book: ${escapeHtml(penalty.bookTitle || penalty.bookId || "")}</span>
-            <span>B_ID: ${escapeHtml(penalty.b_id || penalty.bookId || "")} | Barcode: ${escapeHtml(penalty.bookBarcodeValue || "")}</span>
+            <span>Accession: ${escapeHtml(penalty.accessionNumber || "-")} | B_ID: ${escapeHtml(penalty.b_id || penalty.bookId || "")}</span>
             <span>Issue: ${formatDate(penalty.issueDate)} | Due: ${formatDate(penalty.dueDate)} | Return: ${formatDate(penalty.returnDate)}</span>
-            <span>Late Days: ${Number(penalty.lateDays || penalty.daysLate || 0)}</span>
+            <span>Overdue Days: ${Number(penalty.lateDays || penalty.daysLate || 0)} | Rate: Rs.${Number(penalty.ratePerDay || 5).toFixed(0)}/day | Total: Rs.${amount.toFixed(2)}</span>
             <span>Contact Details: ${escapeHtml([penalty.studentEmail, penalty.studentPhone].filter(Boolean).join(" | "))}</span>
           </div>
           <div class="row-actions">
@@ -2517,19 +2613,59 @@ $("#penaltyDetailsList")?.addEventListener("click", async (event) => {
 
   if (markPaidBtn) {
     const penaltyId = markPaidBtn.dataset.penaltyId;
-    const confirmed = await confirmAction("Mark this penalty as paid?");
+    const row = buildPenaltyRows().find((item) => item.id === penaltyId);
+    const penalty = row?.data || {};
+    const defaultAmount = Math.max(0, penaltyAmountOf(penalty));
+    const amountPaid = defaultAmount;
+    const confirmed = await confirmAction(`Clear dues for Rs.${amountPaid.toFixed(2)}?`);
     if (!confirmed) return;
     markPaidBtn.disabled = true;
     try {
-      await updateDoc(doc(db, "penalties", penaltyId), {
+      const issueId = penaltyIssueIdOf(penalty, penaltyId);
+      await setDoc(doc(db, "penalties", penaltyId), {
+        penaltyId,
+        issueId,
+        studentUid: penalty.studentUid || "",
+        studentName: penalty.studentName || "",
+        studentEmail: penalty.studentEmail || "",
+        studentPhone: penalty.studentPhone || "",
+        rollNumber: penalty.rollNumber || penalty.rollNo || "",
+        enrollmentNumber: penalty.enrollmentNumber || penalty.enrollmentNo || "",
+        bookId: penalty.bookId || penalty.b_id || "",
+        b_id: penalty.b_id || penalty.bookId || "",
+        accessionNumber: penalty.accessionNumber || "",
+        bookBarcodeValue: penalty.bookBarcodeValue || "",
+        bookTitle: penalty.bookTitle || "",
+        issueDate: penalty.issueDate || null,
+        dueDate: penalty.dueDate || null,
+        lateDays: penalty.lateDays || penalty.daysLate || 0,
+        daysLate: penalty.lateDays || penalty.daysLate || 0,
+        ratePerDay: penalty.ratePerDay || 5,
+        amount: penalty.amount || penalty.penaltyAmount || amountPaid,
+        penaltyAmount: penalty.penaltyAmount || penalty.amount || amountPaid,
+        paymentAmount: amountPaid,
+        amountPaid,
+        paidAmount: amountPaid,
         paid: true,
         status: "paid",
+        paymentStatus: "paid",
+        penaltyStatus: "cleared",
         remainingAmount: 0,
+        clearedAt: serverTimestamp(),
+        clearedBy: auth.currentUser.uid,
+        clearedByName: session.profile?.name || auth.currentUser.displayName || auth.currentUser.email || "",
         paidAt: serverTimestamp(),
         paidBy: auth.currentUser.uid,
+        paymentHistory: arrayUnion({
+          amountPaid,
+          clearedBy: auth.currentUser.uid,
+          clearedByName: session.profile?.name || auth.currentUser.displayName || auth.currentUser.email || "",
+          clearedAt: new Date().toISOString(),
+          action: "clear_dues"
+        }),
         updatedAt: serverTimestamp()
-      });
-      showToast("Penalty marked as paid.", "success");
+      }, { merge: true });
+      showToast("Dues cleared and payment history saved.", "success");
     } catch (error) {
       logDetailedError(error);
       showToast(`${error.code || "error"}: ${error.message}`, "error");
@@ -2810,8 +2946,10 @@ $("#confirmReturnRequestForm")?.addEventListener("submit", async (event) => {
 });
 
 onSnapshot(
-  query(collection(db, "bookIssues"), where("status", "==", "issued"), limit(25)),
+  query(collection(db, "bookIssues"), where("status", "==", "issued")),
   async (snap) => {
+    latestActiveIssues = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
+    renderPenaltyDetails();
     const target = $("#activeIssues");
     if (snap.empty) {
       renderEmpty(target, "No active issues.");
@@ -2936,8 +3074,7 @@ $("#quickReturnForm").addEventListener("submit", async (event) => {
     const issueSnap = await getDoc(doc(db, "bookIssues", book.currentIssueId));
     if (!issueSnap.exists()) throw new Error("Active issue record not found.");
     const issue = issueSnap.data();
-    const issueDate = issue.issueDate?.toDate ? issue.issueDate.toDate() : new Date(issue.issueDate);
-    const penalty = Number.isNaN(issueDate.getTime()) ? { penaltyAmount: 0 } : calculatePenalty(issueDate, new Date());
+    const penalty = calculatePenalty(issue, new Date());
     selectedQuickReturn = { lookupValue, book, issue };
     $("#quickReturnDetails").innerHTML = `
       <span>Accession Number</span><strong>${escapeHtml(issue.accessionNumber || accessionNumberOf(book) || "-")}</strong>
@@ -2947,7 +3084,7 @@ $("#quickReturnForm").addEventListener("submit", async (event) => {
       <span>Student Name</span><strong>${escapeHtml(issue.studentName || "-")}</strong>
       <span>Issue Date</span><strong>${escapeHtml(formatDate(issue.issueDate))}</strong>
       <span>Due Date</span><strong>${escapeHtml(formatDate(issue.dueDate))}</strong>
-      <span>Penalty</span><strong>Rs.${Number(penalty.penaltyAmount || 0).toFixed(2)}</strong>`;
+      <span>Penalty</span><strong>Rs.${Number(penalty.calculatedPenalty || 0).toFixed(2)}</strong>`;
     $("#quickReturnDialog").showModal();
   } catch (error) {
     console.error("Quick return lookup failed:", error);
