@@ -24,7 +24,7 @@ import {
   returnBook,
   scheduleLabel,
   titleOf
-} from "./firestore-service.js";
+} from "./firestore-service.js?v=2";
 import {
   EMAILJS_SETUP_MESSAGE,
   isEmailNotificationsConfigured,
@@ -67,9 +67,9 @@ import {
   titleKeywords
 } from "./book-metadata-utils.mjs";
 import {
-  findMatchingPenaltyForIssue,
+  getStudentPenaltyLiability,
   issueIdOf
-} from "./penalty-utils.mjs";
+} from "./penalty-utils.mjs?v=2";
 
 wireSignOut();
 const session = await requireAuth(["librarian", "admin"]);
@@ -2445,82 +2445,77 @@ function penaltyIssueIdOf(penalty = {}, fallback = "") {
 }
 
 function buildPenaltyRows() {
-  const persistedUnpaidIssueIds = new Set(
-    latestPenalties
-      .filter((item) => isUnpaidPenaltyRecord(item.data))
-      .map((item) => penaltyIssueIdOf(item.data, item.id))
-      .filter(Boolean)
-  );
+  const studentMap = new Map();
+  const ensureStudent = (student) => {
+    const uid = student.studentUid || student.userId || student.uid || "";
+    const email = student.studentEmail || student.email || "";
+    const rollNo = student.rollNo || student.rollNumber || "";
+    const enrollmentNumber = student.enrollmentNumber || student.enrollmentNo || "";
+    const key = uid || email || rollNo || enrollmentNumber;
+    if (!key || studentMap.has(key)) return;
+    studentMap.set(key, {
+      uid,
+      email,
+      rollNo,
+      rollNumber: rollNo,
+      enrollmentNumber,
+      name: student.studentName || student.issuedToName || student.name || "Unknown student",
+      phone: student.studentPhone || student.phone || ""
+    });
+  };
 
-  const persistedRows = latestPenalties.map((item) => {
-    const activeIssue = latestActiveIssues.find((issueItem) => findMatchingPenaltyForIssue([item], issueItem.data, issueItem.id));
-    const calculation = activeIssue ? calculatePenalty(activeIssue.data, new Date()) : null;
-    const currentAmount = calculation?.calculatedPenalty || 0;
-    const persistedAmount = penaltyAmountOf(item.data);
-    const data = calculation && isUnpaidPenaltyRecord(item.data) && currentAmount > persistedAmount
-      ? {
-          ...item.data,
-          dueDate: item.data.dueDate || calculation.dueDate,
-          lateDays: calculation.overdueDays,
-          daysLate: calculation.overdueDays,
-          ratePerDay: calculation.ratePerDay,
-          amount: currentAmount,
-          penaltyAmount: currentAmount,
-          remainingAmount: currentAmount
-        }
-      : item.data;
-    return {
-      ...item,
-      data,
-      source: "persisted"
-    };
-  });
+  latestActiveIssues.forEach((item) => ensureStudent(item.data));
+  latestPenalties.forEach((item) => ensureStudent(item.data));
 
-  const calculatedRows = latestActiveIssues
-    .map((item) => {
-      const issue = item.data;
-      const calculation = calculatePenalty(issue, new Date());
-      const persistedPenalty = findMatchingPenaltyForIssue(latestPenalties, issue, item.id);
-      if (!calculation.isOverdue || calculation.calculatedPenalty <= 0) return null;
-      if (persistedPenalty && !isUnpaidPenaltyRecord(persistedPenalty.data)) return null;
-      if (persistedUnpaidIssueIds.has(item.id) || persistedPenalty) return null;
-
-      return {
-        id: item.id,
-        source: "calculated",
+  const rows = [];
+  studentMap.forEach((student) => {
+    const liability = getStudentPenaltyLiability({
+      student,
+      issues: latestActiveIssues.map((item) => ({ id: item.id, ...item.data })),
+      penalties: latestPenalties.map((item) => ({ id: item.id, ...item.data })),
+      now: new Date()
+    });
+    liability.unpaidItems.forEach((penaltyItem) => {
+      rows.push({
+        id: penaltyItem.issueId || penaltyItem.id,
+        source: penaltyItem.source,
         data: {
-          penaltyId: item.id,
-          issueId: item.id,
-          studentUid: issue.studentUid || issue.userId || "",
-          studentName: issue.studentName || issue.issuedToName || "Unknown student",
-          studentEmail: issue.studentEmail || issue.issuedToEmail || "",
-          studentPhone: issue.studentPhone || "",
-          rollNumber: issue.rollNumber || issue.rollNo || "",
-          enrollmentNumber: issue.enrollmentNumber || issue.enrollmentNo || "",
-          bookId: issue.bookId || issue.b_id || "",
-          b_id: issue.b_id || issue.bookId || "",
-          accessionNumber: issue.accessionNumber || "",
-          bookBarcodeValue: issue.bookBarcodeValue || issue.barcodeValue || "",
-          bookTitle: issue.bookTitle || issue.title || issue.bookId || "Issued book",
-          issueDate: issue.issueDate || issue.issuedAt || null,
-          dueDate: issue.dueDate || calculation.dueDate || null,
-          lateDays: calculation.overdueDays,
-          daysLate: calculation.overdueDays,
-          ratePerDay: calculation.ratePerDay,
-          amount: calculation.calculatedPenalty,
-          penaltyAmount: calculation.calculatedPenalty,
-          remainingAmount: calculation.calculatedPenalty,
+          penaltyId: penaltyItem.issueId || penaltyItem.id,
+          issueId: penaltyItem.issueId,
+          studentUid: penaltyItem.studentUid || student.uid || "",
+          studentName: penaltyItem.studentName || student.name || "Unknown student",
+          studentEmail: penaltyItem.issue?.studentEmail || penaltyItem.penalty?.studentEmail || student.email || "",
+          studentPhone: penaltyItem.issue?.studentPhone || penaltyItem.penalty?.studentPhone || student.phone || "",
+          rollNumber: penaltyItem.rollNo || student.rollNo || "",
+          enrollmentNumber: penaltyItem.enrollmentNumber || student.enrollmentNumber || "",
+          bookId: penaltyItem.bookId,
+          b_id: penaltyItem.bookId,
+          accessionNumber: penaltyItem.accessionNumber,
+          bookBarcodeValue: penaltyItem.issue?.bookBarcodeValue || penaltyItem.issue?.barcodeValue || penaltyItem.penalty?.bookBarcodeValue || "",
+          bookTitle: penaltyItem.bookTitle,
+          issueDate: penaltyItem.issueDate,
+          dueDate: penaltyItem.dueDate,
+          lateDays: penaltyItem.overdueDays,
+          daysLate: penaltyItem.overdueDays,
+          ratePerDay: penaltyItem.ratePerDay,
+          amount: penaltyItem.amount,
+          penaltyAmount: penaltyItem.amount,
+          remainingAmount: penaltyItem.amount,
           paid: false,
           status: "unpaid",
           paymentStatus: "unpaid",
           penaltyStatus: "unpaid",
-          calculated: true
+          calculated: penaltyItem.source !== "persisted"
         }
-      };
-    })
-    .filter(Boolean);
+      });
+    });
+  });
 
-  return [...persistedRows, ...calculatedRows];
+  const paidRows = latestPenalties
+    .filter((item) => !isUnpaidPenaltyRecord(item.data))
+    .map((item) => ({ ...item, source: "persisted" }));
+
+  return [...rows, ...paidRows];
 }
 
 function renderPenaltyDetails() {

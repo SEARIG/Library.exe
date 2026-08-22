@@ -8,10 +8,10 @@ import {
   isUnpaidPenaltyRecord,
   scheduleApplies,
   scheduleLabel
-} from "./firestore-service.js";
+} from "./firestore-service.js?v=2";
 import {
-  findMatchingPenaltyForIssue
-} from "./penalty-utils.mjs";
+  getStudentPenaltyLiability
+} from "./penalty-utils.mjs?v=2";
 import {
   collection,
   doc,
@@ -284,72 +284,36 @@ function renderReturnedBooks(docs) {
 
 function renderPenalties(docs) {
   const target = $("#penalties");
-  const persistedRows = docs.map((item) => {
-    const data = item.data();
-    const activeIssue = latestIssuedIssues.find((issue) => findMatchingPenaltyForIssue([{ id: item.id, data }], issue, issue.id));
-    const calculation = activeIssue ? calculatePenalty(activeIssue, new Date()) : null;
-    const currentAmount = calculation?.calculatedPenalty || 0;
-    const persistedAmount = Number(data.remainingAmount ?? data.amount ?? data.penaltyAmount ?? 0) || 0;
-    return {
-      id: item.id,
-      data: calculation && isUnpaidPenaltyRecord(data) && currentAmount > persistedAmount
-        ? {
-            ...data,
-            dueDate: data.dueDate || calculation.dueDate,
-            lateDays: calculation.overdueDays,
-            daysLate: calculation.overdueDays,
-            ratePerDay: calculation.ratePerDay,
-            amount: currentAmount,
-            penaltyAmount: currentAmount,
-            remainingAmount: currentAmount
-          }
-        : data,
-      source: "persisted"
-    };
+  const liability = getStudentPenaltyLiability({
+    student: { ...latestStudent, uid: user?.uid || latestStudent.uid || "", email: latestStudent.email || user?.email || "" },
+    issues: latestIssuedIssues,
+    penalties: docs.map((item) => ({ id: item.id, ...item.data() })),
+    now: new Date()
   });
-  const persistedUnpaidIssueIds = new Set(
-    persistedRows
-      .filter((item) => isUnpaidPenaltyRecord(item.data))
-      .map((item) => item.data.issueId || item.data.currentIssueId || item.id)
-      .filter(Boolean)
-  );
-  const calculatedRows = latestIssuedIssues
-    .map((issue) => {
-      const calculation = calculatePenalty(issue, new Date());
-      const persistedPenalty = findMatchingPenaltyForIssue(persistedRows, issue, issue.id);
-      if (!calculation.isOverdue || calculation.calculatedPenalty <= 0) return null;
-      if (persistedPenalty && !isUnpaidPenaltyRecord(persistedPenalty.data)) return null;
-      if (persistedUnpaidIssueIds.has(issue.id) || persistedPenalty) return null;
-      return {
-        id: issue.id,
-        source: "calculated",
-        data: {
-          issueId: issue.id,
-          bookId: issue.bookId || issue.b_id || "",
-          b_id: issue.b_id || issue.bookId || "",
-          accessionNumber: issue.accessionNumber || "",
-          bookTitle: issue.bookTitle || issue.title || issue.bookId || "Issued book",
-          issueDate: issue.issueDate || issue.issuedAt || null,
-          dueDate: issue.dueDate || calculation.dueDate || null,
-          lateDays: calculation.overdueDays,
-          daysLate: calculation.overdueDays,
-          ratePerDay: calculation.ratePerDay,
-          amount: calculation.calculatedPenalty,
-          penaltyAmount: calculation.calculatedPenalty,
-          remainingAmount: calculation.calculatedPenalty,
-          paid: false,
-          status: "unpaid",
-          paymentStatus: "unpaid"
-        }
-      };
-    })
-    .filter(Boolean);
-  const rows = [...persistedRows, ...calculatedRows];
-  const unpaidRows = rows.filter((item) => isUnpaidPenaltyRecord(item.data));
-  const totalPenalty = unpaidRows.reduce((sum, item) => {
-    const penalty = item.data;
-    return sum + Number(penalty.remainingAmount ?? penalty.amount ?? penalty.penaltyAmount ?? 0);
-  }, 0);
+  const rows = liability.unpaidItems.map((item) => ({
+    id: item.id,
+    data: {
+      issueId: item.issueId,
+      bookId: item.bookId,
+      b_id: item.bookId,
+      accessionNumber: item.accessionNumber,
+      bookTitle: item.bookTitle,
+      issueDate: item.issueDate,
+      dueDate: item.dueDate,
+      returnDate: item.penalty?.returnDate || null,
+      lateDays: item.overdueDays,
+      daysLate: item.overdueDays,
+      ratePerDay: item.ratePerDay,
+      amount: item.amount,
+      penaltyAmount: item.amount,
+      remainingAmount: item.amount,
+      paid: false,
+      status: "unpaid",
+      paymentStatus: "unpaid"
+    },
+    source: item.source
+  }));
+  const totalPenalty = liability.totalUnpaid;
   setMetric("#metricStudentPenalty", totalPenalty.toFixed(0));
   setText("#penaltySummary", totalPenalty > 0
     ? `Pending penalty due: Rs.${totalPenalty.toFixed(2)}`

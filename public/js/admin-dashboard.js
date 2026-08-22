@@ -30,12 +30,9 @@ import {
 } from "./notifications.js";
 import {
   calculatePenalty,
-  findMatchingPenaltyForIssue,
-  isActiveIssue,
-  isUnpaidPenaltyRecord,
-  issueIdOf,
-  penaltyAmountOf
-} from "./penalty-utils.mjs";
+  getStudentPenaltyLiability,
+  logPenaltyDebugForStudent
+} from "./penalty-utils.mjs?v=2";
 
 wireSignOut();
 const session = await requireAuth(["admin"]);
@@ -180,85 +177,48 @@ function noDuesRows() {
   return Array.from(studentMap.values()).map((student) => {
     const uid = student.uid || student.id;
     const user = usersByUid.get(uid) || {};
-    const issues = latestNoDuesIssues
-      .filter((item) => item.data.studentUid === uid || item.data.userId === uid || item.data.issuedTo === uid)
-      .filter((item) => isActiveIssue(item.data));
-    const persistedPenalties = latestNoDuesPenalties
-      .filter((item) => item.data.studentUid === uid)
-      .filter((item) => isUnpaidPenaltyRecord(item.data));
-    const paidPenaltyIssueIds = new Set(
-      latestNoDuesPenalties
-        .filter((item) => item.data.studentUid === uid && !isUnpaidPenaltyRecord(item.data))
-        .map((item) => issueIdOf(item.data, item.id))
-        .filter(Boolean)
-    );
-    const calculatedPenalties = issues
-      .map((item) => {
-        const calculation = calculatePenalty(item.data, new Date());
-        if (!calculation.isOverdue || calculation.calculatedPenalty <= 0) return null;
-        const persistedPenalty = findMatchingPenaltyForIssue(latestNoDuesPenalties.filter((penalty) => penalty.data.studentUid === uid), item.data, item.id);
-        if (persistedPenalty || paidPenaltyIssueIds.has(item.id)) return null;
-        return {
-          issueId: item.id,
-          issue: item.data,
-          calculation
-        };
-      })
-      .filter(Boolean);
-    const overdueBooks = issues
-      .map((item) => {
-        const calculation = calculatePenalty(item.data, new Date());
-        if (!calculation.isOverdue) return null;
-        return {
-          issueId: item.id,
-          bookTitle: item.data.bookTitle || item.data.title || item.data.bookId || "Issued book",
-          accessionNumber: item.data.accessionNumber || item.data.b_id || item.data.bookId || "-",
-          issueDate: item.data.issueDate || item.data.issuedAt || null,
-          dueDate: item.data.dueDate || calculation.dueDate || null,
-          overdueDays: calculation.overdueDays,
-          ratePerDay: calculation.ratePerDay,
-          currentPenalty: calculation.calculatedPenalty
-        };
-      })
-      .filter(Boolean);
+    const studentRecord = { ...user, ...student, uid };
+    const liability = getStudentPenaltyLiability({
+      student: studentRecord,
+      issues: latestNoDuesIssues.map((item) => ({ id: item.id, ...item.data })),
+      penalties: latestNoDuesPenalties.map((item) => ({ id: item.id, ...item.data })),
+      now: new Date()
+    });
+    const issues = liability.activeIssues;
+    const overdueBooks = liability.overdueIssues.map((item) => ({
+      issueId: item.id,
+      bookTitle: item.data.bookTitle || item.data.title || item.data.bookId || "Issued book",
+      accessionNumber: item.data.accessionNumber || item.data.b_id || item.data.bookId || "-",
+      issueDate: item.data.issueDate || item.data.issuedAt || null,
+      dueDate: item.data.dueDate || item.calculation.dueDate || null,
+      overdueDays: item.calculation.overdueDays,
+      ratePerDay: item.calculation.ratePerDay,
+      currentPenalty: item.calculation.calculatedAmount
+    }));
     const unresolvedCopyLiabilities = latestNoDuesBooks.filter((item) => {
       const book = item.data;
       const status = String(book.status || "").toLowerCase();
       const holderUid = book.issuedStudentUid || book.issuedTo || book.studentUid || "";
       return ["lost", "damaged"].includes(status) && holderUid === uid;
     });
-    const persistedPenaltyAmount = persistedPenalties.reduce((sum, item) => {
-      const activeIssue = issues.find((issueItem) => findMatchingPenaltyForIssue([item], issueItem.data, issueItem.id));
-      const calculatedAmount = activeIssue ? calculatePenalty(activeIssue.data, new Date()).calculatedPenalty : 0;
-      return sum + Math.max(0, penaltyAmountOf(item.data), calculatedAmount);
-    }, 0);
-    const calculatedPenaltyAmount = calculatedPenalties.reduce((sum, item) => sum + item.calculation.calculatedPenalty, 0);
-    const penaltyAmount = persistedPenaltyAmount + calculatedPenaltyAmount;
+    const penaltyAmount = liability.totalUnpaid;
     const hasActiveBooks = issues.length > 0;
     const hasPenalty = penaltyAmount > 0;
     const hasCopyLiability = unresolvedCopyLiabilities.length > 0;
     const blocked = hasActiveBooks || hasPenalty || hasCopyLiability;
     const name = student.name || user.name || "Unknown Student";
-    const overdueBlockers = calculatedPenalties.map((item) => {
-      const issue = item.issue;
-      const calculation = item.calculation;
-      return `NO DUES BLOCKED - Book: ${issue.bookTitle || issue.title || issue.bookId || "Issued book"}; Accession: ${issue.accessionNumber || issue.b_id || issue.bookId || "-"}; Due: ${formatDate(issue.dueDate || calculation.dueDate)}; Overdue: ${calculation.overdueDays} days; Outstanding Penalty: ₹${calculation.calculatedPenalty.toFixed(0)}`;
-    });
+    const overdueBlockers = liability.unpaidItems.map((item) =>
+      `NO DUES BLOCKED - Book: ${item.bookTitle}; Accession: ${item.accessionNumber || "-"}; Due: ${formatDate(item.dueDate)}; Overdue: ${item.overdueDays} days; Outstanding Penalty: ₹${item.amount.toFixed(0)}`
+    );
     const activeBookBlockers = issues.map((item) => {
       const issue = item.data;
       return `Book not returned: ${issue.bookTitle || issue.title || issue.bookId || "Issued book"} (${issue.accessionNumber || issue.b_id || issue.bookId || "-"})`;
-    });
-    const persistedPenaltyBlockers = persistedPenalties.map((item) => {
-      const penalty = item.data;
-      const activeIssue = issues.find((issueItem) => findMatchingPenaltyForIssue([item], issueItem.data, issueItem.id));
-      const amount = Math.max(0, penaltyAmountOf(penalty), activeIssue ? calculatePenalty(activeIssue.data, new Date()).calculatedPenalty : 0);
-      return `Persisted unpaid penalty: ${penalty.bookTitle || penalty.bookId || "Book"} - ₹${amount.toFixed(0)}`;
     });
     const copyLiabilityBlockers = unresolvedCopyLiabilities.map((item) => {
       const book = item.data;
       return `Unresolved ${String(book.status || "copy").toLowerCase()} liability: ${book.title || book.bname || book.bookTitle || item.id}`;
     });
-    const blockers = [...overdueBlockers, ...persistedPenaltyBlockers, ...activeBookBlockers, ...copyLiabilityBlockers];
+    const blockers = [...overdueBlockers, ...activeBookBlockers, ...copyLiabilityBlockers];
 
     return {
       uid,
@@ -278,11 +238,12 @@ function noDuesRows() {
         dueDate: item.data.dueDate || calculatePenalty(item.data, new Date()).dueDate || null
       })),
       overdueBooks,
-      unpaidPenalties: persistedPenalties.length + calculatedPenalties.length,
+      unpaidPenalties: liability.unpaidItems.length,
       penaltyAmount,
       status: blocked ? "blocked" : "eligible",
       dueType: hasPenalty ? "penalty" : (hasActiveBooks || hasCopyLiability) ? "books" : "clear",
       blockers,
+      liability,
       active: student.active !== false && user.active !== false
     };
   }).sort((left, right) => {
@@ -392,6 +353,7 @@ function renderNoDues() {
               <button class="btn ${row.status === "eligible" ? "btn-primary" : "btn-muted"}" data-no-dues-action="review" data-student-uid="${escapeHtml(row.uid)}" type="button">
                 ${row.status === "eligible" ? "Ready" : "Review"}
               </button>
+              <button class="btn btn-muted" data-no-dues-action="debug" data-student-uid="${escapeHtml(row.uid)}" type="button">Debug</button>
             </td>
           </tr>`).join("")}
       </tbody>
@@ -730,10 +692,21 @@ $("#exportNoDuesBtn")?.addEventListener("click", () => {
   }
 });
 $("#noDuesTable")?.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-no-dues-action='review']");
+  const button = event.target.closest("[data-no-dues-action]");
   if (!button) return;
   const row = noDuesRows().find((item) => item.uid === button.dataset.studentUid);
   if (!row) return;
+  if (button.dataset.noDuesAction === "debug") {
+    logPenaltyDebugForStudent({
+      student: row,
+      activeIssues: row.liability?.activeIssues || [],
+      persistedPenalties: latestNoDuesPenalties,
+      liability: row.liability,
+      now: new Date()
+    });
+    showToast("Penalty debug data printed to console.", "info");
+    return;
+  }
   renderNoDuesReview(row);
 });
 

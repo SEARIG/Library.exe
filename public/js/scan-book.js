@@ -18,7 +18,7 @@ import {
   getStudentProfile,
   titleOf,
   returnBook
-} from "./firestore-service.js";
+} from "./firestore-service.js?v=2";
 import { sendEmailNotification } from "./notifications.js";
 import {
   doc,

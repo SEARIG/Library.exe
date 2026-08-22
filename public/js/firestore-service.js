@@ -22,13 +22,10 @@ import {
   addCalendarDays,
   calculatePenalty as calculateIssuePenalty,
   completedCalendarDaysBetween,
-  findMatchingPenaltyForIssue,
-  isActiveIssue,
-  isPenaltyPaid,
+  getStudentPenaltyLiability,
   isUnpaidPenaltyRecord as isUnpaidPenaltyRecordUtil,
-  issueIdOf,
-  penaltyAmountOf
-} from "./penalty-utils.mjs";
+  studentUidOfStudent
+} from "./penalty-utils.mjs?v=2";
 
 const ISSUE_DAYS = ISSUE_PERIOD_DAYS;
 const PENALTY_PER_DAY = PENALTY_RATE_PER_DAY;
@@ -145,80 +142,44 @@ export async function getUnpaidPenaltySummary(studentUid) {
 
   console.log("Checking unpaid penalties for student:", cleanUid);
   const penaltiesQuery = query(collection(db, "penalties"), where("studentUid", "==", cleanUid));
-  const activeIssuesQuery = query(collection(db, "bookIssues"), where("studentUid", "==", cleanUid), where("status", "==", "issued"));
+  const activeIssuesQuery = query(collection(db, "bookIssues"), where("studentUid", "==", cleanUid));
   const [penaltiesSnap, activeIssuesSnap] = await Promise.all([
     getDocs(penaltiesQuery),
     getDocs(activeIssuesQuery)
   ]);
-  const activeIssues = activeIssuesSnap.docs.map((item) => ({ id: item.id, ...item.data() }));
-  const penaltyRows = penaltiesSnap.docs.map((item) => ({ id: item.id, data: item.data() }));
-  const penaltyRecords = penaltiesSnap.docs
-    .map((item) => {
-      const penalty = item.data();
-      const matchedIssue = activeIssues.find((issue) => findMatchingPenaltyForIssue([{ id: item.id, data: penalty }], issue, issue.id));
-      const activeIssue = matchedIssue || null;
-      const calculation = activeIssue ? calculatePenalty(activeIssue, new Date()) : null;
-      const currentAmount = calculation?.calculatedPenalty || 0;
-      const persistedAmount = penaltyAmountOf(penalty);
-      return calculation && isUnpaidPenaltyRecord(penalty) && currentAmount > persistedAmount
-        ? {
-            id: item.id,
-            ...penalty,
-            dueDate: penalty.dueDate || calculation.dueDate,
-            lateDays: calculation.overdueDays,
-            daysLate: calculation.overdueDays,
-            ratePerDay: calculation.ratePerDay,
-            amount: currentAmount,
-            penaltyAmount: currentAmount,
-            remainingAmount: currentAmount
-          }
-        : { id: item.id, ...penalty };
-    })
-    .filter(isUnpaidPenaltyRecord);
-  const existingUnpaidIssueIds = new Set(penaltyRecords.map((penalty) => issueIdOf(penalty, penalty.id)));
-
-  const calculatedIssueRecords = activeIssues
-    .filter(isActiveIssue)
-    .map((issue) => {
-      const calculation = calculatePenalty(issue, new Date());
-      const persistedPenaltyRow = findMatchingPenaltyForIssue(penaltyRows, issue, issue.id);
-      const persistedPenalty = persistedPenaltyRow?.data || null;
-      if (!calculation.isOverdue || calculation.calculatedPenalty <= 0 || isPenaltyPaid(persistedPenalty || {})) return null;
-      if (existingUnpaidIssueIds.has(issue.id) || persistedPenaltyRow) return null;
-      return {
-        id: issue.id,
-        penaltyId: issue.id,
-        issueId: issue.id,
-        calculated: true,
-        studentUid: cleanUid,
-        studentName: issue.studentName || "",
-        studentEmail: issue.studentEmail || "",
-        studentPhone: issue.studentPhone || "",
-        bookId: issue.bookId || issue.b_id || "",
-        b_id: issue.b_id || issue.bookId || "",
-        accessionNumber: issue.accessionNumber || "",
-        bookBarcodeValue: issue.bookBarcodeValue || issue.barcodeValue || "",
-        bookTitle: issue.bookTitle || issue.title || issue.bookId || "",
-        issueDate: issue.issueDate || issue.issuedAt || null,
-        dueDate: issue.dueDate || calculation.dueDate || null,
-        lateDays: calculation.overdueDays,
-        daysLate: calculation.overdueDays,
-        ratePerDay: calculation.ratePerDay,
-        amount: calculation.calculatedPenalty,
-        penaltyAmount: calculation.calculatedPenalty,
-        remainingAmount: calculation.calculatedPenalty,
-        paid: false,
-        status: "unpaid",
-        paymentStatus: "unpaid"
-      };
-    })
-    .filter(Boolean);
-
-  const records = [...penaltyRecords, ...calculatedIssueRecords];
-  const totalPendingPenalty = records.reduce((sum, penalty) => {
-    const amount = penaltyAmountOf(penalty);
-    return sum + Math.max(0, amount);
-  }, 0);
+  const liability = getStudentPenaltyLiability({
+    student: { uid: cleanUid },
+    issues: activeIssuesSnap.docs.map((item) => ({ id: item.id, ...item.data() })),
+    penalties: penaltiesSnap.docs.map((item) => ({ id: item.id, ...item.data() })),
+    now: new Date()
+  });
+  const records = liability.unpaidItems.map((item) => ({
+    id: item.id,
+    penaltyId: item.id,
+    issueId: item.issueId,
+    calculated: item.source !== "persisted",
+    studentUid: item.studentUid || studentUidOfStudent({ uid: cleanUid }),
+    studentName: item.studentName || "",
+    studentEmail: item.issue?.studentEmail || item.penalty?.studentEmail || "",
+    studentPhone: item.issue?.studentPhone || item.penalty?.studentPhone || "",
+    bookId: item.bookId,
+    b_id: item.bookId,
+    accessionNumber: item.accessionNumber,
+    bookBarcodeValue: item.issue?.bookBarcodeValue || item.issue?.barcodeValue || item.penalty?.bookBarcodeValue || "",
+    bookTitle: item.bookTitle,
+    issueDate: item.issueDate,
+    dueDate: item.dueDate,
+    lateDays: item.overdueDays,
+    daysLate: item.overdueDays,
+    ratePerDay: item.ratePerDay,
+    amount: item.amount,
+    penaltyAmount: item.amount,
+    remainingAmount: item.amount,
+    paid: false,
+    status: "unpaid",
+    paymentStatus: "unpaid"
+  }));
+  const totalPendingPenalty = liability.totalUnpaid;
 
   console.log("Unpaid penalty summary:", {
     studentUid: cleanUid,

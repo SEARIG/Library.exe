@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   calculatePenalty,
   findMatchingPenaltyForIssue,
+  getStudentPenaltyLiability,
   isActiveIssue,
+  issueBelongsToStudent,
   isUnpaidPenaltyRecord,
   penaltyAmountOf
 } from "../public/js/penalty-utils.mjs";
@@ -117,6 +119,95 @@ test("matching persisted penalty prevents live issue duplicate by accession fall
     bookId: "book-1"
   };
   assert.equal(findMatchingPenaltyForIssue(persisted, issue, issue.id)?.id, "old-penalty");
+});
+
+test("issue belongs to student by uid, email, roll, or enrollment fallback", () => {
+  assert.equal(issueBelongsToStudent({ studentUid: "uid-1" }, { uid: "uid-1" }), true);
+  assert.equal(issueBelongsToStudent({ userId: "uid-2" }, { uid: "uid-2" }), true);
+  assert.equal(issueBelongsToStudent({ studentId: "uid-3" }, { uid: "uid-3" }), true);
+  assert.equal(issueBelongsToStudent({ studentEmail: "student@example.com" }, { email: "STUDENT@example.com" }), true);
+  assert.equal(issueBelongsToStudent({ rollNo: "23 CS 001" }, { rollNumber: "23-CS-001" }), true);
+  assert.equal(issueBelongsToStudent({ enrollmentNumber: "ENR 2026 01" }, { enrollmentNo: "ENR-2026-01" }), true);
+});
+
+test("active issue supports legacy held statuses and excludes closed statuses", () => {
+  for (const status of ["issued", "active", "approved", "borrowed"]) {
+    assert.equal(isActiveIssue({ status, bookId: "book-1" }), true);
+  }
+  for (const status of ["returned", "completed", "cancelled", "rejected", "closed"]) {
+    assert.equal(isActiveIssue({ status, bookId: "book-1" }), false);
+  }
+});
+
+test("student liability includes missing penalty document live overdue issue", () => {
+  const liability = getStudentPenaltyLiability({
+    student: { uid: "student-1" },
+    issues: [{
+      id: "issue-1",
+      studentUid: "student-1",
+      status: "issued",
+      bookId: "book-1",
+      accessionNumber: "ACC-101",
+      issueDate
+    }],
+    penalties: [],
+    now: new Date("2026-08-28T12:00:00+05:30")
+  });
+  assert.equal(liability.activeIssues.length, 1);
+  assert.equal(liability.unpaidItems.length, 1);
+  assert.equal(liability.totalUnpaid, 65);
+});
+
+test("student liability does not double-count matching live and persisted penalty", () => {
+  const liability = getStudentPenaltyLiability({
+    student: { uid: "student-1" },
+    issues: [{
+      id: "issue-1",
+      studentUid: "student-1",
+      status: "issued",
+      bookId: "book-1",
+      accessionNumber: "ACC-101",
+      issueDate
+    }],
+    penalties: [{
+      id: "penalty-1",
+      issueId: "issue-1",
+      studentUid: "student-1",
+      bookId: "book-1",
+      accessionNumber: "ACC-101",
+      amount: 65,
+      remainingAmount: 65,
+      status: "unpaid"
+    }],
+    now: new Date("2026-08-28T12:00:00+05:30")
+  });
+  assert.equal(liability.unpaidItems.length, 1);
+  assert.equal(liability.totalUnpaid, 65);
+});
+
+test("paid persisted penalty covers old amount but allows newly accrued amount", () => {
+  const liability = getStudentPenaltyLiability({
+    student: { uid: "student-1" },
+    issues: [{
+      id: "issue-1",
+      studentUid: "student-1",
+      status: "issued",
+      bookId: "book-1",
+      accessionNumber: "ACC-101",
+      issueDate
+    }],
+    penalties: [{
+      id: "penalty-1",
+      issueId: "issue-1",
+      studentUid: "student-1",
+      amountPaid: 65,
+      paid: true,
+      status: "paid"
+    }],
+    now: new Date("2026-08-29T12:00:00+05:30")
+  });
+  assert.equal(liability.unpaidItems.length, 1);
+  assert.equal(liability.totalUnpaid, 5);
 });
 
 test("multiple overdue books calculate independently and total correctly", () => {

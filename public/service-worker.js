@@ -1,4 +1,4 @@
-const CACHE_NAME = "msu-lms-pwa-v1";
+const CACHE_NAME = "msu-lms-pwa-v2";
 const STATIC_ASSETS = [
   "/",
   "/index.html",
@@ -98,6 +98,21 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (!isStaticRequest(request)) return;
+
+  if (request.destination === "script" || request.destination === "style") {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(request).then((cached) => cached || Response.error()))
+    );
+    return;
+  }
 
   event.respondWith(
     caches.match(request).then((cached) => {
