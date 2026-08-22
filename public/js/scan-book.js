@@ -155,7 +155,7 @@ issueForm.addEventListener("submit", async (event) => {
     showToast("Book issue request sent successfully.", "success");
   } catch (error) {
     logDetailedError(error);
-    if (error.code === "penalty/unpaid") {
+    if (error.code === "penalty/unpaid" || error.code === "dues/blocked") {
       showPenaltyBlock(error);
     } else {
       showToast(error.message, "error");

@@ -48,6 +48,267 @@ function daysBetween(start, end) {
   return Math.max(0, Math.floor((endDate - startDate) / 86400000));
 }
 
+function normalizeIdentifier(value) {
+  return clean(value).toLowerCase().replace(/[\s-]+/g, "");
+}
+
+function issueDateOf(issue = {}) {
+  return toDate(issue.issueDate || issue.issuedAt || issue.createdAt);
+}
+
+function dueDateOf(issue = {}) {
+  const persistedDueDate = toDate(issue.dueDate);
+  if (persistedDueDate) return persistedDueDate;
+  const issueDate = issueDateOf(issue);
+  return issueDate ? addDays(issueDate, ISSUE_DAYS) : null;
+}
+
+function isPaidPenalty(record = {}) {
+  const status = clean(record.paymentStatus || record.penaltyStatus || record.status).toLowerCase();
+  return record.paid === true || ["paid", "cleared", "resolved", "settled", "waived", "closed"].includes(status);
+}
+
+function penaltyAmountOf(record = {}) {
+  return Number(record.remainingAmount ?? record.amount ?? record.penaltyAmount ?? record.fineAmount ?? 0) || 0;
+}
+
+function paidCoverageAmount(record = {}) {
+  return Math.max(
+    0,
+    Number(record.paymentAmount || 0),
+    Number(record.amountPaid || 0),
+    Number(record.paidAmount || 0),
+    Number(record.clearedAmount || 0),
+    Number(record.amount || 0),
+    Number(record.penaltyAmount || 0),
+    Number(record.fineAmount || 0)
+  );
+}
+
+function isActiveLibraryIssue(issue = {}) {
+  const status = clean(issue.status).toLowerCase();
+  if (issue.returnDate || issue.returnedAt) return false;
+  if (["returned", "completed", "closed", "cancelled", "rejected"].includes(status)) return false;
+  if (["issued", "active", "approved", "borrowed"].includes(status)) return true;
+  return !status && Boolean(issue.bookId || issue.b_id || issue.accessionNumber || issue.libraryBarcode);
+}
+
+function calculateIssuePenalty(issue = {}, currentDate = new Date()) {
+  const dueDate = dueDateOf(issue);
+  const endDate = toDate(issue.returnDate || issue.returnedAt) || currentDate;
+  const overdueDays = dueDate ? daysBetween(dueDate, endDate) : 0;
+  const calculatedAmount = overdueDays > 0 ? overdueDays * FINE_PER_DAY : 0;
+  return {
+    dueDate,
+    overdueDays,
+    ratePerDay: FINE_PER_DAY,
+    calculatedAmount,
+    calculatedPenalty: calculatedAmount,
+    isOverdue: overdueDays > 0,
+    paymentStatus: calculatedAmount > 0 ? "unpaid" : "none"
+  };
+}
+
+function studentUidOfStudent(student = {}) {
+  return clean(student.uid || student.studentUid || student.id || student.firebaseAuthUid);
+}
+
+function issueBelongsToStudent(issue = {}, student = {}) {
+  const uid = studentUidOfStudent(student);
+  if (uid) {
+    if (clean(issue.studentUid) === uid) return true;
+    if (clean(issue.userId) === uid) return true;
+    if (clean(issue.studentId) === uid) return true;
+    if (clean(issue.issuedTo) === uid) return true;
+  }
+  const email = clean(student.email || student.studentEmail).toLowerCase();
+  if (email && clean(issue.studentEmail || issue.email).toLowerCase() === email) return true;
+  const studentRoll = normalizeIdentifier(student.rollNo || student.rollNumber || student.roll);
+  const issueRoll = normalizeIdentifier(issue.rollNo || issue.rollNumber || issue.roll);
+  if (studentRoll && issueRoll && studentRoll === issueRoll) return true;
+  const studentEnrollment = normalizeIdentifier(student.enrollmentNumber || student.enrollmentNo);
+  const issueEnrollment = normalizeIdentifier(issue.enrollmentNumber || issue.enrollmentNo);
+  return Boolean(studentEnrollment && issueEnrollment && studentEnrollment === issueEnrollment);
+}
+
+function issueIdOf(record = {}, fallback = "") {
+  return clean(record.issueId || record.currentIssueId || record.bookIssueId || record.id || fallback);
+}
+
+function penaltyMatchesIssue(penalty = {}, issue = {}, issueId = "") {
+  const penaltyIssueId = issueIdOf(penalty);
+  const cleanIssueId = clean(issue.issueId || issue.id || issueId);
+  if (penaltyIssueId && cleanIssueId && penaltyIssueId === cleanIssueId) return true;
+  const penaltyStudentUid = clean(penalty.studentUid || penalty.userId || penalty.studentId);
+  const issueStudentUid = clean(issue.studentUid || issue.userId || issue.studentId || issue.issuedTo);
+  const sameStudent = penaltyStudentUid && issueStudentUid && penaltyStudentUid === issueStudentUid;
+  const sameEmail = clean(penalty.studentEmail).toLowerCase()
+    && clean(issue.studentEmail).toLowerCase()
+    && clean(penalty.studentEmail).toLowerCase() === clean(issue.studentEmail).toLowerCase();
+  if (!sameStudent && !sameEmail) return false;
+  const penaltyIds = [penalty.bookId, penalty.b_id, penalty.accessionNumber, penalty.libraryBarcode, penalty.bookTitle, penalty.title]
+    .map(clean)
+    .filter(Boolean);
+  const issueIds = [issue.bookId, issue.b_id, issue.accessionNumber, issue.libraryBarcode, issue.bookBarcodeValue, issue.title, issue.bookTitle]
+    .map(clean)
+    .filter(Boolean);
+  return penaltyIds.some((left) => issueIds.some((right) => left.toLowerCase() === right.toLowerCase()));
+}
+
+function buildIssueLiability(issue = {}, issueId = "", penalty = null, nowDate = new Date()) {
+  const calculated = calculateIssuePenalty(issue, nowDate);
+  if (!calculated.isOverdue || calculated.calculatedAmount <= 0) return null;
+  if (penalty && isPaidPenalty(penalty)) {
+    const remaining = Math.max(0, calculated.calculatedAmount - paidCoverageAmount(penalty));
+    if (remaining <= 0) return null;
+    return { issue, issueId, penalty, amount: remaining, calculated };
+  }
+  const amount = Math.max(calculated.calculatedAmount, penalty ? penaltyAmountOf(penalty) : 0);
+  return amount > 0 ? { issue, issueId, penalty, amount, calculated } : null;
+}
+
+async function getQueryDocs(queryRef, transaction = null) {
+  return transaction ? transaction.get(queryRef) : queryRef.get();
+}
+
+async function loadStudentIssueEligibility(student, options = {}) {
+  const transaction = options.transaction || null;
+  const nowDate = options.nowDate || new Date();
+  const uid = studentUidOfStudent(student);
+  const email = clean(student.email || student.studentEmail).toLowerCase();
+  const issueQueries = [];
+  const penaltyQueries = [];
+  const bookQueries = [];
+
+  if (uid) {
+    issueQueries.push(db.collection("bookIssues").where("studentUid", "==", uid));
+    issueQueries.push(db.collection("bookIssues").where("userId", "==", uid));
+    issueQueries.push(db.collection("bookIssues").where("studentId", "==", uid));
+    issueQueries.push(db.collection("issueRecords").where("studentUid", "==", uid));
+    penaltyQueries.push(db.collection("penalties").where("studentUid", "==", uid));
+    bookQueries.push(db.collection("books").where("issuedStudentUid", "==", uid));
+    bookQueries.push(db.collection("books").where("issuedTo", "==", uid));
+  }
+  if (email) {
+    issueQueries.push(db.collection("bookIssues").where("studentEmail", "==", email));
+    issueQueries.push(db.collection("issueRecords").where("studentEmail", "==", email));
+    penaltyQueries.push(db.collection("penalties").where("studentEmail", "==", email));
+  }
+
+  const [issueSnaps, penaltySnaps, bookSnaps] = await Promise.all([
+    Promise.all(issueQueries.map((queryRef) => getQueryDocs(queryRef, transaction))),
+    Promise.all(penaltyQueries.map((queryRef) => getQueryDocs(queryRef, transaction))),
+    Promise.all(bookQueries.map((queryRef) => getQueryDocs(queryRef, transaction)))
+  ]);
+
+  const issuesById = new Map();
+  issueSnaps.flatMap((snap) => snap.docs).forEach((docSnap) => {
+    issuesById.set(docSnap.id, { id: docSnap.id, ...docSnap.data() });
+  });
+  const penaltiesById = new Map();
+  penaltySnaps.flatMap((snap) => snap.docs).forEach((docSnap) => {
+    penaltiesById.set(docSnap.id, { id: docSnap.id, ...docSnap.data() });
+  });
+  const booksById = new Map();
+  bookSnaps.flatMap((snap) => snap.docs).forEach((docSnap) => {
+    booksById.set(docSnap.id, { id: docSnap.id, ...docSnap.data() });
+  });
+
+  const activeIssues = [...issuesById.values()]
+    .filter((issue) => issueBelongsToStudent(issue, student))
+    .filter(isActiveLibraryIssue);
+  const penaltyRows = [...penaltiesById.values()];
+  const consumedPenaltyIds = new Set();
+  const blockers = [];
+
+  activeIssues.forEach((issue) => {
+    blockers.push({
+      type: "activeIssue",
+      message: "Student already has an unreturned library book.",
+      bookId: issue.bookId || issue.b_id || "",
+      accessionNumber: issue.accessionNumber || "",
+      amount: 0,
+      overdueDays: 0
+    });
+
+    const penalty = penaltyRows.find((item) => penaltyMatchesIssue(item, issue, issue.id));
+    if (penalty?.id) consumedPenaltyIds.add(penalty.id);
+    const liability = buildIssueLiability(issue, issue.id, penalty, nowDate);
+    if (liability) {
+      blockers.push({
+        type: "penalty",
+        message: `₹${liability.amount.toFixed(2)} unpaid overdue penalty`,
+        bookId: issue.bookId || issue.b_id || "",
+        accessionNumber: issue.accessionNumber || "",
+        amount: liability.amount,
+        overdueDays: liability.calculated.overdueDays
+      });
+    }
+    const calculation = calculateIssuePenalty(issue, nowDate);
+    if (calculation.isOverdue) {
+      blockers.push({
+        type: "overdue",
+        message: "Student has an overdue/unreturned library book.",
+        bookId: issue.bookId || issue.b_id || "",
+        accessionNumber: issue.accessionNumber || "",
+        amount: 0,
+        overdueDays: calculation.overdueDays
+      });
+    }
+  });
+
+  penaltyRows
+    .filter((penalty) => !consumedPenaltyIds.has(penalty.id))
+    .filter((penalty) => !isPaidPenalty(penalty))
+    .filter((penalty) => penaltyAmountOf(penalty) > 0)
+    .forEach((penalty) => {
+      blockers.push({
+        type: "penalty",
+        message: `₹${penaltyAmountOf(penalty).toFixed(2)} unpaid penalty`,
+        bookId: penalty.bookId || penalty.b_id || "",
+        accessionNumber: penalty.accessionNumber || "",
+        amount: penaltyAmountOf(penalty)
+      });
+    });
+
+  [...booksById.values()].forEach((book) => {
+    const status = clean(book.status).toLowerCase();
+    if (!["lost", "damaged"].includes(status)) return;
+    blockers.push({
+      type: status,
+      message: `Student has an unresolved ${status} book liability.`,
+      bookId: book.id || book.bookId || book.b_id || "",
+      accessionNumber: book.accessionNumber || book.blegal_num || "",
+      amount: 0
+    });
+  });
+
+  const totalPendingPenalty = blockers
+    .filter((blocker) => blocker.type === "penalty")
+    .reduce((sum, blocker) => sum + Math.max(0, Number(blocker.amount || 0)), 0);
+  const overdueBooks = new Set(blockers
+    .filter((blocker) => blocker.type === "overdue")
+    .map((blocker) => blocker.accessionNumber || blocker.bookId)
+    .filter(Boolean)).size;
+  const studentInactive = student.active === false || clean(student.status).toLowerCase() === "inactive";
+
+  return {
+    eligible: blockers.length === 0 && !studentInactive,
+    totalPendingPenalty,
+    overdueBooks,
+    activeBooks: activeIssues.length,
+    blockers
+  };
+}
+
+async function assertCanIssueBook(student, options = {}) {
+  const eligibility = await loadStudentIssueEligibility(student, options);
+  if (!eligibility.eligible) {
+    throw new HttpsError("failed-precondition", "Student has unresolved library dues. Clear dues before issuing another book.", eligibility);
+  }
+  return eligibility;
+}
+
 function orgCollection(orgType) {
   if (orgType === "university") return "universities";
   if (orgType === "independent_college") return "independentColleges";
@@ -232,6 +493,61 @@ async function getBookByBarcode(profile, libraryBarcode) {
   const match = matches.docs.find((docSnap) => canAccessTenant(profile, docSnap.data()));
   if (!match) throw new HttpsError("not-found", "Book not found in your organization.");
   return match;
+}
+
+function legacyScheduleApplies(schedule = {}, type = "issue") {
+  if (schedule?.active !== true) return false;
+  const appliesTo = clean(schedule.appliesTo || "both").toLowerCase();
+  return appliesTo === "both" || appliesTo === clean(type).toLowerCase();
+}
+
+function legacyScheduleLabel(schedule = {}) {
+  if (schedule?.active !== true) return "No active library time slot set.";
+  const startDate = clean(schedule.startDate);
+  const endDate = clean(schedule.endDate);
+  const dateLabel = startDate && endDate && startDate !== endDate
+    ? `${startDate} to ${endDate}`
+    : startDate || "Until changed";
+  return `${dateLabel}, ${clean(schedule.startTime) || "-"} - ${clean(schedule.endTime) || "-"}`;
+}
+
+function titleOfBook(book = {}) {
+  return clean(book.title || book.bname || book.bookTitle || book.bookName);
+}
+
+function accessionNumberOfBook(book = {}) {
+  return clean(book.accessionNumber || book.blegal_num || book.blegalNumber || book.BLegalNumber || book.b_id);
+}
+
+async function findLegacyBookForIssue(payload = {}) {
+  const bookId = clean(payload.bookId || payload.b_id);
+  if (bookId) {
+    const directSnap = await db.doc(`books/${bookId}`).get();
+    if (directSnap.exists) return directSnap;
+    const byBId = await db.collection("books").where("b_id", "==", bookId).limit(1).get();
+    if (!byBId.empty) return byBId.docs[0];
+  }
+
+  const scannedValue = normalizeBarcode(payload.libraryBarcode || payload.barcodeValue || payload.bookBarcodeValue);
+  if (scannedValue) {
+    const attempts = [
+      ["barcodeValue", scannedValue],
+      ["bookBarcodeValue", scannedValue]
+    ];
+    const accessionCandidate = scannedValue.toUpperCase().startsWith("ACC-")
+      ? scannedValue.slice(4)
+      : scannedValue;
+    attempts.push(["accessionNumber", accessionCandidate]);
+    attempts.push(["blegal_num", accessionCandidate]);
+    attempts.push(["blegalNumber", accessionCandidate]);
+    attempts.push(["BLegalNumber", accessionCandidate]);
+    for (const [field, value] of attempts) {
+      const snap = await db.collection("books").where(field, "==", value).limit(1).get();
+      if (!snap.empty) return snap.docs[0];
+    }
+  }
+
+  throw new HttpsError("not-found", "Book record not found.");
 }
 
 exports.createRazorpaySubscription = onCall(async (request) => {
@@ -514,6 +830,7 @@ exports.requestBookIssue = onCall(async (request) => {
   if (Number(book.availableCopies || 0) <= 0 || book.status === "lost") {
     throw new HttpsError("failed-precondition", "This book is not available.");
   }
+  await assertCanIssueBook(profile);
 
   const requestRef = db.collection("issueRequests").doc();
   await requestRef.set({
@@ -537,6 +854,107 @@ exports.requestBookIssue = onCall(async (request) => {
   return { requestId: requestRef.id };
 });
 
+exports.requestLegacyBookIssue = onCall(async (request) => {
+  const profile = await requireUser(request.auth, ["student"]);
+  const uid = profile.uid;
+  const [studentSnap, userSnap, scheduleSnap, bookSnap] = await Promise.all([
+    db.doc(`students/${uid}`).get(),
+    db.doc(`users/${uid}`).get(),
+    db.doc("librarySettings/issueReturnSchedule").get(),
+    findLegacyBookForIssue(request.data || {})
+  ]);
+
+  if (!studentSnap.exists || !userSnap.exists || userSnap.get("active") === false) {
+    throw new HttpsError("failed-precondition", "Student profile is missing or inactive.");
+  }
+
+  const schedule = scheduleSnap.exists ? scheduleSnap.data() : null;
+  if (!legacyScheduleApplies(schedule, "issue")) {
+    throw new HttpsError("failed-precondition", "Issue request time is not active. Please contact the librarian.");
+  }
+
+  const book = bookSnap.data();
+  if (book.status !== "available") {
+    throw new HttpsError("failed-precondition", "This book is not available.");
+  }
+
+  const student = {
+    id: uid,
+    uid,
+    ...userSnap.data(),
+    ...studentSnap.data(),
+    active: studentSnap.get("active") !== false && userSnap.get("active") !== false
+  };
+  await assertCanIssueBook(student);
+
+  const pendingSnap = await db.collection("issueRequests")
+    .where("studentUid", "==", uid)
+    .where("status", "==", "pending")
+    .get();
+  const bookDocId = clean(book.b_id || book.bookId || bookSnap.id);
+  const duplicate = pendingSnap.docs.some((item) => {
+    const pending = item.data();
+    return clean(pending.b_id || pending.bookId) === bookDocId;
+  });
+  if (duplicate) {
+    throw new HttpsError("failed-precondition", "You already have a pending request for this book.");
+  }
+
+  const issueDate = new Date();
+  const dueDate = addDays(issueDate, ISSUE_DAYS);
+  const accessionNumber = accessionNumberOfBook(book);
+  const barcode = clean(book.barcodeValue || book.bookBarcodeValue || (accessionNumber ? `ACC-${accessionNumber}` : ""));
+  const requestRef = db.collection("issueRequests").doc();
+  const payload = {
+    type: "issue",
+    requestId: requestRef.id,
+    studentUid: uid,
+    studentName: clean(student.name || profile.name),
+    studentEmail: clean(student.email || profile.email),
+    studentPhone: clean(student.phone),
+    rollNumber: clean(student.rollNumber || student.rollNo || student.roll),
+    bookId: bookDocId,
+    b_id: bookDocId,
+    accessionNumber,
+    author: clean(book.author),
+    title: titleOfBook(book),
+    placePublisher: clean(book.placePublisher || book.publisher),
+    year: clean(book.year),
+    pages: clean(book.pages),
+    volume: clean(book.volume),
+    imageUrl: clean(book.imageUrl),
+    bookTitle: titleOfBook(book),
+    barcodeValue: barcode,
+    bookBarcodeValue: barcode,
+    bookImage: clean(book.imageUrl),
+    subject: clean(book.subject),
+    category: clean(book.category),
+    status: "pending",
+    issueDate: Timestamp.fromDate(issueDate),
+    dueDate: Timestamp.fromDate(dueDate),
+    requestedAt: now(),
+    createdAt: now(),
+    preferredSlot: legacyScheduleLabel(schedule),
+    scheduleSnapshot: schedule,
+    confirmationChecked: true,
+    source: "library_catalog",
+    reviewedBy: null,
+    reviewedAt: null
+  };
+  await requestRef.set(payload);
+  await writeAudit("legacy_issue_requested", uid, { requestId: requestRef.id, bookId: bookDocId });
+  return {
+    requestId: requestRef.id,
+    payload: {
+      ...payload,
+      issueDate: issueDate.toISOString(),
+      dueDate: dueDate.toISOString(),
+      requestedAt: null,
+      createdAt: null
+    }
+  };
+});
+
 async function approveUlcIssue(requestId, actor) {
   const result = await db.runTransaction(async (transaction) => {
     const requestRef = db.doc(`issueRequests/${requestId}`);
@@ -555,6 +973,12 @@ async function approveUlcIssue(requestId, actor) {
     if (availableCopies <= 0 || book.status === "lost") {
       throw new HttpsError("failed-precondition", "Book is not available.");
     }
+    await assertCanIssueBook({
+      uid: issueRequest.studentUid,
+      name: issueRequest.studentName,
+      email: issueRequest.studentEmail,
+      active: true
+    }, { transaction });
 
     const issueDate = new Date();
     const dueDate = addDays(issueDate, ISSUE_DAYS);
@@ -632,6 +1056,14 @@ async function approveLegacyIssue(requestId, actor) {
     if (!bookSnap.exists || bookSnap.get("status") !== "available") {
       throw new HttpsError("failed-precondition", "Book is not available.");
     }
+    await assertCanIssueBook({
+      id: issueRequest.studentUid,
+      uid: issueRequest.studentUid,
+      ...studentSnap.data(),
+      name: issueRequest.studentName || studentSnap.get("name") || "",
+      email: issueRequest.studentEmail || studentSnap.get("email") || studentUserSnap.get("email") || "",
+      active: studentSnap.get("active") !== false && studentUserSnap.get("active") !== false
+    }, { transaction });
 
     const issueDate = toDate(issueRequest.issueDate) || new Date();
     const dueDate = toDate(issueRequest.dueDate) || addDays(issueDate, ISSUE_DAYS);

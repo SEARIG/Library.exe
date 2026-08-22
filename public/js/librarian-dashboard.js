@@ -16,9 +16,10 @@ import {
   accessionBarcode,
   accessionNumberOf,
   calculatePenalty,
+  canStudentIssueBook,
   compareAccessionNumbers,
   findBookByLibraryCode,
-  getUnpaidPenaltySummary,
+  issueEligibilityError,
   getIssueReturnSchedule,
   isUnpaidPenaltyRecord,
   returnBook,
@@ -514,11 +515,16 @@ async function approveRequest(requestId) {
   if (precheckData.status !== "pending") {
     throw new Error("This request was already processed.");
   }
-  const penaltySummary = await getUnpaidPenaltySummary(precheckData.studentUid);
-  if (penaltySummary.hasUnpaid) {
-    const error = new Error(`Cannot approve. Student has pending penalty of Rs.${penaltySummary.totalPendingPenalty.toFixed(2)}.`);
-    error.code = "penalty/unpaid";
-    error.totalPendingPenalty = penaltySummary.totalPendingPenalty;
+  const eligibility = await canStudentIssueBook({
+    uid: precheckData.studentUid,
+    studentUid: precheckData.studentUid,
+    name: precheckData.studentName,
+    email: precheckData.studentEmail,
+    rollNumber: precheckData.rollNumber
+  });
+  if (!eligibility.eligible) {
+    const error = issueEligibilityError(eligibility);
+    error.message = `Cannot approve. Student has unresolved library dues. Pending Penalty: Rs.${Number(eligibility.totalPendingPenalty || 0).toFixed(2)}. Overdue Books: ${eligibility.overdueBooks || 0}.`;
     throw error;
   }
 
@@ -2813,7 +2819,7 @@ $("#pendingRequests").addEventListener("click", async (event) => {
     }
     if (error.message === "This request was already processed.") {
       showToast("This request was already processed.", "warning");
-    } else if (error.code === "penalty/unpaid") {
+    } else if (error.code === "penalty/unpaid" || error.code === "dues/blocked") {
       showToast(error.message, "warning");
     } else if (error.message.includes("not available")) {
       showToast("This book is already issued or unavailable.", "warning");

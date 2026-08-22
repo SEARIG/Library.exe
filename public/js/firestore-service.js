@@ -24,6 +24,7 @@ import {
   completedCalendarDaysBetween,
   getStudentPenaltyLiability,
   isUnpaidPenaltyRecord as isUnpaidPenaltyRecordUtil,
+  issueBelongsToStudent,
   studentUidOfStudent
 } from "./penalty-utils.mjs?v=2";
 
@@ -236,6 +237,166 @@ export async function getStudentProfile(uid) {
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 }
 
+async function getQueryRowsSafely(firestoreQuery, label) {
+  try {
+    const snap = await getDocs(firestoreQuery);
+    return snap.docs.map((item) => ({ id: item.id, ...item.data() }));
+  } catch (error) {
+    console.warn(`Issue eligibility query skipped: ${label}`, {
+      code: error?.code,
+      message: error?.message
+    });
+    return [];
+  }
+}
+
+function uniqueRows(rows = []) {
+  const map = new Map();
+  rows.forEach((row) => {
+    const key = row.id || JSON.stringify(row);
+    if (!map.has(key)) map.set(key, row);
+  });
+  return Array.from(map.values());
+}
+
+export async function canStudentIssueBook(studentOrUid) {
+  const uid = typeof studentOrUid === "string" ? studentOrUid : studentOrUid?.uid || studentOrUid?.studentUid || studentOrUid?.id || "";
+  if (!uid) {
+    return {
+      eligible: false,
+      totalPendingPenalty: 0,
+      overdueBooks: 0,
+      activeBooks: 0,
+      blockers: [{ type: "other", message: "Student record is missing." }]
+    };
+  }
+
+  const [studentSnap, userSnap] = await Promise.all([
+    getDoc(doc(db, "students", uid)).catch(() => null),
+    getDoc(doc(db, "users", uid)).catch(() => null)
+  ]);
+  const student = {
+    ...(userSnap?.exists?.() ? userSnap.data() : {}),
+    ...(studentSnap?.exists?.() ? studentSnap.data() : {}),
+    ...(typeof studentOrUid === "object" ? studentOrUid : {}),
+    uid
+  };
+  const email = String(student.email || student.studentEmail || "").trim().toLowerCase();
+  const rollNo = student.rollNo || student.rollNumber || student.roll || "";
+  const enrollmentNumber = student.enrollmentNumber || student.enrollmentNo || "";
+
+  const issueQueries = [
+    ["bookIssues.studentUid", query(collection(db, "bookIssues"), where("studentUid", "==", uid))],
+    ["bookIssues.userId", query(collection(db, "bookIssues"), where("userId", "==", uid))],
+    ["bookIssues.studentId", query(collection(db, "bookIssues"), where("studentId", "==", uid))],
+    ["bookIssues.issuedTo", query(collection(db, "bookIssues"), where("issuedTo", "==", uid))],
+    ["issueRecords.studentUid", query(collection(db, "issueRecords"), where("studentUid", "==", uid))]
+  ];
+  if (email) {
+    issueQueries.push(["bookIssues.studentEmail", query(collection(db, "bookIssues"), where("studentEmail", "==", email))]);
+    issueQueries.push(["issueRecords.studentEmail", query(collection(db, "issueRecords"), where("studentEmail", "==", email))]);
+  }
+  const penaltyQueries = [
+    ["penalties.studentUid", query(collection(db, "penalties"), where("studentUid", "==", uid))]
+  ];
+  if (email) penaltyQueries.push(["penalties.studentEmail", query(collection(db, "penalties"), where("studentEmail", "==", email))]);
+  const bookQueries = [
+    ["books.issuedStudentUid", query(collection(db, "books"), where("issuedStudentUid", "==", uid))],
+    ["books.issuedTo", query(collection(db, "books"), where("issuedTo", "==", uid))]
+  ];
+
+  const [issueRows, penaltyRows, bookRows] = await Promise.all([
+    Promise.all(issueQueries.map(([label, firestoreQuery]) => getQueryRowsSafely(firestoreQuery, label))).then((groups) => uniqueRows(groups.flat())),
+    Promise.all(penaltyQueries.map(([label, firestoreQuery]) => getQueryRowsSafely(firestoreQuery, label))).then((groups) => uniqueRows(groups.flat())),
+    Promise.all(bookQueries.map(([label, firestoreQuery]) => getQueryRowsSafely(firestoreQuery, label))).then((groups) => uniqueRows(groups.flat()))
+  ]);
+
+  const liability = getStudentPenaltyLiability({
+    student,
+    issues: issueRows,
+    penalties: penaltyRows,
+    now: new Date()
+  });
+  const lostDamagedBlockers = bookRows
+    .filter((book) => ["lost", "damaged"].includes(String(book.status || "").toLowerCase()))
+    .filter((book) => issueBelongsToStudent({
+      studentUid: book.issuedStudentUid || book.issuedTo || book.studentUid || "",
+      studentEmail: book.issuedToEmail || book.studentEmail || "",
+      bookId: book.bookId || book.b_id || book.id,
+      accessionNumber: accessionNumberOf(book)
+    }, student))
+    .map((book) => ({
+      type: String(book.status || "").toLowerCase(),
+      message: `Student has an unresolved ${String(book.status || "").toLowerCase()} book liability.`,
+      bookId: book.bookId || book.b_id || book.id || "",
+      accessionNumber: accessionNumberOf(book),
+      amount: 0
+    }));
+  const penaltyBlockers = liability.unpaidItems.map((item) => ({
+    type: "penalty",
+    message: `₹${Number(item.amount || 0).toFixed(2)} pending library penalty.`,
+    bookId: item.bookId,
+    accessionNumber: item.accessionNumber,
+    amount: Number(item.amount || 0),
+    overdueDays: item.overdueDays
+  }));
+  const activeIssueBlockers = liability.activeIssues.map((item) => ({
+    type: "activeIssue",
+    message: "Student already has an unreturned library book.",
+    bookId: item.data.bookId || item.data.b_id || "",
+    accessionNumber: item.data.accessionNumber || "",
+    amount: 0,
+    overdueDays: 0
+  }));
+  const overdueBlockers = liability.overdueIssues.map((item) => ({
+    type: "overdue",
+    message: "Student has an overdue/unreturned library book.",
+    bookId: item.data.bookId || item.data.b_id || "",
+    accessionNumber: item.data.accessionNumber || "",
+    amount: 0,
+    overdueDays: item.calculation.overdueDays
+  }));
+  const inactiveBlocker = student.active === false || String(student.status || "").toLowerCase() === "inactive"
+    ? [{ type: "other", message: "Student account is inactive." }]
+    : [];
+  const blockers = [...inactiveBlocker, ...penaltyBlockers, ...overdueBlockers, ...lostDamagedBlockers];
+  blockers.push(...activeIssueBlockers);
+  const uniqueBlockers = [];
+  const blockerKeys = new Set();
+  blockers.forEach((blocker) => {
+    const key = [blocker.type, blocker.bookId, blocker.accessionNumber, blocker.amount, blocker.overdueDays].join("|");
+    if (!blockerKeys.has(key)) {
+      blockerKeys.add(key);
+      uniqueBlockers.push(blocker);
+    }
+  });
+
+  return {
+    eligible: uniqueBlockers.length === 0,
+    totalPendingPenalty: liability.totalUnpaid,
+    overdueBooks: liability.overdueIssues.length,
+    activeBooks: liability.activeIssues.length,
+    blockers: uniqueBlockers
+  };
+}
+
+export function issueEligibilityError(eligibility) {
+  const error = new Error(`Book Issue Blocked. You have pending library dues. Please clear them before requesting another book. Pending Penalty: Rs.${Number(eligibility?.totalPendingPenalty || 0).toFixed(2)}. Overdue Books: ${eligibility?.overdueBooks || 0}.`);
+  error.code = "dues/blocked";
+  error.totalPendingPenalty = Number(eligibility?.totalPendingPenalty || 0);
+  error.overdueBooks = Number(eligibility?.overdueBooks || 0);
+  error.blockers = eligibility?.blockers || [];
+  return error;
+}
+
+function normalizeIssueRequestError(error) {
+  const details = error?.details || error?.customData?.details;
+  if (error?.code === "functions/failed-precondition" && details?.blockers) {
+    throw issueEligibilityError(details);
+  }
+  throw error;
+}
+
 export async function findBookByBarcode(value) {
   const barcode = String(value || "").trim().replace(/\s+/g, "");
   console.log("Scanned barcode value:", barcode);
@@ -259,72 +420,27 @@ export async function createIssueRequest({ student, book }) {
     throw new Error("Invalid library book record. Please scan the library barcode sticker.");
   }
 
-  try {
-    const penaltySummary = await getUnpaidPenaltySummary(auth.currentUser.uid);
-    if (penaltySummary.hasUnpaid) {
-      const error = new Error(`Please clear your pending library penalty before requesting another book. Total pending penalty: Rs.${penaltySummary.totalPendingPenalty.toFixed(2)}`);
-      error.code = "penalty/unpaid";
-      error.totalPendingPenalty = penaltySummary.totalPendingPenalty;
-      throw error;
-    }
-  } catch (error) {
-    if (error.code === "penalty/unpaid") throw error;
-    console.error("Penalty check failed before issue request:", {
-      query: "penalties where studentUid == currentUser.uid",
-      code: error?.code,
-      message: error?.message
-    });
-    throw error;
+  const eligibility = await canStudentIssueBook({ ...student, uid: auth.currentUser.uid });
+  if (!eligibility.eligible) {
+    throw issueEligibilityError(eligibility);
   }
 
-  const issueDate = new Date();
-  const dueDate = addDays(issueDate, ISSUE_DAYS);
-  const ref = doc(collection(db, "issueRequests"));
-  const payload = {
-    requestId: ref.id,
-    studentUid: student.uid,
-    studentName: student.name,
-    rollNumber: student.rollNumber || "",
-    bookId: bookDocId,
-    b_id: bookDocId,
-    accessionNumber,
-    author: book.author || "",
-    title: titleOf(book),
-    placePublisher: book.placePublisher || book.publisher || "",
-    year: book.year || "",
-    pages: book.pages || "",
-    volume: book.volume || "",
-    imageUrl: book.imageUrl || "",
-    barcodeValue: book.barcodeValue || accessionBarcode(accessionNumber),
-    bookBarcodeValue: book.barcodeValue || accessionBarcode(accessionNumber),
-    bookTitle: titleOf(book),
-    subject: book.subject || "",
-    category: book.category || "",
-    bookImage: book.imageUrl || "",
-    issueDate: Timestamp.fromDate(issueDate),
-    dueDate: Timestamp.fromDate(dueDate),
-    confirmationChecked: true,
-    status: "pending",
-    createdAt: serverTimestamp(),
-    reviewedBy: null,
-    reviewedAt: null
-  };
-  console.log("Issue request payload:", payload);
-
+  const requestLegacyBookIssue = httpsCallable(functions, "requestLegacyBookIssue");
+  let result;
   try {
-    await setDoc(ref, payload);
-  } catch (error) {
-    console.error("Issue request Firestore error:", {
-      code: error?.code,
-      message: error?.message
+    result = await requestLegacyBookIssue({
+      bookId: bookDocId,
+      libraryBarcode: book.barcodeValue || accessionBarcode(accessionNumber)
     });
-    throw error;
+  } catch (error) {
+    normalizeIssueRequestError(error);
   }
-
+  const data = result.data || {};
   return {
-    requestId: ref.id,
-    issueDate,
-    dueDate
+    requestId: data.requestId,
+    payload: data.payload || {},
+    issueDate: data.payload?.issueDate ? new Date(data.payload.issueDate) : null,
+    dueDate: data.payload?.dueDate ? new Date(data.payload.dueDate) : null
   };
 }
 
@@ -345,14 +461,14 @@ export async function createCatalogIssueRequest({ student, book, confirmationChe
     throw new Error("Issue request time is not active. Please contact the librarian.");
   }
 
-  const [freshBookSnap, pendingSnap, penaltySummary] = await Promise.all([
+  const [freshBookSnap, pendingSnap, eligibility] = await Promise.all([
     getDoc(doc(db, "books", bookDocId)),
     getDocs(query(
       collection(db, "issueRequests"),
       where("studentUid", "==", auth.currentUser.uid),
       where("status", "==", "pending")
     )),
-    getUnpaidPenaltySummary(auth.currentUser.uid)
+    canStudentIssueBook({ ...student, uid: auth.currentUser.uid })
   ]);
 
   if (!freshBookSnap.exists()) throw new Error("Book record not found.");
@@ -360,11 +476,8 @@ export async function createCatalogIssueRequest({ student, book, confirmationChe
   if (freshBook.status !== "available") {
     throw new Error("This book is not available.");
   }
-  if (penaltySummary.hasUnpaid) {
-    const error = new Error(`Please clear your pending library penalty before requesting another book. Total pending penalty: Rs.${penaltySummary.totalPendingPenalty.toFixed(2)}`);
-    error.code = "penalty/unpaid";
-    error.totalPendingPenalty = penaltySummary.totalPendingPenalty;
-    throw error;
+  if (!eligibility.eligible) {
+    throw issueEligibilityError(eligibility);
   }
   const duplicate = pendingSnap.docs.some((item) => {
     const request = item.data();
@@ -374,61 +487,17 @@ export async function createCatalogIssueRequest({ student, book, confirmationChe
     throw new Error("You already have a pending request for this book.");
   }
 
-  const issueDate = new Date();
-  const dueDate = addDays(issueDate, ISSUE_DAYS);
-  const ref = doc(collection(db, "issueRequests"));
-  const userSnap = await getDoc(doc(db, "users", auth.currentUser.uid));
-  const userRole = userSnap.exists() ? userSnap.data().role || "" : "";
-  const requestPayload = {
-    type: "issue",
-    requestId: ref.id,
-    studentUid: auth.currentUser.uid,
-    studentName: student.name || auth.currentUser.displayName || "",
-    studentEmail: student.email || auth.currentUser.email || "",
-    studentPhone: student.phone || "",
-    rollNumber: student.rollNumber || "",
-    bookId: freshBook.b_id || freshBookSnap.id,
-    b_id: freshBook.b_id || freshBookSnap.id,
-    accessionNumber: accessionNumberOf(freshBook),
-    author: freshBook.author || "",
-    title: titleOf(freshBook),
-    placePublisher: freshBook.placePublisher || freshBook.publisher || "",
-    year: freshBook.year || "",
-    pages: freshBook.pages || "",
-    volume: freshBook.volume || "",
-    imageUrl: freshBook.imageUrl || "",
-    bookTitle: titleOf(freshBook),
-    barcodeValue: freshBook.barcodeValue || accessionBarcode(accessionNumberOf(freshBook)),
-    bookBarcodeValue: freshBook.barcodeValue || accessionBarcode(accessionNumberOf(freshBook)),
-    bookImage: freshBook.imageUrl || "",
-    subject: freshBook.subject || "",
-    category: freshBook.category || "",
-    status: "pending",
-    issueDate: Timestamp.fromDate(issueDate),
-    dueDate: Timestamp.fromDate(dueDate),
-    requestedAt: serverTimestamp(),
-    createdAt: serverTimestamp(),
-    preferredSlot: scheduleLabel(schedule),
-    scheduleSnapshot: schedule || null,
-    confirmationChecked: true,
-    source: "library_catalog",
-    reviewedBy: null,
-    reviewedAt: null
-  };
-  console.log("Current user uid:", auth.currentUser.uid);
-  console.log("Current user role:", userRole);
-  console.log("Creating issue request from library:", requestPayload);
+  const requestLegacyBookIssue = httpsCallable(functions, "requestLegacyBookIssue");
+  let result;
   try {
-    await setDoc(ref, requestPayload);
-  } catch (error) {
-    console.error("Library issue request Firestore error:", {
-      code: error?.code,
-      message: error?.message,
-      payload: requestPayload
+    result = await requestLegacyBookIssue({
+      bookId: freshBook.b_id || freshBookSnap.id,
+      libraryBarcode: freshBook.barcodeValue || accessionBarcode(accessionNumberOf(freshBook))
     });
-    throw error;
+  } catch (error) {
+    normalizeIssueRequestError(error);
   }
-  return { requestId: ref.id, payload: requestPayload };
+  return result.data || {};
 }
 
 export async function createReturnRequest({ student, issue, confirmationChecked = true }) {

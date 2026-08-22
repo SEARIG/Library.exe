@@ -253,7 +253,7 @@ issueForm.addEventListener("submit", async (event) => {
     const isPermissionError = error.code === "permission-denied" || /permission/i.test(error.message || "");
     showToast(
       isPermissionError ? "Could not send issue request. Please refresh and try again." : error.message || "Issue request failed.",
-      error.code === "penalty/unpaid" ? "warning" : "error"
+      error.code === "penalty/unpaid" || error.code === "dues/blocked" ? "warning" : "error"
     );
   } finally {
     button.disabled = false;
