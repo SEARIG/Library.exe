@@ -3,5 +3,11 @@
   "buildCommand": null,
   "outputDirectory": "public",
   "cleanUrls": true,
-  "trailingSlash": false
+  "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/downloads/MLSU-LMS.apk",
+      "destination": "/download"
+    }
+  ]
 }

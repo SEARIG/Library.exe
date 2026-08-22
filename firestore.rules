@@ -44,6 +44,10 @@ service cloud.firestore {
       return staffRole() || role() == "admin";
     }
 
+    function isStaff() {
+      return staffRole() || role() == "admin";
+    }
+
     function sameTenant(data) {
       return superAdmin()
         || (
@@ -63,6 +67,39 @@ service cloud.firestore {
 
     function protectedFieldsClean() {
       return request.resource.data.keys().hasAll(["orgType", "createdAt", "updatedAt", "status"]);
+    }
+
+    function bookMetadataPublicOnly() {
+      return !request.resource.data.keys().hasAny([
+        "accessionNumber",
+        "blegal_num",
+        "blegalNumber",
+        "BLegalNumber",
+        "accessionDate",
+        "acquisitionSource",
+        "billNoDate",
+        "cost",
+        "classNo",
+        "bookNo",
+        "withdrawalRemarks",
+        "notes",
+        "barcodeValue",
+        "bookBarcodeValue",
+        "barcodeDataUrl",
+        "barcodePrinted",
+        "barcodePrintedAt",
+        "barcodePrintedBy",
+        "barcodePrintBatchId",
+        "issuedStudentUid",
+        "issuedTo",
+        "issuedToName",
+        "issuedToEmail",
+        "currentIssueId",
+        "status",
+        "b_id",
+        "bookId",
+        "importBatchId"
+      ]);
     }
 
     match /users/{uid} {
@@ -99,10 +136,10 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    match /bookMetadata/{isbn} {
-      allow read: if active();
-      allow create, update: if active() && (staffRole() || role() == "admin");
-      allow delete: if superAdmin() || role() == "admin";
+    match /bookMetadata/{metadataId} {
+      allow read: if signedIn() && isStaff();
+      allow create, update: if signedIn() && isStaff() && bookMetadataPublicOnly();
+      allow delete: if signedIn() && isAdmin();
     }
 
     match /barcodePrintBatches/{batchId} {

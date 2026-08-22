@@ -44,6 +44,19 @@ const metrics = {
 const testEmailButton = $("#sendTestEmailBtn");
 if (testEmailButton) testEmailButton.title = EMAILJS_SETUP_MESSAGE;
 let pendingStudentImportRows = [];
+let latestNoDuesUsers = [];
+let latestNoDuesStudents = [];
+let latestNoDuesIssues = [];
+let latestNoDuesPenalties = [];
+
+const noDuesControls = {
+  search: $("#noDuesSearch"),
+  status: $("#noDuesStatusFilter"),
+  due: $("#noDuesDueFilter"),
+  table: $("#noDuesTable"),
+  summary: $("#noDuesSummaryList"),
+  topPending: $("#noDuesTopPending")
+};
 
 function openModal(id) {
   const modal = document.getElementById(id);
@@ -122,6 +135,210 @@ function downloadWorkbookTemplate(filename, rows) {
   const workbook = window.XLSX.utils.book_new();
   window.XLSX.utils.book_append_sheet(workbook, sheet, "Template");
   window.XLSX.writeFile(workbook, filename);
+}
+
+function amountOfPenalty(penalty = {}) {
+  return Number(penalty.remainingAmount ?? penalty.amount ?? penalty.penaltyAmount ?? 0) || 0;
+}
+
+function isUnpaidPenalty(penalty = {}) {
+  if (penalty.paid === true && String(penalty.status || "").toLowerCase() === "paid") return false;
+  return amountOfPenalty(penalty) > 0 || penalty.paid !== true || String(penalty.status || "").toLowerCase() !== "paid";
+}
+
+function isActiveIssue(issue = {}) {
+  const status = String(issue.status || "").toLowerCase();
+  return !issue.returnDate && !["returned", "closed", "cancelled"].includes(status);
+}
+
+function studentUidOf(record = {}, fallback = "") {
+  return record.uid || record.studentUid || record.firebaseAuthUid || fallback;
+}
+
+function initialsFor(name = "") {
+  return String(name || "Student")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || "")
+    .join("") || "ST";
+}
+
+function noDuesRows() {
+  const usersByUid = new Map(latestNoDuesUsers.map((item) => [item.id, item.data]));
+  const studentMap = new Map();
+
+  latestNoDuesStudents.forEach((item) => {
+    const uid = studentUidOf(item.data, item.id);
+    if (uid) studentMap.set(uid, { id: item.id, ...item.data, uid });
+  });
+  latestNoDuesUsers
+    .filter((item) => item.data.role === "student")
+    .forEach((item) => {
+      if (studentMap.has(item.id)) {
+        studentMap.set(item.id, { ...item.data, ...studentMap.get(item.id), uid: item.id });
+      } else {
+        studentMap.set(item.id, { id: item.id, ...item.data, uid: item.id });
+      }
+    });
+
+  return Array.from(studentMap.values()).map((student) => {
+    const uid = student.uid || student.id;
+    const user = usersByUid.get(uid) || {};
+    const issues = latestNoDuesIssues
+      .filter((item) => item.data.studentUid === uid || item.data.issuedTo === uid)
+      .filter((item) => isActiveIssue(item.data));
+    const penalties = latestNoDuesPenalties
+      .filter((item) => item.data.studentUid === uid)
+      .filter((item) => isUnpaidPenalty(item.data));
+    const penaltyAmount = penalties.reduce((sum, item) => sum + Math.max(0, amountOfPenalty(item.data)), 0);
+    const hasActiveBooks = issues.length > 0;
+    const hasPenalty = penaltyAmount > 0;
+    const blocked = hasActiveBooks || hasPenalty;
+    const name = student.name || user.name || "Unknown Student";
+
+    return {
+      uid,
+      name,
+      email: student.email || user.email || "",
+      phone: student.phone || user.phone || "",
+      rollNumber: student.rollNumber || student.rollNo || student.roll || student.enrollmentNumber || student.enrollmentNo || "-",
+      department: student.department || student.branch || student.course || "",
+      activeBooks: issues.length,
+      activeBookTitles: issues.map((item) => item.data.bookTitle || item.data.title || item.data.bookId || "Book"),
+      unpaidPenalties: penalties.length,
+      penaltyAmount,
+      status: blocked ? "blocked" : "eligible",
+      dueType: hasPenalty ? "penalty" : hasActiveBooks ? "books" : "clear",
+      active: student.active !== false && user.active !== false
+    };
+  }).sort((left, right) => {
+    if (left.status !== right.status) return left.status === "blocked" ? -1 : 1;
+    return right.penaltyAmount - left.penaltyAmount || right.activeBooks - left.activeBooks || left.name.localeCompare(right.name);
+  });
+}
+
+function filteredNoDuesRows() {
+  const search = String(noDuesControls.search?.value || "").trim().toLowerCase();
+  const status = noDuesControls.status?.value || "";
+  const due = noDuesControls.due?.value || "";
+  return noDuesRows().filter((row) => {
+    const haystack = [
+      row.name,
+      row.email,
+      row.phone,
+      row.rollNumber,
+      row.department,
+      row.uid,
+      row.activeBookTitles.join(" ")
+    ].join(" ").toLowerCase();
+    if (search && !haystack.includes(search)) return false;
+    if (status && row.status !== status) return false;
+    if (due && row.dueType !== due) return false;
+    return true;
+  });
+}
+
+function renderNoDues() {
+  if (!noDuesControls.table) return;
+  const rows = filteredNoDuesRows();
+  const allRows = noDuesRows();
+  const eligible = allRows.filter((row) => row.status === "eligible").length;
+  const blocked = allRows.filter((row) => row.status === "blocked").length;
+  const activeIssues = allRows.reduce((sum, row) => sum + row.activeBooks, 0);
+  const pendingAmount = allRows.reduce((sum, row) => sum + row.penaltyAmount, 0);
+
+  $("#noDuesClearStudents").textContent = String(eligible);
+  $("#noDuesBlockedStudents").textContent = String(blocked);
+  $("#noDuesActiveIssues").textContent = String(activeIssues);
+  $("#noDuesPendingAmount").textContent = `₹ ${pendingAmount.toFixed(0)}`;
+
+  noDuesControls.summary.innerHTML = `
+    <div><span>Total Students</span><strong>${allRows.length}</strong></div>
+    <div><span>Eligible for No Dues</span><strong>${eligible}</strong></div>
+    <div><span>Blocked Students</span><strong>${blocked}</strong></div>
+    <div><span>Active Issued Books</span><strong>${activeIssues}</strong></div>
+    <div><span>Pending Penalty Amount</span><strong>₹ ${pendingAmount.toFixed(2)}</strong></div>`;
+
+  const topRows = allRows
+    .filter((row) => row.status === "blocked")
+    .slice(0, 5);
+  noDuesControls.topPending.innerHTML = topRows.length
+    ? topRows.map((row, index) => `
+      <div>
+        <span>${index + 1}. ${escapeHtml(row.name)}</span>
+        <strong>${row.activeBooks ? `${row.activeBooks} book${row.activeBooks === 1 ? "" : "s"}` : `₹ ${row.penaltyAmount.toFixed(0)}`}</strong>
+      </div>`).join("")
+    : `<div class="empty">No pending students.</div>`;
+
+  if (!rows.length) {
+    renderEmpty(noDuesControls.table, "No students match the selected no dues filters.");
+    return;
+  }
+
+  noDuesControls.table.innerHTML = `
+    <table class="no-dues-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Student Details</th>
+          <th>Roll No.</th>
+          <th>Active Books</th>
+          <th>Pending Penalty</th>
+          <th>Clearance Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((row, index) => `
+          <tr>
+            <td>${index + 1}</td>
+            <td>
+              <div class="student-cell">
+                <span class="student-avatar">${escapeHtml(initialsFor(row.name))}</span>
+                <div>
+                  <strong>${escapeHtml(row.name)}</strong>
+                  <span>${escapeHtml([row.email, row.phone].filter(Boolean).join(" | ") || row.department || "Student")}</span>
+                </div>
+              </div>
+            </td>
+            <td>${escapeHtml(row.rollNumber)}</td>
+            <td><strong class="${row.activeBooks ? "danger-text" : "success-text"}">${row.activeBooks}</strong><span>${escapeHtml(row.activeBookTitles.slice(0, 2).join(", ") || "No books pending")}</span></td>
+            <td><strong class="${row.penaltyAmount ? "danger-text" : "success-text"}">₹ ${row.penaltyAmount.toFixed(2)}</strong><span>${row.unpaidPenalties} unpaid record${row.unpaidPenalties === 1 ? "" : "s"}</span></td>
+            <td>${row.status === "eligible" ? statusBadge("eligible") : statusBadge("blocked")}</td>
+            <td>
+              <button class="btn ${row.status === "eligible" ? "btn-primary" : "btn-muted"}" data-no-dues-action="review" data-student-uid="${escapeHtml(row.uid)}" type="button">
+                ${row.status === "eligible" ? "Ready" : "Review"}
+              </button>
+            </td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+    <div class="table-footer-note">Showing ${rows.length} of ${allRows.length} student entries</div>`;
+}
+
+function exportNoDuesReport() {
+  if (!window.XLSX) throw new Error("XLSX library is not loaded.");
+  const rows = filteredNoDuesRows().map((row) => ({
+    "Student Name": row.name,
+    "Roll No.": row.rollNumber,
+    Email: row.email,
+    Phone: row.phone,
+    Department: row.department,
+    "Active Books": row.activeBooks,
+    "Pending Penalty": row.penaltyAmount,
+    "Clearance Status": row.status === "eligible" ? "Eligible" : "Blocked",
+    "Blocking Reason": row.status === "eligible"
+      ? "No active books or unpaid dues"
+      : [
+          row.activeBooks ? `${row.activeBooks} active book(s)` : "",
+          row.penaltyAmount ? `₹ ${row.penaltyAmount.toFixed(2)} unpaid penalty` : ""
+        ].filter(Boolean).join("; ")
+  }));
+  const sheet = window.XLSX.utils.json_to_sheet(rows);
+  const workbook = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(workbook, sheet, "No Dues");
+  window.XLSX.writeFile(workbook, "no_dues_report.xlsx");
 }
 
 function normalizeStudentImportRows(rows) {
@@ -232,18 +449,30 @@ async function importPreviewedStudents() {
 }
 
 onSnapshot(collection(db, "users"), (snap) => {
+  latestNoDuesUsers = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
   metrics.users.textContent = snap.size;
   metrics.students.textContent = snap.docs.filter((item) => item.data().role === "student").length;
   metrics.librarians.textContent = snap.docs.filter((item) => item.data().role === "librarian").length;
+  renderNoDues();
 });
 onSnapshot(collection(db, "books"), (snap) => metrics.books.textContent = snap.size);
 onSnapshot(collection(db, "issueRequests"), (snap) => {
   metrics.pending.textContent = snap.docs.filter((item) => item.data().status === "pending").length;
 });
 onSnapshot(collection(db, "bookIssues"), (snap) => {
+  latestNoDuesIssues = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
   metrics.issued.textContent = snap.size;
+  renderNoDues();
 });
-onSnapshot(collection(db, "penalties"), (snap) => metrics.penalties.textContent = snap.size);
+onSnapshot(collection(db, "students"), (snap) => {
+  latestNoDuesStudents = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
+  renderNoDues();
+});
+onSnapshot(collection(db, "penalties"), (snap) => {
+  latestNoDuesPenalties = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
+  metrics.penalties.textContent = snap.size;
+  renderNoDues();
+});
 
 onSnapshot(query(collection(db, "users"), orderBy("createdAt", "desc"), limit(50)), (snap) => {
   const target = $("#usersTable");
@@ -348,6 +577,38 @@ $("#confirmStudentImportBtn").addEventListener("click", async () => {
     logDetailedError(error);
     showToast(error.message, "error");
   }
+});
+
+noDuesControls.search?.addEventListener("input", renderNoDues);
+noDuesControls.status?.addEventListener("change", renderNoDues);
+noDuesControls.due?.addEventListener("change", renderNoDues);
+document.querySelectorAll(".no-dues-quick-filter").forEach((button) => {
+  button.addEventListener("click", () => {
+    if (noDuesControls.status) noDuesControls.status.value = button.dataset.noDuesFilter || "";
+    renderNoDues();
+  });
+});
+$("#exportNoDuesBtn")?.addEventListener("click", () => {
+  try {
+    exportNoDuesReport();
+    showToast("No dues report exported.", "success");
+  } catch (error) {
+    logDetailedError(error);
+    showToast(error.message, "error");
+  }
+});
+$("#noDuesTable")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-no-dues-action='review']");
+  if (!button) return;
+  const row = noDuesRows().find((item) => item.uid === button.dataset.studentUid);
+  if (!row) return;
+  const message = row.status === "eligible"
+    ? `${row.name} is eligible for no dues clearance.`
+    : `${row.name} is blocked: ${[
+        row.activeBooks ? `${row.activeBooks} active book(s)` : "",
+        row.penaltyAmount ? `₹ ${row.penaltyAmount.toFixed(2)} unpaid penalty` : ""
+      ].filter(Boolean).join("; ")}.`;
+  showToast(message, row.status === "eligible" ? "success" : "warning");
 });
 
 onSnapshot(query(collection(db, "issueRequests"), orderBy("createdAt", "desc"), limit(8)), (snap) => {

@@ -29,7 +29,6 @@ const roleLinks = {
     ["Users", "admin-dashboard.html#userManagementModal"],
     ["Import Students", "admin-dashboard.html#studentImportModal"],
     ["Reports", "admin-dashboard.html#reportsModal"],
-    ["Email History", "admin-dashboard.html#emailHistoryModal"],
     ["No Dues", "admin-dashboard.html#noDuesModal"],
     ["Settings", "admin-dashboard.html#settingsModal"]
   ]
@@ -136,8 +135,7 @@ export function renderNavbarSkeleton() {
 function homeForRole(role) {
   if (role === "admin") return "admin-dashboard.html";
   if (role === "librarian") return "librarian-dashboard.html";
-  if (role === "student") return "student-dashboard.html";
-  return "login.html";
+  return "student-dashboard.html";
 }
 
 function isCurrentLink(currentPath, href) {

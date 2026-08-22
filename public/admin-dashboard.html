@@ -3,16 +3,16 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>Admin Dashboard | Mohanlal Sukhadia University LMS</title>
-    <link rel="icon" type="image/png" href="/assets/mlsu-logo.png?v=5">
-    <link rel="apple-touch-icon" href="/assets/mlsu-logo-192.png">
-    <link rel="stylesheet" href="css/style.css?v=10">
-    <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#0F766E">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-title" content="MLSU LMS">
+    <meta name="apple-mobile-web-app-title" content="MSU LMS">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <title>Admin Dashboard | Mohanlal Sukhadia University LMS</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/png" href="/assets/mlsu-logo.png?v=4">
+    <link rel="apple-touch-icon" href="/assets/mlsu-logo-192.png">
+    <link rel="stylesheet" href="css/style.css?v=6">
   </head>
   <body class="protected-page">
     <header class="app-header">
@@ -109,12 +109,101 @@
       </section>
     </div>
     <div class="modal-backdrop" id="noDuesModal" role="dialog" aria-modal="true" aria-labelledby="noDuesTitle">
-      <section class="app-modal">
+      <section class="app-modal no-dues-modal">
         <div class="modal-head">
-          <h2 id="noDuesTitle">No Dues</h2>
+          <div>
+            <h2 id="noDuesTitle">No Dues / Clearance</h2>
+            <p class="helper-text">Review student eligibility before issuing no dues clearance.</p>
+          </div>
           <button class="btn btn-muted" data-close-modal type="button">Close</button>
         </div>
-        <div class="empty">No dues certificate tools will appear here.</div>
+        <section class="no-dues-metrics" aria-label="No dues summary">
+          <article class="no-dues-stat stat-clear">
+            <span class="stat-icon">✓</span>
+            <div>
+              <strong id="noDuesClearStudents">0</strong>
+              <span>Eligible Students</span>
+              <small>No active books or unpaid dues</small>
+            </div>
+          </article>
+          <article class="no-dues-stat stat-danger">
+            <span class="stat-icon">₹</span>
+            <div>
+              <strong id="noDuesBlockedStudents">0</strong>
+              <span>Students with Dues</span>
+              <small>Penalty or issued books pending</small>
+            </div>
+          </article>
+          <article class="no-dues-stat stat-warning">
+            <span class="stat-icon">⏱</span>
+            <div>
+              <strong id="noDuesActiveIssues">0</strong>
+              <span>Active Issued Books</span>
+              <small>Books still not returned</small>
+            </div>
+          </article>
+          <article class="no-dues-stat stat-info">
+            <span class="stat-icon">₹</span>
+            <div>
+              <strong id="noDuesPendingAmount">₹ 0</strong>
+              <span>Pending Amount</span>
+              <small>Total unpaid penalty amount</small>
+            </div>
+          </article>
+        </section>
+
+        <section class="no-dues-filters" aria-label="No dues filters">
+          <label>Search
+            <input id="noDuesSearch" placeholder="Search by student name, roll no., email, phone...">
+          </label>
+          <label>Clearance Status
+            <select id="noDuesStatusFilter">
+              <option value="">All Status</option>
+              <option value="eligible">Eligible</option>
+              <option value="blocked">Blocked</option>
+            </select>
+          </label>
+          <label>Due Type
+            <select id="noDuesDueFilter">
+              <option value="">All</option>
+              <option value="penalty">Unpaid Penalty</option>
+              <option value="books">Books Not Returned</option>
+              <option value="clear">No Dues</option>
+            </select>
+          </label>
+          <button class="btn btn-primary" id="exportNoDuesBtn" type="button">Export Report</button>
+          <div class="quick-filter-row">
+            <span>Quick Filters:</span>
+            <button class="btn btn-muted no-dues-quick-filter" data-no-dues-filter="" type="button">All</button>
+            <button class="btn btn-muted no-dues-quick-filter" data-no-dues-filter="eligible" type="button">Eligible</button>
+            <button class="btn btn-muted no-dues-quick-filter" data-no-dues-filter="blocked" type="button">Blocked</button>
+          </div>
+        </section>
+
+        <section class="no-dues-layout">
+          <div class="no-dues-table-card">
+            <div id="noDuesTable" class="table-scroll"></div>
+          </div>
+          <aside class="no-dues-side">
+            <article class="no-dues-side-card">
+              <h3>No Dues Summary</h3>
+              <div id="noDuesSummaryList" class="summary-list"></div>
+            </article>
+            <article class="no-dues-side-card">
+              <h3>Clearance Rules</h3>
+              <ul class="rules-list">
+                <li>All issued books must be returned.</li>
+                <li>All unpaid penalties must be cleared.</li>
+                <li>Student account should remain active.</li>
+                <li>Issue/return history is not deleted.</li>
+              </ul>
+            </article>
+            <article class="no-dues-side-card">
+              <h3>Top Pending Students</h3>
+              <div id="noDuesTopPending" class="top-pending-list"></div>
+            </article>
+          </aside>
+        </section>
       </section>
     </div>
     <div class="modal-backdrop" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
@@ -127,7 +216,7 @@
       </section>
     </div>
     <div id="toast" class="toast"></div>
-    <script src="/js/pwa.js?v=10"></script>
+    <script src="./js/pwa.js?v=7" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
     <script type="module" src="./js/notifications.js"></script>

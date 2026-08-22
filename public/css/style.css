@@ -918,6 +918,7 @@ canvas {
 }
 
 .home-features,
+.home-get-app,
 .home-catalog-preview {
   margin-top: 42px;
   padding: clamp(22px, 3vw, 32px);
@@ -926,6 +927,202 @@ canvas {
   background: rgba(255, 255, 255, 0.78);
   box-shadow: 0 18px 46px rgba(15, 23, 42, 0.10);
   backdrop-filter: blur(14px);
+}
+
+.home-get-app {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.72fr);
+  gap: 24px;
+  align-items: stretch;
+}
+
+.get-app-intro,
+.get-app-actions-card,
+.download-card,
+.install-card {
+  min-width: 0;
+  border: 1px solid rgba(229, 231, 235, 0.86);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+}
+
+.get-app-intro {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 22px;
+  align-items: center;
+  padding: clamp(22px, 3vw, 34px);
+  position: relative;
+  overflow: hidden;
+}
+
+.get-app-intro::before,
+.download-card::before {
+  content: "";
+  position: absolute;
+  left: 28px;
+  right: 28px;
+  top: 0;
+  height: 5px;
+  border-radius: 0 0 999px 999px;
+  background: var(--gold);
+}
+
+.get-app-icon {
+  width: clamp(86px, 10vw, 132px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border: 10px solid rgba(15, 118, 110, 0.11);
+  border-radius: 30px;
+  background: linear-gradient(135deg, #ffffff, #F8F5EF);
+  box-shadow: inset 0 -18px 30px rgba(15, 118, 110, 0.08);
+}
+
+.get-app-icon img,
+.download-logo {
+  width: 76%;
+  height: 76%;
+  object-fit: contain;
+  border-radius: 50%;
+}
+
+.section-kicker {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 30px;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: var(--primary-dark);
+  background: rgba(15, 118, 110, 0.1);
+  font-size: 0.82rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.get-app-intro h2,
+.download-card h1,
+.install-card h2 {
+  margin: 10px 0 0;
+  color: #134E4A;
+}
+
+.get-app-intro h2 {
+  font-size: clamp(1.9rem, 4vw, 3.2rem);
+  line-height: 1.04;
+}
+
+.get-app-intro p,
+.download-card p,
+.install-card p {
+  margin: 12px 0 0;
+  color: #475569;
+}
+
+.get-app-actions-card {
+  padding: clamp(22px, 3vw, 30px);
+  display: grid;
+  gap: 18px;
+}
+
+.get-app-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.get-app-buttons .btn {
+  min-height: 52px;
+}
+
+.install-note {
+  padding: 12px 14px;
+  border-left: 4px solid var(--gold);
+  border-radius: 12px;
+  background: rgba(212, 160, 23, 0.10);
+  font-weight: 750;
+}
+
+.install-steps {
+  margin: 0;
+  padding-left: 22px;
+  color: #334155;
+}
+
+.install-steps li + li {
+  margin-top: 7px;
+}
+
+.app-details {
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.app-details div {
+  display: grid;
+  grid-template-columns: minmax(92px, 0.44fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(229, 231, 235, 0.9);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.app-details dt {
+  color: #64748B;
+  font-weight: 850;
+}
+
+.app-details dd {
+  margin: 0;
+  color: #134E4A;
+  font-weight: 900;
+}
+
+.download-main {
+  min-height: calc(100vh - 210px);
+  display: grid;
+  align-items: center;
+}
+
+.download-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(320px, 1.05fr);
+  gap: 26px;
+  padding: clamp(24px, 4vw, 42px);
+  overflow: hidden;
+}
+
+.download-hero {
+  display: grid;
+  align-content: center;
+  gap: 12px;
+}
+
+.download-logo {
+  width: 132px;
+  height: 132px;
+  padding: 12px;
+  background: #fff;
+  box-shadow: 0 16px 34px rgba(15, 118, 110, 0.14);
+}
+
+.download-card h1 {
+  font-size: clamp(2.1rem, 5vw, 4rem);
+  line-height: 1.02;
+}
+
+.download-info {
+  display: grid;
+  gap: 18px;
+}
+
+.install-card {
+  padding: 22px;
 }
 
 .home-feature-grid {
@@ -1433,7 +1630,8 @@ button:disabled,
 .badge-available,
 .badge-active,
 .badge-paid,
-.badge-returned {
+.badge-returned,
+.badge-eligible {
   background: rgba(21, 128, 61, 0.12);
   color: var(--success);
 }
@@ -1449,7 +1647,8 @@ button:disabled,
 .badge-damaged,
 .badge-lost,
 .badge-inactive,
-.badge-overdue {
+.badge-overdue,
+.badge-blocked {
   background: rgba(180, 35, 24, 0.1);
   color: var(--danger);
 }
@@ -1492,10 +1691,20 @@ button:disabled,
 
 .auth-brand h1,
 .auth-brand p,
+.auth-brand-logo,
 .feature-chips,
 .auth-brand .btn {
   position: relative;
   z-index: 1;
+}
+
+.auth-brand-logo {
+  width: 116px;
+  height: 116px;
+  object-fit: contain;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.18);
 }
 
 .auth-brand p {
@@ -1913,10 +2122,212 @@ td strong {
   align-content: start;
 }
 
+.no-dues-modal {
+  width: min(1280px, calc(100% - 24px));
+}
+
+.no-dues-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.no-dues-stat,
+.no-dues-filters,
+.no-dues-table-card,
+.no-dues-side-card {
+  min-width: 0;
+  border: 1px solid rgba(229, 231, 235, 0.92);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.07);
+}
+
+.no-dues-stat {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px;
+}
+
+.no-dues-stat .stat-icon {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.1);
+  color: var(--primary-dark);
+  font-size: 1.55rem;
+  font-weight: 950;
+}
+
+.no-dues-stat strong,
+.no-dues-stat span,
+.no-dues-stat small {
+  display: block;
+}
+
+.no-dues-stat strong {
+  color: var(--navy);
+  font-size: 1.75rem;
+  line-height: 1;
+}
+
+.no-dues-stat span {
+  margin-top: 6px;
+  color: var(--navy);
+  font-weight: 950;
+}
+
+.no-dues-stat small {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.stat-clear { border-color: rgba(15, 118, 110, 0.24); }
+.stat-danger { border-color: rgba(239, 68, 68, 0.28); }
+.stat-warning { border-color: rgba(245, 158, 11, 0.3); }
+.stat-info { border-color: rgba(59, 130, 246, 0.24); }
+
+.stat-danger .stat-icon {
+  color: #dc2626;
+  background: rgba(239, 68, 68, 0.09);
+}
+
+.stat-warning .stat-icon {
+  color: #ea580c;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.stat-info .stat-icon {
+  color: #2563eb;
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.no-dues-filters {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.5fr) minmax(180px, 0.75fr) minmax(180px, 0.75fr) auto;
+  gap: 14px;
+  align-items: end;
+  padding: 18px;
+  margin-bottom: 18px;
+}
+
+.quick-filter-row {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  color: var(--navy);
+  font-weight: 850;
+}
+
+.quick-filter-row .btn {
+  min-height: 36px;
+  padding: 0 14px;
+}
+
+.no-dues-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.28fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.no-dues-table-card {
+  overflow: hidden;
+}
+
+.no-dues-table {
+  min-width: 900px;
+}
+
+.student-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.student-avatar {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #e5e7eb;
+  color: var(--navy);
+  font-weight: 950;
+}
+
+.danger-text {
+  color: var(--danger);
+}
+
+.success-text {
+  color: var(--success);
+}
+
+.table-footer-note {
+  padding: 14px 16px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  font-size: 0.92rem;
+}
+
+.no-dues-side {
+  display: grid;
+  gap: 14px;
+}
+
+.no-dues-side-card {
+  padding: 18px;
+}
+
+.no-dues-side-card h3 {
+  margin: 0 0 14px;
+  color: var(--primary-dark);
+}
+
+.summary-list,
+.top-pending-list {
+  display: grid;
+  gap: 11px;
+}
+
+.summary-list div,
+.top-pending-list div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+}
+
+.summary-list strong,
+.top-pending-list strong {
+  color: var(--navy);
+  white-space: nowrap;
+}
+
+.rules-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--navy);
+}
+
+.rules-list li + li {
+  margin-top: 9px;
+}
+
 @media (max-width: 900px) {
   .auth-shell,
   .scanner-layout,
-  .librarian-grid {
+  .librarian-grid,
+  .no-dues-layout {
     grid-template-columns: 1fr;
   }
 
@@ -1945,6 +2356,11 @@ td strong {
   .span-12,
   .metric {
     grid-column: span 12;
+  }
+
+  .no-dues-metrics,
+  .no-dues-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .request-card {
@@ -1982,6 +2398,11 @@ td strong {
     gap: 18px;
   }
 
+  .home-get-app,
+  .download-card {
+    grid-template-columns: 1fr;
+  }
+
   .home-hero-copy {
     padding: 24px;
     border-radius: 20px;
@@ -2002,6 +2423,10 @@ td strong {
 
   .home-feature-card {
     padding: 18px;
+  }
+
+  .get-app-intro {
+    grid-template-columns: 1fr;
   }
 
   .home-section-row {
@@ -2433,7 +2858,7 @@ select {
 
   .home-brand strong::after,
   .library-brand span::after {
-    content: "MLSU LMS";
+    content: "MSU LMS";
     font-size: 1rem;
   }
 
@@ -2480,6 +2905,28 @@ select {
     margin-right: auto;
   }
 
+  .get-app-intro,
+  .download-hero {
+    text-align: center;
+  }
+
+  .get-app-icon,
+  .download-logo,
+  .section-kicker {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .get-app-buttons {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .app-details div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
   .home-hero h1 {
     font-size: clamp(2rem, 12vw, 3rem);
     line-height: 1.04;
@@ -2497,7 +2944,13 @@ select {
     grid-template-columns: 1fr;
   }
 
+  .no-dues-metrics,
+  .no-dues-filters {
+    grid-template-columns: 1fr;
+  }
+
   .home-features,
+  .home-get-app,
   .home-catalog-preview {
     margin-top: 22px;
     padding: 16px;
@@ -2531,7 +2984,7 @@ select {
   }
 
   .header-inner .brand span::after {
-    content: "MLSU LMS";
+    content: "MSU LMS";
     font-size: 0.95rem;
   }
 
@@ -2675,77 +3128,5 @@ select {
   .auth-card,
   .auth-brand {
     padding: 22px 18px;
-  }
-}
-
-/* Fixed navigation for browser and installed-PWA use */
-.home-page,
-.library-catalog-page,
-.protected-page {
-  padding-top: 92px;
-}
-
-.navbar,
-.app-header,
-.app-navbar,
-.library-nav,
-.home-navbar,
-.main-navbar,
-.top-nav {
-  position: fixed;
-  top: max(10px, env(safe-area-inset-top));
-  left: 50%;
-  width: min(96%, 1400px);
-  margin: 0;
-  transform: translateX(-50%);
-  z-index: 9999;
-  border: 1px solid rgba(255, 255, 255, 0.65);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-
-.app-header {
-  min-height: 64px;
-}
-
-.app-sidebar {
-  top: 92px;
-  height: calc(100dvh - 92px);
-  z-index: 9998;
-}
-
-.sidebar-overlay {
-  inset: 82px 0 0;
-  z-index: 9997;
-}
-
-@media (max-width: 768px) {
-  .home-page,
-  .library-catalog-page,
-  .protected-page {
-    padding-top: 82px;
-  }
-
-  .navbar,
-  .app-header,
-  .app-navbar,
-  .library-nav,
-  .home-navbar,
-  .main-navbar,
-  .top-nav {
-    top: max(8px, env(safe-area-inset-top));
-    width: calc(100% - 20px);
-  }
-
-  .app-sidebar {
-    top: 82px;
-    height: calc(100dvh - 82px);
-  }
-
-  .sidebar-overlay {
-    inset: 72px 0 0;
   }
 }

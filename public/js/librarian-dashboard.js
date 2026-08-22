@@ -53,6 +53,18 @@ import {
   updateDoc,
   where
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import {
+  collectReusableMetadata,
+  createMetadataKey,
+  hasReusableMetadata,
+  mergeReusableMetadata,
+  metadataKeyCandidates,
+  normalizeBarcode,
+  normalizeIsbn,
+  normalizeProviderSource,
+  reusableMetadataPayload,
+  titleKeywords
+} from "./book-metadata-utils.mjs";
 
 wireSignOut();
 const session = await requireAuth(["librarian", "admin"]);
@@ -86,6 +98,14 @@ const INDCAT_CONFIG = {
   apiUrl: ""
 };
 const BOOK_CATEGORIES = ["pyq", "textbook", "qna", "reference", "notes", "journal", "other"];
+const SLD_STATUS = {
+  searching: "Searching saved metadata...",
+  foundSld: "Found in Self Learning DB",
+  foundOnline: "Found online",
+  foundExisting: "Found from Existing Book",
+  notFound: "Not found, manual entry required",
+  saved: "Saved to Self Learning DB"
+};
 
 function logLibraryDiagnostics() {
   console.log("XLSX loaded:", typeof XLSX);
@@ -294,6 +314,15 @@ async function importPreviewedBooks() {
       });
       imported += 1;
     }
+
+    try {
+      const savedKeys = await upsertReusableBookMetadata(registerData, "accession_register_import");
+      if (savedKeys.length) {
+        console.log("[SLD] Import taught metadata:", savedKeys);
+      }
+    } catch (metadataError) {
+      console.warn("[SLD] Import metadata upsert failed:", metadataError);
+    }
   }
 
   const skipped = pendingBookImportRows.length - validRows.length;
@@ -346,62 +375,93 @@ function collectBookMetadata() {
 }
 
 function metadataDocId(code) {
-  return cleanBookMetadataCode(code).toUpperCase();
-}
-
-function titleKeywords(title = "") {
-  return String(title || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((word) => word.length >= 3)
-    .slice(0, 12);
+  return normalizeBarcode(code).replace(/[/\\?#\[\]*]/g, "_");
 }
 
 function normalizeLocalMetadata(data = {}, cleanCode = "") {
-  const title = data.bname || data.title || "";
+  const title = data.title || data.bname || data.bookTitle || "";
   const isbn = data.isbn || data.isbn13 || data.isbn10 || cleanCode;
+  const placePublisher = data.placePublisher || data.publisher || "";
   return {
     title,
     authors: data.author || data.authors || "",
-    publisher: data.publisher || "",
+    publisher: placePublisher,
+    placePublisher,
+    year: data.year || data.publishedDate || "",
+    pages: data.pages || data.pageCount || "",
+    volume: data.volume || "",
     subject: data.subject || "",
     category: data.category || inferCategory(title),
     imageUrl: data.imageUrl || "",
+    publisherBarcode: data.publisherBarcode || cleanCode,
     isbn,
     isbn13: String(isbn).length === 13 ? isbn : "",
     isbn10: String(isbn).length === 10 ? isbn : "",
-    source: "Local Metadata Database",
-    metadataSource: "local",
+    source: "Self Learning DB",
+    metadataSource: "sld",
     raw: data
   };
 }
 
+function setSldStatus(message = SLD_STATUS.notFound, type = "") {
+  const status = document.getElementById("sldStatusIndicator");
+  if (!status) return;
+  status.textContent = message;
+  status.dataset.state = type || "";
+}
+
+async function upsertReusableBookMetadata(record = collectBookMetadata(), source = "manual") {
+  const metadata = collectReusableMetadata(record);
+  if (!hasReusableMetadata(metadata)) return [];
+  const keys = metadataKeyCandidates(metadata);
+  if (!keys.length) return [];
+
+  const savedKeys = [];
+  for (const keyInfo of keys) {
+    console.log("[SLD] Lookup key:", keyInfo.key);
+    const ref = doc(db, "bookMetadata", keyInfo.key);
+    const existingSnap = await getDoc(ref);
+    const existing = existingSnap.exists() ? existingSnap.data() : {};
+    const publicMetadata = mergeReusableMetadata(existing, metadata);
+    const payload = {
+      ...reusableMetadataPayload(publicMetadata, keyInfo, {
+        source: normalizeProviderSource(source, existing.source),
+        existing,
+        existingSource: existing.source
+      }),
+      usageCount: Number(existing.usageCount || 0) + 1,
+      updatedAt: serverTimestamp(),
+      updatedBy: session.user.uid
+    };
+    if (!existingSnap.exists()) {
+      payload.createdAt = serverTimestamp();
+      payload.createdBy = session.user.uid;
+    } else if (existing.createdAt) {
+      payload.createdAt = existing.createdAt;
+    }
+    if (existing.createdBy) payload.createdBy = existing.createdBy;
+
+    await setDoc(ref, payload);
+    console.log("[SLD] Upsert saved:", keyInfo.key);
+    savedKeys.push(keyInfo.key);
+  }
+  return savedKeys;
+}
+
 async function saveBookMetadataForFuture(source = "manual") {
-  const cleanCode = metadataDocId($("#isbnInput").value || $("#publisherBarcodeInput").value);
-  if (!cleanCode) throw new Error("Enter publisher ISBN/barcode before saving metadata.");
   const metadata = collectBookMetadata();
-  if (!metadata.bname) throw new Error("Book Name is required before saving metadata.");
-  const payload = {
-    isbn: metadata.isbn || cleanCode,
-    publisherBarcode: metadata.publisherBarcode || cleanCode,
-    bname: metadata.bname,
-    author: metadata.author || "",
-    publisher: metadata.publisher || "",
-    subject: metadata.subject || "General",
-    category: metadata.category || inferCategory(metadata.bname),
-    imageUrl: metadata.imageUrl || "",
-    source,
-    bnameKeywords: titleKeywords(metadata.bname),
-    updatedAt: serverTimestamp()
-  };
-  const ref = doc(db, "bookMetadata", cleanCode);
-  const existing = await getDoc(ref);
-  await setDoc(ref, {
-    ...payload,
-    createdAt: existing.exists() ? existing.data().createdAt || serverTimestamp() : serverTimestamp()
-  }, { merge: true });
-  return payload;
+  if (!metadata.isbn && !metadata.publisherBarcode && !metadata.title) {
+    throw new Error("Enter ISBN/publisher barcode or title before saving metadata.");
+  }
+  if (!metadata.title && !metadata.author) {
+    throw new Error("Title or Author is required before saving metadata.");
+  }
+  const savedKeys = await upsertReusableBookMetadata(metadata, source);
+  if (!savedKeys.length) {
+    throw new Error("No reusable metadata was available to save.");
+  }
+  setSldStatus(SLD_STATUS.saved, "saved");
+  return savedKeys;
 }
 
 function localBookForRequest(request = {}) {
@@ -688,10 +748,7 @@ async function ensureBarcodeDataUrl() {
 }
 
 function cleanBookMetadataCode(rawCode) {
-  return String(rawCode || "")
-    .trim()
-    .replace(/[-\s]/g, "")
-    .replace(/[^A-Za-z0-9]/g, "");
+  return normalizeBarcode(rawCode);
 }
 
 function cleanGoogleBookCode(rawCode) {
@@ -723,11 +780,17 @@ function setMetadataSourceBadge(source) {
   const badge = document.getElementById("metadataSourceBadge");
   if (!badge) return;
   const labels = {
-    google: "Fetched from Google Books",
-    openlibrary: "Fetched from Open Library",
+    google: "Found in Google Books",
+    google_books: "Found in Google Books",
+    openlibrary: "Found in Open Library",
+    open_library: "Found in Open Library",
     loc: "Fetched from Library of Congress",
     indcat: "Fetched from INDCAT",
-    local: "Fetched from Local Database"
+    local: "Found from Existing Book",
+    local_book: "Found from Existing Book",
+    sld: "Found in Self Learning DB",
+    self_learning: "Found in Self Learning DB",
+    online: "Found online"
   };
   badge.textContent = labels[source] || "";
   badge.hidden = !source;
@@ -764,11 +827,14 @@ function normalizeGoogleBook(info, cleanCode) {
     imageUrl: info.imageLinks?.thumbnail
       ? info.imageLinks.thumbnail.replace("http://", "https://")
       : "",
+    year: info.publishedDate || "",
+    pages: info.pageCount ? String(info.pageCount) : "",
+    volume: "",
     isbn13,
     isbn10,
     isbn: isbn13 || isbn10 || cleanCode,
     source: "Google Books",
-    metadataSource: "google",
+    metadataSource: "google_books",
     raw: info
   };
 }
@@ -797,11 +863,14 @@ async function normalizeOpenLibraryIsbn(data, cleanCode) {
     subject: Array.isArray(data.subjects) ? data.subjects.slice(0, 3).join(", ") : "",
     category: inferCategory(data.title || ""),
     imageUrl: data.covers?.[0] ? `https://covers.openlibrary.org/b/id/${data.covers[0]}-M.jpg` : "",
+    year: data.publish_date || "",
+    pages: data.number_of_pages ? String(data.number_of_pages) : "",
+    volume: "",
     isbn13: Array.isArray(data.isbn_13) ? data.isbn_13[0] : "",
     isbn10: Array.isArray(data.isbn_10) ? data.isbn_10[0] : "",
     isbn: (Array.isArray(data.isbn_13) && data.isbn_13[0]) || (Array.isArray(data.isbn_10) && data.isbn_10[0]) || cleanCode,
     source: "Open Library ISBN",
-    metadataSource: "openlibrary",
+    metadataSource: "open_library",
     raw: data
   };
 }
@@ -814,11 +883,14 @@ function normalizeOpenLibrarySearch(doc, cleanCode) {
     subject: Array.isArray(doc.subject) ? doc.subject.slice(0, 3).join(", ") : "",
     category: inferCategory(doc.title || ""),
     imageUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : "",
+    year: doc.first_publish_year ? String(doc.first_publish_year) : "",
+    pages: "",
+    volume: "",
     isbn13: Array.isArray(doc.isbn) ? doc.isbn.find((item) => String(item).length === 13) || "" : "",
     isbn10: Array.isArray(doc.isbn) ? doc.isbn.find((item) => String(item).length === 10) || "" : "",
     isbn: cleanCode,
     source: "Open Library Search",
-    metadataSource: "openlibrary",
+    metadataSource: "open_library",
     raw: doc
   };
 }
@@ -884,14 +956,57 @@ function indcatFallback(cleanCode) {
 
 async function findLocalMetadata(cleanCode) {
   if (!cleanCode) return null;
-  const docSnap = await getDoc(doc(db, "bookMetadata", metadataDocId(cleanCode)));
-  if (docSnap.exists()) return normalizeLocalMetadata(docSnap.data(), cleanCode);
+  const isbn = normalizeIsbn(cleanCode);
+  const barcode = normalizeBarcode(cleanCode);
+  const candidateKeys = [
+    createMetadataKey("isbn", isbn),
+    createMetadataKey("publisherBarcode", barcode),
+    metadataDocId(cleanCode)
+  ].filter(Boolean);
 
-  const isbnSnap = await getDocs(query(collection(db, "bookMetadata"), where("isbn", "==", cleanCode), limit(1)));
-  if (!isbnSnap.empty) return normalizeLocalMetadata(isbnSnap.docs[0].data(), cleanCode);
+  for (const key of [...new Set(candidateKeys)]) {
+    console.log("[SLD] Lookup key:", key);
+    try {
+      const docSnap = await getDoc(doc(db, "bookMetadata", key));
+      if (docSnap.exists()) {
+        const metadata = normalizeLocalMetadata(docSnap.data(), cleanCode);
+        console.log("[SLD] Found metadata:", metadata);
+        return metadata;
+      }
+    } catch (error) {
+      console.warn("[SLD] Lookup failed:", error);
+    }
+  }
 
-  const barcodeSnap = await getDocs(query(collection(db, "bookMetadata"), where("publisherBarcode", "==", cleanCode), limit(1)));
-  if (!barcodeSnap.empty) return normalizeLocalMetadata(barcodeSnap.docs[0].data(), cleanCode);
+  const isbnValues = [...new Set([isbn, cleanCode].filter(Boolean))];
+  for (const value of isbnValues) {
+    try {
+      console.log("[SLD] Lookup key:", `isbn == ${value}`);
+      const isbnSnap = await getDocs(query(collection(db, "bookMetadata"), where("isbn", "==", value), limit(1)));
+      if (!isbnSnap.empty) {
+        const metadata = normalizeLocalMetadata(isbnSnap.docs[0].data(), cleanCode);
+        console.log("[SLD] Found metadata:", metadata);
+        return metadata;
+      }
+    } catch (error) {
+      console.warn("[SLD] Lookup failed:", error);
+    }
+  }
+
+  const barcodeValues = [...new Set([barcode, cleanCode].filter(Boolean))];
+  for (const value of barcodeValues) {
+    try {
+      console.log("[SLD] Lookup key:", `publisherBarcode == ${value}`);
+      const barcodeSnap = await getDocs(query(collection(db, "bookMetadata"), where("publisherBarcode", "==", value), limit(1)));
+      if (!barcodeSnap.empty) {
+        const metadata = normalizeLocalMetadata(barcodeSnap.docs[0].data(), cleanCode);
+        console.log("[SLD] Found metadata:", metadata);
+        return metadata;
+      }
+    } catch (error) {
+      console.warn("[SLD] Lookup failed:", error);
+    }
+  }
 
   return null;
 }
@@ -899,13 +1014,76 @@ async function findLocalMetadata(cleanCode) {
 async function findLocalMetadataByTitle(title) {
   const keywords = titleKeywords(title);
   if (!keywords.length) return null;
-  const snap = await getDocs(query(collection(db, "bookMetadata"), where("bnameKeywords", "array-contains", keywords[0]), limit(10)));
-  const normalizedTitle = String(title || "").toLowerCase();
-  const found = snap.docs.find((item) => {
-    const name = String(item.data().bname || "").toLowerCase();
-    return keywords.some((word) => name.includes(word)) || normalizedTitle.includes(name);
-  }) || snap.docs[0];
-  return found ? normalizeLocalMetadata(found.data(), found.id) : null;
+  const key = createMetadataKey("titleAuthor", title);
+  console.log("[SLD] Lookup key:", key);
+  try {
+    const direct = await getDoc(doc(db, "bookMetadata", key));
+    if (direct.exists()) {
+      const metadata = normalizeLocalMetadata(direct.data(), key);
+      console.log("[SLD] Found metadata:", metadata);
+      return metadata;
+    }
+  } catch (error) {
+    console.warn("[SLD] Lookup failed:", error);
+  }
+
+  for (const keywordField of ["titleKeywords", "bnameKeywords"]) {
+    try {
+      const snap = await getDocs(query(collection(db, "bookMetadata"), where(keywordField, "array-contains", keywords[0]), limit(10)));
+      const normalizedTitle = String(title || "").toLowerCase();
+      const found = snap.docs.find((item) => {
+        const name = String(item.data().title || item.data().bname || "").toLowerCase();
+        return keywords.some((word) => name.includes(word)) || normalizedTitle.includes(name);
+      }) || snap.docs[0];
+      if (found) {
+        const metadata = normalizeLocalMetadata(found.data(), found.id);
+        console.log("[SLD] Found metadata:", metadata);
+        return metadata;
+      }
+    } catch (error) {
+      console.warn("[SLD] Lookup failed:", error);
+    }
+  }
+  return null;
+}
+
+function applyBookMetadataToForm(info = {}, cleanCode = "") {
+  const bnameEl = document.getElementById("bnameInput");
+  const subjectEl = document.getElementById("subjectInput");
+  const authorEl = document.getElementById("authorInput");
+  const publisherEl = document.getElementById("publisherInput");
+  const isbnEl = document.getElementById("isbnInput");
+  const imageUrlEl = document.getElementById("imageUrlInput");
+  const publisherBarcodeEl = document.getElementById("publisherBarcodeInput");
+  const metadataSourceEl = document.getElementById("metadataSourceInput");
+  const yearEl = document.getElementById("yearInput");
+  const pagesEl = document.getElementById("pagesInput");
+  const volumeEl = document.getElementById("volumeInput");
+
+  if (bnameEl && info.title) bnameEl.value = info.title;
+  if (subjectEl) subjectEl.value = info.subject || info.category || inferSubject(info.title) || "General";
+  $("#category").value = info.category || inferCategory(info.title);
+  if (authorEl && info.authors) authorEl.value = info.authors;
+  if (publisherEl && (info.placePublisher || info.publisher)) publisherEl.value = info.placePublisher || info.publisher;
+  if (isbnEl) isbnEl.value = info.isbn || info.isbn13 || info.isbn10 || cleanCode;
+  if (imageUrlEl && info.imageUrl) imageUrlEl.value = info.imageUrl;
+  if (yearEl && info.year) yearEl.value = info.year;
+  if (pagesEl && info.pages) pagesEl.value = info.pages;
+  if (volumeEl && info.volume) volumeEl.value = info.volume;
+  if (publisherBarcodeEl && cleanCode) publisherBarcodeEl.value = cleanCode;
+  if (metadataSourceEl) metadataSourceEl.value = info.metadataSource || "";
+  setMetadataSourceBadge(info.metadataSource);
+
+  $("#bookFetchPreview").innerHTML = `
+    <article class="book-preview">
+      <img src="${escapeHtml(info.imageUrl || "assets/book-placeholder.svg")}" alt="">
+      <div>
+        <strong>${escapeHtml(info.title || "Untitled book")}</strong>
+        <span>${escapeHtml(info.authors || "Unknown author")}</span>
+        <span>${escapeHtml(info.placePublisher || info.publisher || "Publisher not found")}</span>
+        <span>${escapeHtml(info.source || "Book metadata")}</span>
+      </div>
+    </article>`;
 }
 
 async function lookupBookMetadata(rawCode) {
@@ -917,33 +1095,40 @@ async function lookupBookMetadata(rawCode) {
     throw new Error("Enter or scan ISBN/publisher barcode first.");
   }
 
+  setSldStatus(SLD_STATUS.searching, "searching");
   const attempts = [];
   const lookups = [
     {
-      source: "Local Metadata Database",
-      url: cleanCode ? `bookMetadata/${metadataDocId(cleanCode)} or isbn/publisherBarcode == ${cleanCode}` : `bookMetadata title keywords for ${typedTitle}`,
+      source: "Self Learning DB",
+      url: cleanCode ? `bookMetadata isbn/publisherBarcode keys for ${cleanCode}` : `bookMetadata title keywords for ${typedTitle}`,
       getResult: async () => cleanCode ? findLocalMetadata(cleanCode) : findLocalMetadataByTitle(typedTitle)
     },
     {
-      source: "Local Database",
+      source: "Existing Book",
       url: `Firestore books where publisherBarcode/isbn == ${cleanCode}`,
       getResult: async () => {
+        const cleanIsbn = normalizeIsbn(cleanCode);
+        const cleanBarcode = normalizeBarcode(cleanCode);
         const localMatches = latestBooks.find(({ data }) =>
-          data.publisherBarcode === cleanCode
-          || data.isbn === cleanCode
+          normalizeBarcode(data.publisherBarcode) === cleanBarcode
+          || normalizeIsbn(data.isbn) === cleanIsbn
         );
         return localMatches ? {
-          title: localMatches.data.bname || "",
+          title: localMatches.data.title || localMatches.data.bname || localMatches.data.bookTitle || "",
           authors: localMatches.data.author || "",
-          publisher: localMatches.data.publisher || "",
+          publisher: localMatches.data.placePublisher || localMatches.data.publisher || "",
+          placePublisher: localMatches.data.placePublisher || localMatches.data.publisher || "",
+          year: localMatches.data.year || "",
+          pages: localMatches.data.pages || "",
+          volume: localMatches.data.volume || "",
           subject: localMatches.data.subject || "",
-          category: localMatches.data.category || inferCategory(localMatches.data.bname || ""),
+          category: localMatches.data.category || inferCategory(localMatches.data.title || localMatches.data.bname || ""),
           imageUrl: localMatches.data.imageUrl || "",
           isbn: localMatches.data.isbn || cleanCode,
           isbn13: String(localMatches.data.isbn || cleanCode).length === 13 ? localMatches.data.isbn || cleanCode : "",
           isbn10: String(localMatches.data.isbn || cleanCode).length === 10 ? localMatches.data.isbn || cleanCode : "",
-          source: "Local Database",
-          metadataSource: "local",
+          source: "Existing Book",
+          metadataSource: "local_book",
           raw: localMatches.data
         } : null;
       }
@@ -956,9 +1141,9 @@ async function lookupBookMetadata(rawCode) {
     },
     {
       source: "Google Books General",
-      url: `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(cleanCode)}`,
+      url: `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(cleanCode || typedTitle)}`,
       getCount: (data) => data.items?.length || 0,
-      getResult: (data) => data.items?.[0]?.volumeInfo ? normalizeGoogleBook(data.items[0].volumeInfo, cleanCode) : null
+      getResult: (data) => data.items?.[0]?.volumeInfo ? normalizeGoogleBook(data.items[0].volumeInfo, cleanCode || typedTitle) : null
     },
     {
       source: "Open Library ISBN",
@@ -968,7 +1153,9 @@ async function lookupBookMetadata(rawCode) {
     },
     {
       source: "Open Library Search",
-      url: `https://openlibrary.org/search.json?isbn=${encodeURIComponent(cleanCode)}`,
+      url: cleanCode
+        ? `https://openlibrary.org/search.json?isbn=${encodeURIComponent(cleanCode)}`
+        : `https://openlibrary.org/search.json?title=${encodeURIComponent(typedTitle)}`,
       getCount: (data) => data.docs?.length || 0,
       getResult: (data) => data.docs?.[0] ? normalizeOpenLibrarySearch(data.docs[0], cleanCode) : null
     },
@@ -993,7 +1180,7 @@ async function lookupBookMetadata(rawCode) {
   ];
 
   for (const lookup of lookups) {
-    if (lookup.source === "Local Metadata Database") {
+    if (lookup.source === "Self Learning DB") {
       const localMetadata = await lookup.getResult();
       attempts.push({
         source: lookup.source,
@@ -1006,14 +1193,17 @@ async function lookupBookMetadata(rawCode) {
         cleanCode,
         attempts,
         localMetadataFound: Boolean(localMetadata),
-        selectedSource: localMetadata ? "Local Metadata Database" : ""
+        selectedSource: localMetadata ? "Self Learning DB" : ""
       });
-      if (localMetadata) return localMetadata;
-      if (!cleanCode) return { found: false, indcatFallback: null, attempts };
+      if (localMetadata) {
+        setSldStatus(SLD_STATUS.foundSld, "found");
+        return localMetadata;
+      }
       continue;
     }
 
-    if (lookup.source === "Local Database") {
+    if (lookup.source === "Existing Book") {
+      if (!cleanCode) continue;
       const localResult = await lookup.getResult();
       attempts.push({
         source: lookup.source,
@@ -1026,9 +1216,16 @@ async function lookupBookMetadata(rawCode) {
         cleanCode,
         attempts,
         localMetadataFound: false,
-        selectedSource: localResult ? "Local Firestore" : ""
+        selectedSource: localResult ? "Existing Book" : ""
       });
-      if (localResult) return localResult;
+      if (localResult) {
+        setSldStatus(SLD_STATUS.foundExisting, "found-existing");
+        return localResult;
+      }
+      continue;
+    }
+
+    if (!cleanCode && (lookup.source === "Google Books ISBN" || lookup.source === "Open Library ISBN" || lookup.source === "INDCAT")) {
       continue;
     }
 
@@ -1110,6 +1307,7 @@ async function lookupBookMetadata(rawCode) {
         const result = await lookup.getResult(data);
         if (result && (result.title || result.publisher || result.authors || result.subject)) {
           updateGoogleFetchDebug({ cleanCode, attempts, selectedSource: result.source });
+          setSldStatus(SLD_STATUS.foundOnline, "found-online");
           return result;
         }
       }
@@ -1126,6 +1324,7 @@ async function lookupBookMetadata(rawCode) {
     }
   }
 
+  setSldStatus(SLD_STATUS.notFound, "not-found");
   return { found: false, indcatFallback: indcatFallback(cleanCode), attempts };
 }
 
@@ -1148,42 +1347,17 @@ async function fetchGoogleBook(event) {
         <div class="empty">
           <span>Online metadata not found. Enter details once and this system will remember it.</span>
         </div>`;
+      setMetadataSourceBadge("");
+      setSldStatus(SLD_STATUS.notFound, "not-found");
       showToast("No online metadata found. Please enter details once. Future scans will auto-fill from local database.", "warning");
       return;
     }
 
-    const bnameEl = document.getElementById("bnameInput");
-    const subjectEl = document.getElementById("subjectInput");
-    const authorEl = document.getElementById("authorInput");
-    const publisherEl = document.getElementById("publisherInput");
-    const isbnEl = document.getElementById("isbnInput");
-    const imageUrlEl = document.getElementById("imageUrlInput");
-    const publisherBarcodeEl = document.getElementById("publisherBarcodeInput");
-    const metadataSourceEl = document.getElementById("metadataSourceInput");
-
-    if (bnameEl && info.title) bnameEl.value = info.title;
-    if (subjectEl) subjectEl.value = info.subject || info.category || inferSubject(info.title) || "General";
-    $("#category").value = info.category || inferCategory(info.title);
-    if (authorEl) authorEl.value = info.authors;
-    if (publisherEl) publisherEl.value = info.publisher;
-    if (isbnEl) isbnEl.value = info.isbn || info.isbn13 || info.isbn10 || cleanCode;
-    if (imageUrlEl) imageUrlEl.value = info.imageUrl;
-    if (publisherBarcodeEl) publisherBarcodeEl.value = cleanCode;
-    if (metadataSourceEl) metadataSourceEl.value = info.metadataSource || "";
-    setMetadataSourceBadge(info.metadataSource);
-
-    $("#bookFetchPreview").innerHTML = `
-      <article class="book-preview">
-        <img src="${escapeHtml(info.imageUrl || "assets/book-placeholder.svg")}" alt="">
-        <div>
-          <strong>${escapeHtml(info.title || "Untitled book")}</strong>
-          <span>${escapeHtml(info.authors || "Unknown author")}</span>
-          <span>${escapeHtml(info.publisher || "Publisher not found")}</span>
-          <span>${escapeHtml(info.source || "Online metadata")}</span>
-        </div>
-      </article>`;
-    const successMessage = info.metadataSource === "local"
-      ? "Book details filled from local library database."
+    applyBookMetadataToForm(info, cleanCode);
+    const successMessage = info.metadataSource === "sld"
+      ? "Book details loaded from Self Learning DB."
+      : info.metadataSource === "local_book"
+        ? "Book details filled from an existing book record."
       : `Book details fetched from ${info.source}.`;
     showToast(successMessage, "success");
   } catch (error) {
@@ -1196,6 +1370,27 @@ async function fetchGoogleBook(event) {
       error: error.message
     });
     showToast("Online metadata lookup failed. Please fill manually once. Future scans will use local database.", "warning");
+    setSldStatus(SLD_STATUS.notFound, "not-found");
+  }
+}
+
+async function checkSavedMetadataForCurrentCode() {
+  const barcodeInput = document.getElementById("publisherBarcodeInput");
+  const cleanCode = cleanGoogleBookCode(barcodeInput?.value);
+  if (!cleanCode) return;
+  setSldStatus(SLD_STATUS.searching, "searching");
+  try {
+    const info = await findLocalMetadata(cleanCode);
+    if (!info) {
+      setSldStatus(SLD_STATUS.notFound, "not-found");
+      return;
+    }
+    applyBookMetadataToForm(info, cleanCode);
+    setSldStatus(SLD_STATUS.foundSld, "found");
+    showToast("Book details loaded from Self Learning DB.", "success");
+  } catch (error) {
+    console.warn("[SLD] Lookup failed:", error);
+    setSldStatus(SLD_STATUS.notFound, "not-found");
   }
 }
 
@@ -1226,6 +1421,7 @@ async function startPublisherScanner() {
     $("#publisherBarcodeInput").value = codes[0].rawValue;
     await stopPublisherScanner();
     showToast("Publisher barcode scanned.", "success");
+    await fetchGoogleBook();
   }, 750);
 }
 
@@ -1361,6 +1557,7 @@ async function saveBook(event) {
     $("#bookFetchPreview").innerHTML = `<div class="empty">Fetch details or fill the book manually.</div>`;
     $("#metadataSourceInput").value = "";
     setMetadataSourceBadge("");
+    setSldStatus(SLD_STATUS.notFound, "not-found");
     latestBarcodeDataUrl = "";
     const counterSnap = await getDoc(doc(db, "counters", "books"));
     setNextBookId(counterSnap.exists() ? counterSnap.data().lastId : 0);
@@ -1885,6 +2082,16 @@ onDomReady(() => {
   }
 
   fetchBtn.addEventListener("click", fetchGoogleBook);
+  barcodeInput.addEventListener("change", () => {
+    checkSavedMetadataForCurrentCode().catch((error) => {
+      console.warn("[SLD] Lookup failed:", error);
+    });
+  });
+  barcodeInput.addEventListener("blur", () => {
+    checkSavedMetadataForCurrentCode().catch((error) => {
+      console.warn("[SLD] Lookup failed:", error);
+    });
+  });
   console.log("Metadata fetch click handler attached:", true);
 });
 $("#scanPublisherBtn").addEventListener("click", () => startPublisherScanner().catch((error) => {
@@ -1894,7 +2101,7 @@ $("#scanPublisherBtn").addEventListener("click", () => startPublisherScanner().c
 $("#saveMetadataBtn").addEventListener("click", async () => {
   try {
     await saveBookMetadataForFuture("manual");
-    showToast("Metadata saved for future scans.", "success");
+    showToast("Saved to Self Learning DB.", "success");
   } catch (error) {
     console.error("Save metadata failed:", error);
     showToast(error.message || "Could not save metadata.", "error");
@@ -2899,4 +3106,3 @@ $("#sendTestEmailBtn").addEventListener("click", async (event) => {
     button.disabled = false;
   }
 });
-

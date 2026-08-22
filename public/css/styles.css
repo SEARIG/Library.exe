@@ -109,6 +109,15 @@ a {
   letter-spacing: 0;
 }
 
+.auth-brand-logo {
+  width: 116px;
+  height: 116px;
+  object-fit: contain;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.18);
+}
+
 .auth-brand p,
 .page-title p {
   margin: 0;

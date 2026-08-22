@@ -3,16 +3,16 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>Mohanlal Sukhadia University LMS</title>
-    <link rel="icon" type="image/png" href="/assets/mlsu-logo.png?v=5">
-    <link rel="apple-touch-icon" href="/assets/mlsu-logo-192.png">
-    <link rel="stylesheet" href="css/style.css?v=10">
-    <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#0F766E">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-title" content="MLSU LMS">
+    <meta name="apple-mobile-web-app-title" content="MSU LMS">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <title>Mohanlal Sukhadia University LMS</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/png" href="/assets/mlsu-logo.png?v=4">
+    <link rel="apple-touch-icon" href="/assets/mlsu-logo-192.png">
+    <link rel="stylesheet" href="css/style.css?v=6">
   </head>
   <body class="home-page">
     <header class="home-navbar">
@@ -27,6 +27,7 @@
         <span></span><span></span><span></span>
       </button>
       <nav class="home-nav-links" id="homeNavLinks" aria-label="Primary navigation">
+        <a href="#get-app">Get App</a>
         <a href="library.html">Browse Library</a>
         <a href="login.html">Login</a>
         <a class="home-nav-cta" href="signup.html">Create Account</a>
@@ -62,6 +63,57 @@
           <a class="btn btn-muted" href="signup.html">Create Account</a>
           <button class="btn btn-muted" id="installAppBtn" type="button" onclick="installPWA()" style="display:none;">Install App</button>
         </aside>
+      </section>
+
+      <section class="home-get-app" id="get-app" aria-labelledby="getAppTitle">
+        <div class="get-app-intro">
+          <div class="get-app-icon" aria-hidden="true">
+            <img src="./assets/mlsu-logo.png?v=2" alt="">
+          </div>
+          <div>
+            <span class="section-kicker">Student Android App</span>
+            <h2 id="getAppTitle">Get the Student App</h2>
+            <p>Download the MLSU LMS Android app for students to browse books, request issue, request return, scan accession numbers, and check penalties.</p>
+          </div>
+        </div>
+        <div class="get-app-actions-card" aria-label="MLSU LMS Android app download">
+          <div class="get-app-buttons">
+            <a href="download.html" class="btn btn-primary">
+              Get Android App
+            </a>
+            <a href="/library.html" class="btn btn-muted">Open Web App</a>
+          </div>
+          <p class="install-note">Android only. Use the app page for the current APK availability and installation steps.</p>
+          <ol class="install-steps">
+            <li>Open the app download page</li>
+            <li>Open the downloaded APK</li>
+            <li>Allow installation from browser if asked</li>
+            <li>Tap Install</li>
+            <li>Open MLSU LMS</li>
+          </ol>
+          <dl class="app-details">
+            <div>
+              <dt>App Name</dt>
+              <dd>MLSU LMS</dd>
+            </div>
+            <div>
+              <dt>For</dt>
+              <dd>Students</dd>
+            </div>
+            <div>
+              <dt>Platform</dt>
+              <dd>Android</dd>
+            </div>
+            <div>
+              <dt>Login</dt>
+              <dd>Roll No. + Enrollment Number</dd>
+            </div>
+            <div>
+              <dt>Backend</dt>
+              <dd>Same MLSU LMS database</dd>
+            </div>
+          </dl>
+        </div>
       </section>
 
       <section class="home-features" aria-labelledby="homeFeaturesTitle">
@@ -117,6 +169,7 @@
         <a href="library.html">Browse Library</a>
         <a href="login.html">Login</a>
         <a href="signup.html">Create Account</a>
+        <a href="download.html">Get Android App</a>
       </section>
       <section>
         <h3>Developed By</h3>
@@ -130,7 +183,7 @@
       </div>
     </footer>
 
-    <script src="/js/pwa.js?v=10"></script>
+    <script src="./js/pwa.js?v=7" defer></script>
     <script type="module" src="./js/home.js"></script>
     <script type="module" src="./js/push-notifications.js"></script>
   </body>

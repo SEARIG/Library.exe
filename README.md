@@ -58,6 +58,8 @@ http://127.0.0.1:4173/
 
 ## Deployment Notes
 
+Place the signed release APK at `public/downloads/MLSU-LMS.apk` before deployment.
+
 Install/update function dependencies before deployment:
 
 ```bash

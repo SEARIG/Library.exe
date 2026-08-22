@@ -1,5 +1,4 @@
-const CACHE_NAME = "mlsu-lms-pwa-v2";
-
+const CACHE_NAME = "msu-lms-pwa-v1";
 const STATIC_ASSETS = [
   "/",
   "/index.html",
@@ -23,7 +22,15 @@ const STATIC_ASSETS = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS).catch(console.warn))
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.allSettled(
+        STATIC_ASSETS.map((asset) =>
+          cache.add(asset).catch((error) => {
+            console.warn(`Unable to precache ${asset}`, error);
+          })
+        )
+      )
+    )
   );
   self.skipWaiting();
 });
@@ -37,60 +44,79 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-function shouldBypassCache(request) {
-  const url = new URL(request.url);
-  const hostname = url.hostname.toLowerCase();
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
 
+function shouldBypassCache(request) {
+  if (request.method !== "GET") return true;
+
+  const url = new URL(request.url);
+
+  // Keep all third-party SDKs and APIs on the network. This includes Firebase
+  // Auth/Firestore, Google APIs, EmailJS, Open Library, and book-cover services.
+  if (url.origin !== self.location.origin) return true;
+
+  // Same-origin API responses and Firebase Hosting auth helpers are dynamic.
   return (
-    request.method !== "GET"
-    || url.origin !== self.location.origin
-    || url.pathname.startsWith("/api/")
-    || url.pathname.startsWith("/__/auth/")
-    || url.pathname.startsWith("/__/firebase/")
-    || hostname.includes("firebase")
-    || hostname.includes("firestore")
-    || hostname.includes("googleapis")
-    || hostname.includes("identitytoolkit")
-    || hostname.includes("securetoken")
-    || hostname.includes("emailjs")
-    || hostname.includes("openlibrary")
-    || hostname.includes("books.google")
-    || hostname.includes("gstatic")
+    url.pathname.startsWith("/api/")
+    || url.pathname.startsWith("/__/")
+    || url.pathname.startsWith("/downloads/")
+    || url.pathname.endsWith(".apk")
+    || url.pathname.includes("/firestore/")
+    || url.pathname.includes("/identitytoolkit/")
+    || url.pathname.includes("/securetoken/")
   );
+}
+
+function isStaticRequest(request) {
+  return ["script", "style", "image", "font", "manifest"].includes(request.destination);
 }
 
 self.addEventListener("fetch", (event) => {
   const request = event.request;
+
   if (shouldBypassCache(request)) return;
 
-  const accept = request.headers.get("accept") || "";
-  const isHtml = request.mode === "navigate"
-    || request.destination === "document"
-    || accept.includes("text/html");
-
-  if (isHtml) {
+  if (request.mode === "navigate" || request.destination === "document") {
     event.respondWith(
       fetch(request)
         .then((response) => {
           if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
           }
           return response;
         })
-        .catch(() => caches.match(request).then((cached) => cached || caches.match("/index.html")))
+        .catch(() =>
+          caches.match(request).then((cached) => cached || caches.match("/index.html"))
+        )
     );
     return;
   }
 
+  if (!isStaticRequest(request)) return;
+
   event.respondWith(
-    caches.match(request).then((cached) => cached || fetch(request).then((response) => {
-      if (response.ok) {
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-      }
-      return response;
-    }))
+    caches.match(request).then((cached) => {
+      if (cached) return cached;
+
+      return fetch(request)
+        .then((response) => {
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          }
+          return response;
+        })
+        .catch(() =>
+          request.destination === "image"
+            ? caches.match("/assets/book-placeholder.svg")
+            : Response.error()
+        );
+    })
   );
 });
 

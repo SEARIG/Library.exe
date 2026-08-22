@@ -1,14 +1,17 @@
 {
   "name": "Mohanlal Sukhadia University LMS",
-  "short_name": "MLSU LMS",
+  "short_name": "MSU LMS",
   "description": "Smart barcode-based library management system for Mohanlal Sukhadia University.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#ffffff",
   "theme_color": "#0F766E",
-  "orientation": "portrait",
-  "categories": ["education", "productivity"],
+  "categories": [
+    "education",
+    "productivity"
+  ],
   "icons": [
     {
       "src": "/assets/mlsu-logo-192.png",
