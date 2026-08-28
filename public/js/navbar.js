@@ -24,14 +24,14 @@ const roleLinks = {
     ["Issue History", "librarian-dashboard.html#issueHistoryModal"],
     ["Return History", "librarian-dashboard.html#returnHistoryModal"],
     ["No Dues", "no-dues.html"],
-    ["Reports", "librarian-dashboard.html#librarianReportsModal"]
+    ["Reports", "reports.html"]
   ],
   admin: [
     ["Dashboard", "admin-dashboard.html"],
     ["Library", "library.html"],
     ["Users", "admin-dashboard.html#userManagementModal"],
     ["Import Students", "admin-dashboard.html#studentImportModal"],
-    ["Reports", "admin-dashboard.html#reportsModal"],
+    ["Reports", "reports.html"],
     ["No Dues", "no-dues.html"],
     ["Settings", "admin-dashboard.html#settingsModal"]
   ]

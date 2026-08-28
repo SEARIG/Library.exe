@@ -3057,28 +3057,6 @@ onSnapshot(
 );
 
 onSnapshot(
-  query(collection(db, "students"), orderBy("createdAt", "desc"), limit(20)),
-  (snap) => {
-    const target = $("#recentStudents");
-    if (snap.empty) {
-      renderEmpty(target, "No students found.");
-      return;
-    }
-    target.innerHTML = snap.docs.map((item) => {
-      const student = item.data();
-      return `
-        <article class="list-row">
-          <div>
-            <strong>${escapeHtml(student.name)}</strong>
-            <span>${escapeHtml(student.rollNumber || "")} | ${escapeHtml(student.department || "")} | ${escapeHtml(student.year || "")}</span>
-          </div>
-          ${statusBadge(student.active ? "active" : "inactive")}
-        </article>`;
-    }).join("");
-  }
-);
-
-onSnapshot(
   query(collection(db, "books"), orderBy("updatedAt", "desc"), limit(500)),
   (snap) => {
     latestBooks = snap.docs.map((item) => ({ id: item.id, data: item.data() }));

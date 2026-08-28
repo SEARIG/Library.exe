@@ -17,11 +17,7 @@ import {
   serverTimestamp,
   setDoc
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
-import {
-  calculatePenalty,
-  getStudentPenaltyLiability,
-  isUnpaidPenaltyRecord
-} from "./penalty-utils.mjs?v=2";
+import { buildNoDuesRows } from "./no-dues-utils.mjs";
 
 const session = await requireAuth(["admin", "librarian"]);
 
@@ -48,10 +44,6 @@ if (initialParams.get("filter") && controls.due) {
   controls.due.value = initialParams.get("filter");
 }
 
-function studentUidOf(record = {}, fallback = "") {
-  return record.uid || record.studentUid || record.firebaseAuthUid || record.id || fallback;
-}
-
 function initialsFor(name = "") {
   return String(name || "Student")
     .trim()
@@ -59,14 +51,6 @@ function initialsFor(name = "") {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() || "")
     .join("") || "ST";
-}
-
-function titleOfIssue(issue = {}) {
-  return issue.bookTitle || issue.title || issue.bookName || issue.bookId || issue.b_id || "Issued book";
-}
-
-function accessionOf(record = {}) {
-  return record.accessionNumber || record.blegal_num || record.blegalNumber || record.BLegalNumber || record.b_id || record.bookId || "-";
 }
 
 function penaltyAmountOf(penalty = {}) {
@@ -77,119 +61,15 @@ function penaltyIssueIdOf(penalty = {}, fallback = "") {
   return penalty.issueId || penalty.currentIssueId || penalty.bookIssueId || penalty.penaltyId || penalty.id || fallback;
 }
 
-function rowStudents() {
-  const usersByUid = new Map(latestUsers.map((item) => [item.id, item.data]));
-  const studentMap = new Map();
-
-  latestStudents.forEach((item) => {
-    const uid = studentUidOf(item.data, item.id);
-    if (uid) studentMap.set(uid, { id: item.id, ...item.data, uid });
-  });
-
-  latestUsers
-    .filter((item) => item.data.role === "student")
-    .forEach((item) => {
-      const existing = studentMap.get(item.id) || {};
-      studentMap.set(item.id, { ...item.data, ...existing, uid: item.id });
-    });
-
-  return { usersByUid, students: Array.from(studentMap.values()) };
-}
-
 function noDuesRows() {
-  const { usersByUid, students } = rowStudents();
-  const issues = latestIssues.map((item) => ({ id: item.id, ...item.data }));
-  const penalties = latestPenalties.map((item) => ({ id: item.id, ...item.data }));
-
-  return students.map((student) => {
-    const uid = student.uid || student.id;
-    const user = usersByUid.get(uid) || {};
-    const studentRecord = { ...user, ...student, uid };
-    const liability = getStudentPenaltyLiability({
-      student: studentRecord,
-      issues,
-      penalties,
-      now: new Date()
-    });
-    const activeIssues = liability.activeIssues;
-    const overdueItems = liability.overdueIssues;
-    const penaltyItems = liability.unpaidItems;
-    const unresolvedCopyLiabilities = latestBooks.filter((item) => {
-      const book = item.data;
-      const status = String(book.status || "").toLowerCase();
-      const holderUid = book.issuedStudentUid || book.issuedTo || book.studentUid || "";
-      return ["lost", "damaged"].includes(status) && holderUid === uid;
-    });
-    const lostCount = unresolvedCopyLiabilities.filter((item) => String(item.data.status || "").toLowerCase() === "lost").length;
-    const damagedCount = unresolvedCopyLiabilities.filter((item) => String(item.data.status || "").toLowerCase() === "damaged").length;
-    const penaltyAmount = liability.totalUnpaid;
-    const dueTypes = new Set();
-    if (activeIssues.length) dueTypes.add("activeBook");
-    if (overdueItems.length) dueTypes.add("overdue");
-    if (penaltyAmount > 0) dueTypes.add("penalty");
-    if (lostCount) dueTypes.add("lost");
-    if (damagedCount) dueTypes.add("damaged");
-
-    const activeIssueDetails = activeIssues.map((item) => ({
-      issueId: item.id,
-      bookTitle: titleOfIssue(item.data),
-      accessionNumber: accessionOf(item.data),
-      issueDate: item.data.issueDate || item.data.issuedAt || null,
-      dueDate: item.data.dueDate || calculatePenalty(item.data, new Date()).dueDate || null,
-      status: item.data.status || "issued"
-    }));
-    const overdueBooks = overdueItems.map((item) => ({
-      issueId: item.id,
-      bookTitle: titleOfIssue(item.data),
-      accessionNumber: accessionOf(item.data),
-      dueDate: item.data.dueDate || item.calculation.dueDate || null,
-      overdueDays: item.calculation.overdueDays,
-      ratePerDay: item.calculation.ratePerDay,
-      currentPenalty: item.calculation.calculatedAmount,
-      paymentStatus: item.calculation.paymentStatus || "unpaid"
-    }));
-    const paidHistory = penalties
-      .filter((penalty) => penalty.studentUid === uid || (studentRecord.email && penalty.studentEmail === studentRecord.email))
-      .filter((penalty) => !isUnpaidPenaltyRecord(penalty))
-      .sort((left, right) => {
-        const leftDate = left.clearedAt?.toDate?.() || left.paidAt?.toDate?.() || new Date(left.clearedAt || left.paidAt || 0);
-        const rightDate = right.clearedAt?.toDate?.() || right.paidAt?.toDate?.() || new Date(right.clearedAt || right.paidAt || 0);
-        return rightDate - leftDate;
-      });
-    const blockers = [
-      ...activeIssueDetails.map((book) => `Active book: ${book.bookTitle} (${book.accessionNumber})`),
-      ...overdueBooks.map((book) => `NO DUES BLOCKED - Book: ${book.bookTitle}; Accession: ${book.accessionNumber}; Due: ${formatDate(book.dueDate)}; Overdue: ${book.overdueDays} days; Outstanding Penalty: ₹${book.currentPenalty.toFixed(0)}`),
-      ...penaltyItems.map((item) => `Unpaid penalty: ₹${Number(item.amount || 0).toFixed(2)} for ${item.bookTitle || item.bookId || "library item"}`),
-      ...unresolvedCopyLiabilities.map((item) => `Unresolved ${String(item.data.status || "copy").toLowerCase()} liability: ${item.data.title || item.data.bname || item.data.bookTitle || item.id}`)
-    ];
-    const blocked = blockers.length > 0;
-
-    return {
-      uid,
-      name: studentRecord.name || "Unknown Student",
-      email: studentRecord.email || "",
-      phone: studentRecord.phone || "",
-      rollNumber: studentRecord.rollNumber || studentRecord.rollNo || studentRecord.roll || "-",
-      enrollmentNumber: studentRecord.enrollmentNumber || studentRecord.enrollmentNo || "",
-      department: studentRecord.department || studentRecord.branch || studentRecord.course || "",
-      year: studentRecord.year || studentRecord.semester || "",
-      activeBooks: activeIssueDetails.length,
-      overdueCount: overdueBooks.length,
-      lostCount,
-      damagedCount,
-      activeIssueDetails,
-      overdueBooks,
-      penaltyItems,
-      paidHistory,
-      penaltyAmount,
-      dueTypes,
-      blockers,
-      status: blocked ? "blocked" : "eligible",
-      liability
-    };
-  }).sort((left, right) => {
-    if (left.status !== right.status) return left.status === "blocked" ? -1 : 1;
-    return right.penaltyAmount - left.penaltyAmount || right.overdueCount - left.overdueCount || right.activeBooks - left.activeBooks || left.name.localeCompare(right.name);
+  return buildNoDuesRows({
+    users: latestUsers,
+    students: latestStudents,
+    issues: latestIssues,
+    penalties: latestPenalties,
+    books: latestBooks,
+    now: new Date(),
+    formatDate
   });
 }
 
