@@ -127,6 +127,61 @@ function logLibraryDiagnostics() {
   console.log("Metadata fetch button found:", Boolean(document.getElementById("fetchGoogleBookBtn")));
 }
 
+function eventTime(value) {
+  if (!value) return 0;
+  const date = value.toDate ? value.toDate() : new Date(value);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function renderRecentActivity() {
+  const target = $("#recentBooks");
+  if (!target) return;
+  const events = [
+    ...latestBooks.slice(0, 20).map((item) => ({
+      type: "book added",
+      title: bookTitle(item.data),
+      meta: `Accession No.: ${accessionNumberOf(item.data) || item.data.b_id || item.id}`,
+      status: item.data.status || "book",
+      time: eventTime(item.data.updatedAt || item.data.createdAt)
+    })),
+    ...latestPendingRequests.map((item) => ({
+      type: "issue request",
+      title: item.data.bookTitle || item.data.title || item.data.bookId || "Issue request",
+      meta: `${item.data.studentName || "Student"} | ${formatDate(item.data.createdAt || item.data.requestedAt)}`,
+      status: item.data.status || "pending",
+      time: eventTime(item.data.createdAt || item.data.requestedAt)
+    })),
+    ...latestReturnRequests.map((item) => ({
+      type: "return request",
+      title: item.data.bookTitle || item.data.title || item.data.bookId || "Return request",
+      meta: `${item.data.studentName || "Student"} | ${formatDate(item.data.createdAt || item.data.requestedAt)}`,
+      status: item.data.status || "pending",
+      time: eventTime(item.data.createdAt || item.data.requestedAt)
+    })),
+    ...latestActiveIssues.slice(0, 20).map((item) => ({
+      type: "book issued",
+      title: item.data.bookTitle || item.data.title || item.data.bookId || "Issued book",
+      meta: `Accession No.: ${item.data.accessionNumber || item.data.bookId || "-"} | Due ${formatDate(item.data.dueDate)}`,
+      status: item.data.status || "issued",
+      time: eventTime(item.data.issueDate || item.data.issuedAt || item.data.createdAt)
+    }))
+  ].sort((left, right) => right.time - left.time).slice(0, 10);
+
+  if (!events.length) {
+    renderEmpty(target, "No recent activity yet.");
+    return;
+  }
+
+  target.innerHTML = events.map((event) => `
+    <article class="list-row compact-activity-row">
+      <div>
+        <strong>${escapeHtml(event.title)}</strong>
+        <span>${escapeHtml(event.type)} | ${escapeHtml(event.meta)}</span>
+      </div>
+      ${statusBadge(event.status)}
+    </article>`).join("");
+}
+
 function timeOf(value) {
   if (!value) return 0;
   const date = value.toDate ? value.toDate() : new Date(value);
@@ -2698,6 +2753,7 @@ onSnapshot(
     if (pendingMetric) pendingMetric.textContent = String(snap.size);
     if (newRequestMetric) newRequestMetric.textContent = String(snap.size);
     renderPendingRequests();
+    renderRecentActivity();
   }
 );
 
@@ -2722,6 +2778,7 @@ onSnapshot(
   (snap) => {
     latestReturnRequests = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
     renderReturnRequests();
+    renderRecentActivity();
   },
   (error) => {
     console.error("Pending return requests query failed:", {
@@ -2956,25 +3013,24 @@ onSnapshot(
       renderEmpty(target, "No active issues.");
       return;
     }
-    const cards = await Promise.all(snap.docs.sort((a, b) => timeOf(a.data().dueDate) - timeOf(b.data().dueDate)).map(async (item) => {
+    const sortedIssues = snap.docs.sort((a, b) => timeOf(a.data().dueDate) - timeOf(b.data().dueDate));
+    const cards = await Promise.all(sortedIssues.slice(0, 8).map(async (item) => {
       const issue = item.data();
       const student = await resolveIssueStudent(issue);
+      const accessionNumber = issue.accessionNumber || issue.bookId || issue.b_id || "";
       return `
-        <article class="list-row">
+        <article class="list-row active-issue-row">
           <div>
-            <strong>Book: ${escapeHtml(issue.bookTitle || issue.bookId || issue.b_id || "Issued book")}</strong>
-            <span>Issued To: ${escapeHtml(student.name)}</span>
-            <span>Student Email: ${escapeHtml(issue.studentEmail || student.email || "")}</span>
-            <span>UID: ${escapeHtml(shortUid(issue.studentUid))}</span>
-            <span>B_ID: ${escapeHtml(issue.b_id || issue.bookId || "")}</span>
-            <span>Barcode: ${escapeHtml(issue.bookBarcodeValue || "")}</span>
-            <span>Issue Date: ${formatDate(issue.issueDate)}</span>
-            <span>Due Date: ${formatDate(issue.dueDate)}</span>
+            <strong>${escapeHtml(issue.bookTitle || issue.title || issue.bookId || issue.b_id || "Issued book")}</strong>
+            <span>Accession No.: ${escapeHtml(accessionNumber || "-")}</span>
+            <span>Student: ${escapeHtml(student.name)} ${issue.studentUid ? `(${escapeHtml(shortUid(issue.studentUid))})` : ""}</span>
+            <span>Issue: ${formatDate(issue.issueDate)} | Due: ${formatDate(issue.dueDate)}</span>
           </div>
           ${statusBadge(issue.status)}
         </article>`;
     }));
-    target.innerHTML = cards.join("");
+    target.innerHTML = `${cards.join("")}${sortedIssues.length > 8 ? `<a class="btn btn-muted dashboard-view-all" href="no-dues.html?filter=activeBook">View All Active Issues</a>` : ""}`;
+    renderRecentActivity();
   }
 );
 
@@ -3046,22 +3102,7 @@ onSnapshot(
     renderBooksTable();
     renderBarcodePrintManager();
     renderPendingRequests();
-    const target = $("#recentBooks");
-    if (snap.empty) {
-      renderEmpty(target, "No books found.");
-      return;
-    }
-    target.innerHTML = latestBooks.slice(0, 8).map((item) => {
-      const book = item.data;
-      return `
-        <article class="list-row">
-          <div>
-            <strong>${escapeHtml(bookTitle(book))}</strong>
-            <span>${escapeHtml(book.b_id || item.id)} | ${escapeHtml(book.category || "")}</span>
-          </div>
-          ${statusBadge(book.status)}
-        </article>`;
-    }).join("");
+    renderRecentActivity();
   }
 );
 

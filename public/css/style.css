@@ -500,13 +500,13 @@ canvas {
 
 .librarian-add-book { grid-column: 1; grid-row: span 2; }
 .librarian-books { grid-column: 2; }
-.librarian-pending { grid-column: 1; }
-.librarian-notifications { grid-column: 2; }
-.librarian-return { grid-column: 2; }
-.librarian-active { grid-column: 1; }
+.librarian-pending { grid-column: span 6; }
+.librarian-notifications { grid-column: 1 / -1; }
+.librarian-return { grid-column: span 6; }
+.librarian-active { grid-column: span 6; }
 .librarian-returns { grid-column: 2; }
 .librarian-students { grid-column: 1; }
-.librarian-recent-books { grid-column: 2; }
+.librarian-recent-books { grid-column: 1 / -1; }
 .librarian-barcode-manager { grid-column: 1 / -1; }
 
 .page-shell {
@@ -2132,10 +2132,6 @@ td strong {
   align-content: start;
 }
 
-.no-dues-modal {
-  width: min(1280px, calc(100% - 24px));
-}
-
 .no-dues-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2301,6 +2297,55 @@ td strong {
 .no-dues-side-card h3 {
   margin: 0 0 14px;
   color: var(--primary-dark);
+}
+
+.no-dues-page .no-dues-main {
+  display: grid;
+  gap: 22px;
+}
+
+.no-dues-title {
+  margin-bottom: 0;
+}
+
+.no-dues-review-panel {
+  display: grid;
+  gap: 18px;
+  border-top: 4px solid var(--gold);
+}
+
+.no-dues-review-panel[hidden] {
+  display: none;
+}
+
+.blocked-note {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid rgba(180, 35, 24, 0.18);
+  border-left: 4px solid var(--danger);
+  border-radius: 14px;
+  background: rgba(180, 35, 24, 0.06);
+  color: var(--danger);
+}
+
+.blocked-note span {
+  color: #7f1d1d;
+}
+
+.active-issue-row,
+.compact-activity-row {
+  padding: 12px 14px;
+}
+
+.active-issue-row strong,
+.compact-activity-row strong {
+  font-size: 0.98rem;
+}
+
+.dashboard-view-all {
+  width: 100%;
+  margin-top: 10px;
 }
 
 .summary-list,

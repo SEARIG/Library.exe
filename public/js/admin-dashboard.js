@@ -31,6 +31,7 @@ import {
 import {
   calculatePenalty,
   getStudentPenaltyLiability,
+  isUnpaidPenaltyRecord,
   logPenaltyDebugForStudent
 } from "./penalty-utils.mjs?v=2";
 
@@ -407,7 +408,7 @@ function renderNoDuesReview(row) {
         ${statusBadge("unpaid")}
       </article>`).join("") : `<div class="empty">No overdue penalty on active books.</div>`}
     ${row.blockers.length ? `<h3>Blockers</h3><ul class="rules-list">${row.blockers.map((blocker) => `<li>${escapeHtml(blocker)}</li>`).join("")}</ul>` : ""}`;
-  openModal("noDuesReviewModal");
+  window.location.href = `no-dues.html?student=${encodeURIComponent(row.uid)}`;
 }
 
 function exportNoDuesReport() {
@@ -565,6 +566,9 @@ onSnapshot(collection(db, "students"), (snap) => {
 });
 onSnapshot(collection(db, "penalties"), (snap) => {
   latestNoDuesPenalties = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
+  if (metrics.penalties) {
+    metrics.penalties.textContent = String(snap.docs.filter((item) => isUnpaidPenaltyRecord(item.data())).length);
+  }
   renderNoDues();
 });
 

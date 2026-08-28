@@ -23,9 +23,11 @@ import {
   $,
   escapeHtml,
   formatDate,
+  getUserProfile,
   renderEmpty,
   showToast
 } from "./app.js";
+import { renderNavbar } from "./navbar.js";
 
 const pageSize = 25;
 let allBooks = [];
@@ -67,7 +69,14 @@ function filteredBooks() {
       const status = String(data.status || "available").toLowerCase();
       const haystack = [
         bookTitle(data),
-        data.author
+        data.author,
+        accessionNumberOf(data),
+        data.isbn,
+        data.publisherBarcode,
+        data.barcodeValue,
+        data.bookBarcodeValue,
+        data.category,
+        data.subject
       ].join(" ").toLowerCase();
 
       if (search && !haystack.includes(search)) return false;
@@ -262,6 +271,18 @@ issueForm.addEventListener("submit", async (event) => {
 
 onAuthStateChanged(auth, (user) => {
   currentUser = user;
+  if (user) {
+    getUserProfile(user.uid)
+      .then((profile) => {
+        if (!["admin", "librarian"].includes(profile?.role)) return;
+        const header = document.querySelector(".library-nav");
+        if (header) header.className = "app-header";
+        document.body.classList.add("protected-page", "auth-ready", "staff-catalog-page");
+        document.querySelector(".library-page")?.classList.add("app-main");
+        renderNavbar(profile.role, { ...profile, email: user.email });
+      })
+      .catch((error) => console.warn("Could not render staff library navigation:", error));
+  }
 });
 
 onSnapshot(

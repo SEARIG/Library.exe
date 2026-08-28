@@ -49,12 +49,14 @@
           <h2>Librarian Actions</h2>
           <div class="dashboard-action-grid">
             <button class="btn btn-primary" data-open-modal="addBookModal" type="button">Add Book</button>
+            <a class="btn btn-muted" href="library.html">Library</a>
             <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Book Database</button>
             <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Import Books</button>
             <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Export Books</button>
             <button class="btn btn-muted" data-open-modal="barcodeManagerModal" type="button">Barcode Manager</button>
             <button class="btn btn-muted" data-open-modal="timeSlotModal" type="button">Set Issue / Return Time</button>
             <button class="btn btn-muted" data-open-modal="returnHistoryModal" type="button">Return History</button>
+            <a class="btn btn-muted" href="no-dues.html">No Dues</a>
             <button class="btn btn-muted" data-open-modal="librarianReportsModal" type="button">Reports</button>
           </div>
           <div id="activeScheduleCard" class="success-box">Loading issue/return timing...</div>
@@ -88,7 +90,7 @@
           <div id="activeIssues" class="list-stack"></div>
         </article>
 
-        <article class="panel span-6 librarian-recent-books">
+        <article class="panel span-12 librarian-recent-books">
           <h2>Recent Activity</h2>
           <div id="recentBooks" class="list-stack"></div>
         </article>

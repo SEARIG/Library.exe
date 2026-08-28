@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0F766E">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="MSU LMS">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <title>No Dues / Clearance | Mohanlal Sukhadia University LMS</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/png" href="/assets/mlsu-logo.png?v=4">
+    <link rel="apple-touch-icon" href="/assets/mlsu-logo-192.png">
+    <link rel="stylesheet" href="css/style.css?v=6">
+  </head>
+  <body class="protected-page no-dues-page">
+    <header class="app-header">
+      <div class="header-inner">
+        <a class="brand" href="index.html">
+          <img src="./assets/mlsu-logo.png?v=2" alt="Mohanlal Sukhadia University LMS Logo" class="nav-logo">
+          <span>Mohanlal Sukhadia University LMS</span>
+        </a>
+        <div class="nav-skeleton"><span></span><span></span><span></span></div>
+      </div>
+    </header>
+
+    <main class="app-main no-dues-main">
+      <section class="page-title no-dues-title">
+        <span class="eyebrow">Clearance workspace</span>
+        <h1>No Dues / Clearance</h1>
+        <p>Review student library liabilities and clearance eligibility.</p>
+      </section>
+
+      <section class="no-dues-metrics" aria-label="No dues summary">
+        <article class="no-dues-stat stat-clear">
+          <span class="stat-icon">✓</span>
+          <div>
+            <strong id="noDuesClearStudents">0</strong>
+            <span>Eligible Students</span>
+            <small>No active books or unpaid dues</small>
+          </div>
+        </article>
+        <article class="no-dues-stat stat-danger">
+          <span class="stat-icon">₹</span>
+          <div>
+            <strong id="noDuesBlockedStudents">0</strong>
+            <span>Students with Dues</span>
+            <small>Students currently blocked</small>
+          </div>
+        </article>
+        <article class="no-dues-stat stat-warning">
+          <span class="stat-icon">⏱</span>
+          <div>
+            <strong id="noDuesActiveIssues">0</strong>
+            <span>Active Issued Books</span>
+            <small>Books still not returned</small>
+          </div>
+        </article>
+        <article class="no-dues-stat stat-info">
+          <span class="stat-icon">₹</span>
+          <div>
+            <strong id="noDuesPendingAmount">₹ 0</strong>
+            <span>Pending Amount</span>
+            <small>Live + persisted unpaid liability</small>
+          </div>
+        </article>
+      </section>
+
+      <section class="no-dues-filters" aria-label="No dues filters">
+        <label>Search
+          <input id="noDuesSearch" placeholder="Search by student name, roll no., enrollment no., email, phone...">
+        </label>
+        <label>Clearance Status
+          <select id="noDuesStatusFilter">
+            <option value="">All</option>
+            <option value="eligible">Eligible</option>
+            <option value="blocked">Blocked</option>
+          </select>
+        </label>
+        <label>Due Type
+          <select id="noDuesDueFilter">
+            <option value="">All</option>
+            <option value="activeBook">Active Book</option>
+            <option value="overdue">Overdue</option>
+            <option value="penalty">Penalty</option>
+            <option value="lost">Lost</option>
+            <option value="damaged">Damaged</option>
+          </select>
+        </label>
+        <button class="btn btn-primary" id="exportNoDuesBtn" type="button">Export Report</button>
+        <div class="quick-filter-row">
+          <span>Quick Filters:</span>
+          <button class="btn btn-muted no-dues-quick-filter" data-no-dues-filter="" type="button">All</button>
+          <button class="btn btn-muted no-dues-quick-filter" data-no-dues-filter="eligible" type="button">Eligible</button>
+          <button class="btn btn-muted no-dues-quick-filter" data-no-dues-filter="blocked" type="button">Blocked</button>
+        </div>
+      </section>
+
+      <section class="no-dues-layout">
+        <div class="no-dues-table-card">
+          <div id="noDuesTable" class="table-scroll"></div>
+        </div>
+        <aside class="no-dues-side">
+          <article class="no-dues-side-card">
+            <h3>No Dues Summary</h3>
+            <div id="noDuesSummaryList" class="summary-list"></div>
+          </article>
+          <article class="no-dues-side-card">
+            <h3>Clearance Rules</h3>
+            <ul class="rules-list">
+              <li>All issued books must be returned.</li>
+              <li>All live and persisted unpaid penalties must be cleared.</li>
+              <li>Lost or damaged liabilities must be resolved.</li>
+              <li>Payment history remains preserved.</li>
+            </ul>
+          </article>
+          <article class="no-dues-side-card">
+            <h3>Top Pending Students</h3>
+            <div id="noDuesTopPending" class="top-pending-list"></div>
+          </article>
+        </aside>
+      </section>
+
+      <section class="panel no-dues-review-panel" id="noDuesReviewPanel" hidden>
+        <div class="modal-head">
+          <div>
+            <h2 id="noDuesReviewTitle">Student Review</h2>
+            <p class="helper-text">Detailed active issues, penalties, payment history, and blockers.</p>
+          </div>
+          <button class="btn btn-muted" id="closeNoDuesReviewBtn" type="button">Close Review</button>
+        </div>
+        <div id="noDuesReviewContent" class="detail-panel"></div>
+      </section>
+    </main>
+
+    <dialog id="clearDuesDialog">
+      <div class="dialog-inner">
+        <div class="dialog-top">
+          <div>
+            <h2>Clear Dues / Record Payment</h2>
+            <p class="helper-text">Record payment without deleting penalty history.</p>
+          </div>
+          <button class="btn btn-muted dialog-close" type="button" aria-label="Close">X</button>
+        </div>
+        <form id="clearDuesForm" class="form-grid">
+          <input id="clearDuesStudentUid" type="hidden">
+          <input id="clearDuesPenaltyId" type="hidden">
+          <label>Amount
+            <input id="clearDuesAmount" type="number" min="0" step="0.01" required>
+          </label>
+          <label>Payment Method
+            <select id="clearDuesMethod">
+              <option value="cash">Cash</option>
+              <option value="upi">UPI</option>
+              <option value="card">Card</option>
+              <option value="bank_transfer">Bank Transfer</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label>Payment Date
+            <input id="clearDuesDate" type="date" required>
+          </label>
+          <label>Remarks
+            <textarea id="clearDuesRemarks" rows="2" placeholder="Receipt no., note, or staff remark"></textarea>
+          </label>
+          <button class="btn btn-primary" type="submit">Confirm Payment</button>
+        </form>
+      </div>
+    </dialog>
+
+    <div id="toast" class="toast"></div>
+    <script src="./js/pwa.js?v=7" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script type="module" src="./js/no-dues.js?v=1"></script>
+  </body>
+</html>
