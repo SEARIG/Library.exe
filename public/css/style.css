@@ -21,7 +21,7 @@
 
 .reports-main {
   display: grid;
-  gap: 20px;
+  gap: 18px;
 }
 
 .reports-hero,
@@ -41,7 +41,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  padding: 28px;
+  padding: 24px 26px;
   color: #fff;
   background: linear-gradient(135deg, #0b1f3a, #0f766e 72%, #11977e);
 }
@@ -90,14 +90,16 @@
 .reports-kpi-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 16px;
+  gap: 14px;
 }
 
 .reports-kpi-card {
-  display: flex;
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
   align-items: center;
-  gap: 14px;
-  padding: 18px;
+  gap: 13px;
+  min-height: 112px;
+  padding: 18px 16px;
 }
 
 .reports-kpi-icon {
@@ -120,14 +122,16 @@
 
 .reports-kpi-card strong {
   color: var(--navy);
-  font-size: 1.85rem;
+  font-size: clamp(1.45rem, 2vw, 1.8rem);
   line-height: 1.05;
+  white-space: nowrap;
 }
 
 .reports-kpi-card div > span {
   margin-top: 6px;
   color: #334155;
   font-weight: 850;
+  line-height: 1.2;
 }
 
 .accent-blue .reports-kpi-icon {
@@ -152,10 +156,10 @@
 
 .reports-filter-panel {
   display: grid;
-  grid-template-columns: minmax(170px, 1fr) minmax(170px, 1fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(140px, 0.8fr) auto;
-  gap: 14px;
+  grid-template-columns: repeat(5, minmax(145px, 1fr)) minmax(155px, auto);
+  gap: 12px;
   align-items: end;
-  padding: 18px;
+  padding: 16px;
 }
 
 .reports-filter-panel label {
@@ -174,7 +178,7 @@
 .reports-chart-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.85fr) minmax(280px, 0.9fr);
-  gap: 18px;
+  gap: 16px;
 }
 
 .reports-table-grid {
@@ -185,6 +189,7 @@
 }
 
 .reports-card {
+  min-height: 320px;
   padding: 18px;
   overflow: hidden;
 }
@@ -194,7 +199,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .reports-card-head h2 {
@@ -220,7 +225,9 @@
 }
 
 .trend-chart {
-  min-height: 250px;
+  display: grid;
+  align-content: start;
+  min-height: 235px;
 }
 
 .trend-chart svg {
@@ -235,8 +242,13 @@
 }
 
 .trend-chart .axis {
-  stroke: #e2e8f0;
+  stroke: #cbd5e1;
   stroke-width: 2;
+}
+
+.trend-chart .grid-line {
+  stroke: rgba(203, 213, 225, 0.65);
+  stroke-width: 1;
 }
 
 .trend-line {
@@ -258,9 +270,21 @@
   display: flex;
   justify-content: center;
   gap: 16px;
+  margin-bottom: 6px;
   color: #334155;
   font-weight: 850;
   font-size: 0.9rem;
+}
+
+.chart-empty-state {
+  min-height: 190px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(100, 116, 139, 0.28);
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.82);
+  color: var(--muted);
+  font-weight: 900;
 }
 
 .dot,
@@ -282,17 +306,17 @@
 
 .donut-wrap {
   display: grid;
-  grid-template-columns: 150px minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 20px;
   align-items: center;
 }
 
 .donut-chart {
-  width: 150px;
-  height: 150px;
+  width: 190px;
+  height: 190px;
   border-radius: 50%;
   background: rgba(100, 116, 139, 0.15);
-  box-shadow: inset 0 0 0 38px #fff;
+  box-shadow: inset 0 0 0 48px #fff;
 }
 
 .chart-legend {
@@ -302,11 +326,18 @@
 
 .chart-legend div {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   color: #334155;
   font-size: 0.92rem;
+}
+
+.chart-legend span:not(.legend-dot) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chart-legend strong {
@@ -351,6 +382,9 @@
 
 .top-book-title {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 0.92rem;
   font-weight: 850;
   line-height: 1.25;

@@ -397,25 +397,38 @@ function renderTrendChart(context) {
     if (returnDate && dateInRange(returnDate, context)) increment(returned, bucketLabel(returnDate, bucket));
   });
   const labels = Array.from(new Set([...issued.keys(), ...returned.keys()])).sort();
+  const totalActivity = labels.reduce((sum, label) => sum + (issued.get(label) || 0) + (returned.get(label) || 0), 0);
   const max = Math.max(1, ...labels.map((label) => Math.max(issued.get(label) || 0, returned.get(label) || 0)));
-  if (!labels.length) {
-    $("#issueReturnTrendChart").innerHTML = `<div class="empty">No issue or return records in this date range.</div>`;
+  if (!labels.length || totalActivity === 0) {
+    $("#issueReturnTrendChart").innerHTML = `<div class="chart-empty-state">No activity for selected period</div>`;
     return;
   }
   const width = 560;
-  const height = 230;
-  const pad = 34;
-  const x = (index) => labels.length === 1 ? width / 2 : pad + (index * (width - pad * 2)) / (labels.length - 1);
-  const y = (value) => height - pad - (value / max) * (height - pad * 2);
-  const issuePoints = labels.map((label, index) => `${x(index)},${y(issued.get(label) || 0)}`).join(" ");
-  const returnPoints = labels.map((label, index) => `${x(index)},${y(returned.get(label) || 0)}`).join(" ");
+  const height = 190;
+  const padLeft = 42;
+  const padRight = 18;
+  const padTop = 16;
+  const padBottom = 34;
+  const y = (value) => height - padBottom - (value / max) * (height - padTop - padBottom);
+  const xFor = (index) => labels.length === 1 ? width / 2 : padLeft + (index * (width - padLeft - padRight)) / (labels.length - 1);
+  const yTicks = [...new Set([0, 0.25, 0.5, 0.75, 1].map((ratio) => Math.round(max * ratio)))];
+  const labelEvery = Math.max(1, Math.ceil(labels.length / 6));
+  const issuePoints = labels.map((label, index) => `${xFor(index)},${y(issued.get(label) || 0)}`).join(" ");
+  const returnPoints = labels.map((label, index) => `${xFor(index)},${y(returned.get(label) || 0)}`).join(" ");
   $("#issueReturnTrendChart").innerHTML = `
     <div class="chart-key"><span><i class="dot issued"></i>Issued</span><span><i class="dot returned"></i>Returned</span></div>
     <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Issued and returned book trend">
-      <line x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}" class="axis"></line>
+      ${yTicks.map((tick) => `<g>
+        <line x1="${padLeft}" y1="${y(tick)}" x2="${width - padRight}" y2="${y(tick)}" class="grid-line"></line>
+        <text x="${padLeft - 10}" y="${y(tick) + 4}" text-anchor="end">${tick}</text>
+      </g>`).join("")}
+      <line x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}" class="axis"></line>
+      <line x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}" class="axis"></line>
       <polyline points="${issuePoints}" class="trend-line issued-line"></polyline>
       <polyline points="${returnPoints}" class="trend-line returned-line"></polyline>
-      ${labels.map((label, index) => `<text x="${x(index)}" y="${height - 8}" text-anchor="middle">${escapeHtml(shortLabel(label, bucket))}</text>`).join("")}
+      ${labels.map((label, index) => index % labelEvery === 0 || index === labels.length - 1
+        ? `<text x="${xFor(index)}" y="${height - 10}" text-anchor="middle">${escapeHtml(shortLabel(label, bucket))}</text>`
+        : "").join("")}
     </svg>`;
 }
 
@@ -460,7 +473,7 @@ function renderTopIssuedBooks(context) {
   const max = Math.max(1, ...rows.map((row) => row.count));
   $("#topBooksRange").textContent = context.dateLabel;
   $("#topIssuedBooks").innerHTML = rows.length ? rows.map((row, index) => `
-    <button class="bar-row" type="button" title="Top issued book">
+    <button class="bar-row" type="button" title="${escapeHtml(row.title)}" aria-label="${escapeHtml(row.title)} issued ${row.count} time${row.count === 1 ? "" : "s"}">
       <span class="top-book-rank">${index + 1}</span>
       <span class="top-book-title">${escapeHtml(row.title)}</span>
       <strong>${row.count}</strong>
@@ -739,11 +752,46 @@ function accessionOf(record = {}) {
 }
 
 function categoryOf(book = {}) {
-  return book.category || book.bookCategory || book.subjectCategory || "Uncategorized";
+  return normalizeCategoryName(book.category || book.bookCategory || book.subjectCategory);
 }
 
 function recordCategory(record = {}, book = {}) {
-  return record.category || record.bookCategory || book.category || book.bookCategory || book.subjectCategory || "Uncategorized";
+  return normalizeCategoryName(record.category || record.bookCategory || book.category || book.bookCategory || book.subjectCategory);
+}
+
+function normalizeCategoryName(value) {
+  const clean = String(value || "").trim();
+  if (!clean) return "Uncategorized";
+  const key = clean.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
+  const aliases = {
+    textbook: "Textbook",
+    textbooks: "Textbook",
+    text: "Textbook",
+    qna: "Q&A",
+    qa: "Q&A",
+    qanda: "Q&A",
+    questionanswer: "Q&A",
+    questionanswers: "Q&A",
+    pyq: "PYQ",
+    previousyearquestion: "PYQ",
+    previousyearquestions: "PYQ",
+    reference: "Reference",
+    references: "Reference",
+    journal: "Journal",
+    journals: "Journal",
+    notes: "Notes",
+    note: "Notes",
+    general: "General",
+    engineering: "Engineering",
+    other: "Other",
+    uncategorized: "Uncategorized"
+  };
+  if (aliases[key]) return aliases[key];
+  return clean
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function stableBookKey(record = {}, book = {}) {
