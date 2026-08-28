@@ -454,14 +454,17 @@ function renderTopIssuedBooks(context) {
     current.count += 1;
     counts.set(key, current);
   });
-  const rows = Array.from(counts.values()).sort((left, right) => right.count - left.count).slice(0, 5);
+  const rows = Array.from(counts.values())
+    .sort((left, right) => right.count - left.count || left.title.localeCompare(right.title))
+    .slice(0, 5);
   const max = Math.max(1, ...rows.map((row) => row.count));
   $("#topBooksRange").textContent = context.dateLabel;
-  $("#topIssuedBooks").innerHTML = rows.length ? rows.map((row) => `
+  $("#topIssuedBooks").innerHTML = rows.length ? rows.map((row, index) => `
     <button class="bar-row" type="button" title="Top issued book">
-      <span>${escapeHtml(row.title)}</span>
-      <i style="width:${Math.max(8, (row.count / max) * 100)}%"></i>
+      <span class="top-book-rank">${index + 1}</span>
+      <span class="top-book-title">${escapeHtml(row.title)}</span>
       <strong>${row.count}</strong>
+      <i aria-hidden="true"><span style="width:${Math.max(8, (row.count / max) * 100)}%"></span></i>
     </button>`).join("") : `<div class="empty">No issue history in this date range.</div>`;
 }
 
