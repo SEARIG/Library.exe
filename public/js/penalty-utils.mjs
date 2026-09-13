@@ -145,14 +145,14 @@ export function issueDateOf(issue = {}) {
 }
 
 export function dueDateOf(issue = {}) {
+  const issueDate = issueDateOf(issue);
+  if (issueDate) return addCalendarDays(issueDate, ISSUE_PERIOD_DAYS);
   const persistedDueDate = dateFrom(issue.dueDate);
-  if (persistedDueDate) return new Date(
+  return persistedDueDate ? new Date(
     persistedDueDate.getFullYear(),
     persistedDueDate.getMonth(),
     persistedDueDate.getDate()
-  );
-  const issueDate = issueDateOf(issue);
-  return issueDate ? addCalendarDays(issueDate, ISSUE_PERIOD_DAYS) : null;
+  ) : null;
 }
 
 export function calculateIssuePenalty(issue = {}, now = new Date()) {
