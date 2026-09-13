@@ -34,8 +34,11 @@
         <div class="reports-hero-actions">
           <select id="heroDateRange" aria-label="Date range">
             <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
             <option value="week">This Week</option>
+            <option value="lastWeek">Last Week</option>
             <option value="month" selected>This Month</option>
+            <option value="lastMonth">Last Month</option>
             <option value="year">This Year</option>
             <option value="all">All Time</option>
           </select>
@@ -62,7 +65,7 @@
         </article>
         <article class="reports-kpi-card accent-red">
           <span class="reports-kpi-icon">⚠</span>
-          <div><strong id="kpiLostDamaged">0</strong><span>Lost / Damaged</span></div>
+          <div><strong id="kpiOverdueBooks">0</strong><span>Overdue Books</span></div>
         </article>
         <article class="reports-kpi-card accent-teal">
           <span class="reports-kpi-icon">₹</span>
@@ -70,25 +73,47 @@
         </article>
       </section>
 
+      <section class="quick-reports-grid" aria-label="Quick reports">
+        <button class="quick-report-card" data-report-preset="issuedToday" type="button"><span>Issued Today</span><strong>0</strong></button>
+        <button class="quick-report-card" data-report-preset="returnedToday" type="button"><span>Returned Today</span><strong>0</strong></button>
+        <button class="quick-report-card" data-report-preset="dueToday" type="button"><span>Due Today</span><strong>0</strong></button>
+        <button class="quick-report-card" data-report-preset="dueTomorrow" type="button"><span>Due Tomorrow</span><strong>0</strong></button>
+        <button class="quick-report-card" data-report-preset="overdueBooks" type="button"><span>Overdue Books</span><strong>0</strong></button>
+        <button class="quick-report-card" data-report-preset="unpaidPenalties" type="button"><span>Unpaid Penalties</span><strong>0</strong></button>
+        <button class="quick-report-card" data-report-preset="pendingIssueRequests" type="button"><span>Pending Issue Requests</span><strong>0</strong></button>
+        <button class="quick-report-card" data-report-preset="pendingReturnRequests" type="button"><span>Pending Return Requests</span><strong>0</strong></button>
+        <button class="quick-report-card" data-report-preset="availableBooks" type="button"><span>Available Books</span><strong>0</strong></button>
+        <button class="quick-report-card" data-report-preset="lostDamagedBooks" type="button"><span>Lost / Damaged Books</span><strong>0</strong></button>
+      </section>
+
       <section class="reports-filter-panel" aria-label="Report filters">
+        <label class="reports-search-field">Search
+          <input id="reportSearch" placeholder="Search reports, students, books, accession no., roll no...">
+        </label>
         <label>Report Type
           <select id="reportType">
             <option value="all">All Reports</option>
             <option value="books">Books</option>
             <option value="students">Students</option>
-            <option value="issueReturn">Issue / Return</option>
+            <option value="issues">Issues</option>
+            <option value="returns">Returns</option>
+            <option value="issueReturn">Issue / Return Summary</option>
             <option value="penalties">Penalties</option>
             <option value="requests">Requests</option>
             <option value="noDues">No Dues</option>
             <option value="activity">Activity</option>
             <option value="inventory">Inventory</option>
+            <option value="statistics">Statistics</option>
           </select>
         </label>
         <label>Date Range
           <select id="dateRange">
             <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
             <option value="week">This Week</option>
+            <option value="lastWeek">Last Week</option>
             <option value="month" selected>This Month</option>
+            <option value="lastMonth">Last Month</option>
             <option value="year">This Year</option>
             <option value="custom">Custom</option>
             <option value="all">All Time</option>
@@ -110,10 +135,36 @@
             <option value="">All Courses</option>
           </select>
         </label>
+        <label>Status
+          <select id="statusFilter">
+            <option value="">All Status</option>
+            <option value="available">Available</option>
+            <option value="issued">Issued / Active</option>
+            <option value="returned">Returned</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+            <option value="overdue">Overdue</option>
+            <option value="unpaid">Unpaid</option>
+            <option value="paid">Paid / Cleared</option>
+            <option value="lost">Lost</option>
+            <option value="damaged">Damaged</option>
+            <option value="blocked">Blocked</option>
+            <option value="eligible">Eligible</option>
+          </select>
+        </label>
         <label>Format
           <select id="reportFormat">
             <option value="summary">Summary</option>
             <option value="detailed">Detailed</option>
+          </select>
+        </label>
+        <label>Page Size
+          <select id="reportPageSize">
+            <option value="10" selected>10</option>
+            <option value="25">25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
           </select>
         </label>
         <button class="btn btn-primary" id="generateReportBtn" type="button">Generate Report</button>
@@ -148,6 +199,20 @@
           </div>
           <div id="topIssuedBooks" class="bar-list"></div>
         </article>
+        <article class="reports-card">
+          <div class="reports-card-head">
+            <h2>Penalty Collection Trend</h2>
+            <span id="penaltyTrendRange">Selected range</span>
+          </div>
+          <div id="penaltyTrendChart" class="trend-chart compact-trend" aria-label="Penalty collection trend chart"></div>
+        </article>
+        <article class="reports-card">
+          <div class="reports-card-head">
+            <h2>Overdue Distribution</h2>
+            <span>Active overdue books</span>
+          </div>
+          <div id="overdueDistributionChart" class="bar-list"></div>
+        </article>
       </section>
 
       <section class="reports-table-grid">
@@ -160,7 +225,9 @@
               <button class="btn btn-muted" id="exportExcelBtn" type="button">Export Excel</button>
             </div>
           </div>
+          <div id="reportSummary" class="report-summary-strip"></div>
           <div id="primaryReportTable" class="table-scroll"></div>
+          <div id="reportPagination" class="report-pagination"></div>
         </article>
         <article class="reports-card">
           <div class="reports-card-head">
