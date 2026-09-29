@@ -22,13 +22,18 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js";
 import {
   REGISTER_EXPORT_HEADERS,
+  REGISTER_FIELD_LABELS,
+  REGISTER_FIELDS,
+  createEmptyRegisterRow,
   createMockOcrResult,
   digitizedRowToExportRow,
   digitizedRowsToMatrix,
+  parseOcrLikeRows,
+  resolveDittoValues,
   rowsReadyForImport,
   summarizeDigitizedRows,
   validateDigitizedRows
-} from "./register-digitizer.mjs";
+} from "./register-digitizer.mjs?v=2";
 import {
   accessionBookData,
   parseAccessionRegister
@@ -41,6 +46,8 @@ const extractRegisterOcr = httpsCallable(functions, "extractRegisterOcr");
 let digitizerFiles = [];
 let digitizerRows = [];
 let zoom = 1;
+let searchText = "";
+let statusFilter = "all";
 
 const fileInput = $("#digitizerFileInput");
 const dropzone = $("#digitizerDropzone");
@@ -48,15 +55,35 @@ const dropzone = $("#digitizerDropzone");
 $("#chooseDigitizerFilesBtn")?.addEventListener("click", () => fileInput.click());
 fileInput?.addEventListener("change", () => addFiles([...fileInput.files]));
 $("#clearDigitizerFilesBtn")?.addEventListener("click", () => {
+  digitizerFiles.forEach((item) => item.objectUrl && URL.revokeObjectURL(item.objectUrl));
   digitizerFiles = [];
   digitizerRows = [];
+  fileInput.value = "";
+  searchText = "";
+  statusFilter = "all";
+  if ($("#digitizerSearchInput")) $("#digitizerSearchInput").value = "";
+  if ($("#digitizerStatusFilter")) $("#digitizerStatusFilter").value = "all";
+  $("#digitizerConfigMessage").textContent = "OCR provider status will appear here.";
+  $("#digitizerImportProgress").textContent = "No import started.";
   renderFiles();
   renderRows();
 });
 $("#startDigitizerExtractionBtn")?.addEventListener("click", () => startExtraction().catch(handleError));
 $("#validateDigitizerRowsBtn")?.addEventListener("click", () => validateRowsFromGrid().catch(handleError));
-$("#exportDigitizerExcelBtn")?.addEventListener("click", () => exportReviewedExcel());
+$("#exportDigitizerExcelBtn")?.addEventListener("click", () => exportReviewedExcel().catch(handleError));
 $("#importDigitizerRowsBtn")?.addEventListener("click", () => importReviewedRows().catch(handleError));
+$("#downloadDigitizerTemplateBtn")?.addEventListener("click", () => downloadSampleTemplate().catch(handleError));
+$("#addDigitizerRowBtn")?.addEventListener("click", () => addManualRow());
+$("#digitizerSearchInput")?.addEventListener("input", (event) => {
+  persistVisibleGridEdits();
+  searchText = event.target.value.trim().toLowerCase();
+  renderRows();
+});
+$("#digitizerStatusFilter")?.addEventListener("change", (event) => {
+  persistVisibleGridEdits();
+  statusFilter = event.target.value;
+  renderRows();
+});
 $("#zoomInDigitizerBtn")?.addEventListener("click", () => {
   zoom = Math.min(2, zoom + 0.1);
   renderPreview();
@@ -90,7 +117,7 @@ function addFiles(files = []) {
     type: file.type || "",
     size: file.size || 0,
     rotation: 0,
-    objectUrl: file.type?.startsWith("image/") ? URL.createObjectURL(file) : ""
+    objectUrl: URL.createObjectURL(file)
   })));
   if (accepted.length !== files.length) showToast("Unsupported files skipped. Use JPG, JPEG, PNG, or PDF.", "warning");
   renderFiles();
@@ -126,9 +153,9 @@ function renderFiles() {
   }
   target.innerHTML = digitizerFiles.map((item, index) => `
     <article class="digitizer-page-card" data-page-id="${escapeHtml(item.id)}">
-      <div class="digitizer-thumb">${item.objectUrl
-        ? `<img src="${escapeHtml(item.objectUrl)}" alt="">`
-        : `<span>PDF</span>`}</div>
+      <div class="digitizer-thumb">${item.type === "application/pdf" || item.name.toLowerCase().endsWith(".pdf")
+        ? `<span>PDF</span>`
+        : `<img src="${escapeHtml(item.objectUrl)}" alt="">`}</div>
       <div>
         <strong>Page ${index + 1}</strong>
         <span>${escapeHtml(item.name)}</span>
@@ -150,7 +177,10 @@ function renderFiles() {
 function updatePage(id, action) {
   const index = digitizerFiles.findIndex((item) => item.id === id);
   if (index < 0) return;
-  if (action === "remove") digitizerFiles.splice(index, 1);
+  if (action === "remove") {
+    if (digitizerFiles[index].objectUrl) URL.revokeObjectURL(digitizerFiles[index].objectUrl);
+    digitizerFiles.splice(index, 1);
+  }
   if (action === "rotate") digitizerFiles[index].rotation = (digitizerFiles[index].rotation + 90) % 360;
   if (action === "up" && index > 0) [digitizerFiles[index - 1], digitizerFiles[index]] = [digitizerFiles[index], digitizerFiles[index - 1]];
   if (action === "down" && index < digitizerFiles.length - 1) [digitizerFiles[index + 1], digitizerFiles[index]] = [digitizerFiles[index], digitizerFiles[index + 1]];
@@ -166,9 +196,9 @@ function renderPreview() {
   }
   target.innerHTML = digitizerFiles.map((item, index) => `
     <div class="digitizer-preview-page" style="transform:scale(${zoom}); transform-origin: top left;">
-      ${item.objectUrl
-        ? `<img src="${escapeHtml(item.objectUrl)}" alt="Page ${index + 1}" style="rotate:${item.rotation}deg">`
-        : `<div class="pdf-preview-box">PDF page placeholder<br>${escapeHtml(item.name)}<br>Rotation ${item.rotation}°</div>`}
+      ${item.type === "application/pdf" || item.name.toLowerCase().endsWith(".pdf")
+        ? `<embed class="digitizer-pdf-preview" src="${escapeHtml(item.objectUrl)}" type="application/pdf" aria-label="PDF preview for ${escapeHtml(item.name)}">`
+        : `<img src="${escapeHtml(item.objectUrl)}" alt="Page ${index + 1}" style="rotate:${item.rotation}deg">`}
     </div>`).join("");
 }
 
@@ -191,12 +221,15 @@ async function startExtraction() {
     result = createMockOcrResult(filePayload);
   }
   const existing = await existingAccessionSet();
-  digitizerRows = validateDigitizedRows(result.rows || [], existing);
+  const parsedRows = parseOcrLikeRows(result.rows || []);
+  const resolvedRows = resolveDittoValues(parsedRows);
+  digitizerRows = validateDigitizedRows(resolvedRows, existing);
+  const dittoCount = digitizerRows.reduce((total, row) => total + (row.dittoResolvedFields?.length || 0), 0);
   $("#digitizerConfigMessage").innerHTML = `
     <div class="${result.configured ? "success-box" : "empty"}">
       <strong>Provider: ${escapeHtml(result.provider || "mock")}</strong>
       <span>${escapeHtml(result.message || "")}</span>
-      <span>Pages processed: ${Number(result.pages || digitizerFiles.length)}</span>
+      <span>Pages processed: ${Number(result.pages || digitizerFiles.length)} · Rows: ${digitizerRows.length} · Ditto cells resolved: ${dittoCount}</span>
     </div>`;
   renderRows();
 }
@@ -213,59 +246,112 @@ function renderRows() {
   const target = $("#digitizerReviewGrid");
   if (!target) return;
   if (!digitizerRows.length) {
+    if ($("#digitizerVisibleCount")) $("#digitizerVisibleCount").textContent = "Showing 0 of 0 rows";
     renderEmpty(target, "Run extraction to review structured rows.");
     return;
   }
-  const fields = [
-    "accessionNumber", "accessionDate", "author", "title", "placePublisher", "year", "pages", "volume",
-    "source", "billNoDate", "cost", "classNo", "bookNo", "withdrawalRemarks", "imageUrl", "notes"
-  ];
+  const visibleRows = digitizerRows
+    .map((row, rowIndex) => ({ row, rowIndex }))
+    .filter(({ row }) => statusFilter === "all" || row.status === statusFilter)
+    .filter(({ row }) => !searchText || REGISTER_FIELDS.some((field) => String(row[field] || "").toLowerCase().includes(searchText)));
+  $("#digitizerVisibleCount").textContent = `Showing ${visibleRows.length} of ${digitizerRows.length} rows`;
+  if (!visibleRows.length) {
+    renderEmpty(target, "No rows match the current search and status filter.");
+    return;
+  }
   target.innerHTML = `
     <table class="digitizer-table">
       <thead>
         <tr>
-          <th>Status</th><th>Confidence</th><th>Page</th><th>Row</th>
-          ${fields.map((field) => `<th>${escapeHtml(field)}</th>`).join("")}
-          <th>Errors</th>
+          <th>Status</th><th>Confidence</th><th>Page</th><th>Side</th><th>Row</th>
+          ${REGISTER_FIELDS.map((field) => `<th>${escapeHtml(REGISTER_FIELD_LABELS[field])}</th>`).join("")}
+          <th>Validation</th><th>Actions</th>
         </tr>
       </thead>
       <tbody>
-        ${digitizerRows.map((row, rowIndex) => `
+        ${visibleRows.map(({ row, rowIndex }) => `
           <tr class="digitizer-row status-${row.status.toLowerCase().replace(/\s+/g, "-")} confidence-${row.confidenceStatus}">
-            <td>${escapeHtml(row.status)}</td>
+            <td><span class="digitizer-status-badge">${escapeHtml(row.status)}</span></td>
             <td>${Number(row.confidence || 0)}%</td>
             <td>${escapeHtml(row.pageNumber || "")}</td>
+            <td>${escapeHtml(row.pageSide || "")}</td>
             <td>${escapeHtml(row.rowNumber || "")}</td>
-            ${fields.map((field) => `<td><input data-row-index="${rowIndex}" data-field="${field}" value="${escapeHtml(row[field] || "")}"></td>`).join("")}
-            <td>${escapeHtml((row.errors || []).join("; "))}</td>
+            ${REGISTER_FIELDS.map((field) => `<td><input data-row-index="${rowIndex}" data-field="${field}" value="${escapeHtml(row[field] || "")}" aria-label="${escapeHtml(REGISTER_FIELD_LABELS[field])} row ${rowIndex + 1}"></td>`).join("")}
+            <td><span class="digitizer-validation-text">${escapeHtml((row.errors || []).join("; ") || "Valid")}</span></td>
+            <td><button class="btn btn-danger digitizer-delete-row" data-delete-row="${rowIndex}" type="button">Delete</button></td>
           </tr>`).join("")}
       </tbody>
     </table>`;
+  target.querySelectorAll("[data-row-index][data-field]").forEach((input) => {
+    input.addEventListener("input", () => {
+      digitizerRows[Number(input.dataset.rowIndex)][input.dataset.field] = input.value;
+      digitizerRows[Number(input.dataset.rowIndex)].origin = "reviewed";
+    });
+  });
+  target.querySelectorAll("[data-delete-row]").forEach((button) => {
+    button.addEventListener("click", () => {
+      digitizerRows.splice(Number(button.dataset.deleteRow), 1);
+      renderRows();
+      showToast("Row deleted from this review session.", "success");
+    });
+  });
 }
 
 function renderSummary() {
   const summary = summarizeDigitizedRows(digitizerRows);
   $("#digitizerSummary").innerHTML = `
-    <span>Total: <strong>${summary.total}</strong></span>
-    <span>Ready: <strong>${summary.ready}</strong></span>
-    <span>Needs Review: <strong>${summary.needsReview}</strong></span>
-    <span>Duplicates: <strong>${summary.duplicates}</strong></span>
-    <span>Invalid: <strong>${summary.invalid}</strong></span>`;
+    <span class="metric">Total <strong>${summary.total}</strong></span>
+    <span class="metric metric-ready">Ready <strong>${summary.ready}</strong></span>
+    <span class="metric metric-review">Needs Review <strong>${summary.needsReview}</strong></span>
+    <span class="metric metric-duplicate">Duplicates <strong>${summary.duplicates}</strong></span>
+    <span class="metric metric-invalid">Invalid <strong>${summary.invalid}</strong></span>`;
 }
 
 function readRowsFromGrid() {
-  if (!digitizerRows.length) return [];
-  const rows = digitizerRows.map((row) => ({ ...row }));
-  document.querySelectorAll("#digitizerReviewGrid [data-row-index][data-field]").forEach((input) => {
-    rows[Number(input.dataset.rowIndex)][input.dataset.field] = input.value;
-  });
-  return rows;
+  persistVisibleGridEdits();
+  return digitizerRows.map((row) => ({ ...row }));
 }
 
-function exportReviewedExcel() {
-  digitizerRows = readRowsFromGrid();
+function persistVisibleGridEdits() {
+  document.querySelectorAll("#digitizerReviewGrid [data-row-index][data-field]").forEach((input) => {
+    const row = digitizerRows[Number(input.dataset.rowIndex)];
+    if (row) row[input.dataset.field] = input.value;
+  });
+}
+
+function addManualRow() {
+  persistVisibleGridEdits();
+  digitizerRows.push(createEmptyRegisterRow({
+    id: `manual-row-${Date.now()}`,
+    pageNumber: "",
+    pageSide: "",
+    rowNumber: digitizerRows.length + 1,
+    confidence: 100,
+    confidenceStatus: "high",
+    origin: "manual",
+    status: "Invalid",
+    errors: ["missing accession number", "missing title", "missing author"],
+    rawText: ""
+  }));
+  searchText = "";
+  statusFilter = "all";
+  if ($("#digitizerSearchInput")) $("#digitizerSearchInput").value = "";
+  if ($("#digitizerStatusFilter")) $("#digitizerStatusFilter").value = "all";
+  renderRows();
+}
+
+async function validatedRowsForOutput() {
+  digitizerRows = validateDigitizedRows(readRowsFromGrid(), await existingAccessionSet());
+  renderRows();
+  const blocked = digitizerRows.filter((row) => row.status !== "Ready");
+  if (blocked.length) throw new Error(`Resolve ${blocked.length} row(s) marked Needs Review, Duplicate, or Invalid before export/import.`);
+  return digitizerRows;
+}
+
+async function exportReviewedExcel() {
+  const rows = await validatedRowsForOutput();
   if (!digitizerRows.length) throw new Error("No reviewed rows to export.");
-  const sheetRows = digitizerRows.map(digitizedRowToExportRow);
+  const sheetRows = rows.map(digitizedRowToExportRow);
   const sheet = window.XLSX.utils.json_to_sheet(sheetRows, { header: REGISTER_EXPORT_HEADERS });
   sheet["!cols"] = REGISTER_EXPORT_HEADERS.map(() => ({ wch: 20 }));
   const workbook = window.XLSX.utils.book_new();
@@ -274,16 +360,34 @@ function exportReviewedExcel() {
   showToast("Reviewed Excel exported.", "success");
 }
 
+async function downloadSampleTemplate() {
+  const sample = [digitizedRowToExportRow(createEmptyRegisterRow({
+    accessionNumber: "0001", author: "Author name", title: "Book title", placePublisher: "Place: Publisher",
+    year: "2026", pages: "250", source: "Purchase", billNoDate: "B-001 / 01-01-2026", cost: "500",
+    classNo: "000", bookNo: "AUT", callNo: "000 AUT", remarks: ""
+  }))];
+  const sheet = window.XLSX.utils.json_to_sheet(sample, { header: REGISTER_EXPORT_HEADERS });
+  sheet["!cols"] = REGISTER_EXPORT_HEADERS.map(() => ({ wch: 20 }));
+  const workbook = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(workbook, sheet, "Accession Register");
+  window.XLSX.writeFile(workbook, "mlsu-accession-register-digitizer-template.xlsx");
+  showToast("Sample template downloaded.", "success");
+}
+
 async function importReviewedRows() {
-  digitizerRows = validateDigitizedRows(readRowsFromGrid(), await existingAccessionSet());
-  renderRows();
-  const readyRows = rowsReadyForImport(digitizerRows);
+  const validatedRows = await validatedRowsForOutput();
+  const readyRows = rowsReadyForImport(validatedRows);
   if (!readyRows.length) throw new Error("No Ready rows available for import.");
   const confirmed = await confirmAction(`Import ${readyRows.length} ready rows into LMS in safe chunks?`);
   if (!confirmed) return;
 
   const parsed = parseAccessionRegister(digitizedRowsToMatrix(readyRows), await existingBookMap(), false);
-  const validRows = parsed.rows.filter((row) => !row.errors.length);
+  const sourceByAccession = new Map(readyRows.map((row) => [String(row.accessionNumber).trim().toLowerCase(), row]));
+  const validRows = parsed.rows.filter((row) => !row.errors.length).map((row) => ({
+    ...row,
+    callNo: sourceByAccession.get(String(row.accessionNumber).trim().toLowerCase())?.callNo || "",
+    remarks: sourceByAccession.get(String(row.accessionNumber).trim().toLowerCase())?.remarks || row.withdrawalRemarks || ""
+  }));
   const failedRows = parsed.rows.filter((row) => row.errors.length);
   const chunkSize = 50;
   let imported = 0;
@@ -331,6 +435,8 @@ async function createBookFromRegisterRow(row, importBatchId) {
     const bookRef = doc(db, "books", bId);
     transaction.set(bookRef, {
       ...registerData,
+      callNo: String(row.callNo || "").trim(),
+      remarks: String(row.remarks || row.withdrawalRemarks || "").trim(),
       b_id: bId,
       bname: registerData.title,
       publisher: registerData.placePublisher,

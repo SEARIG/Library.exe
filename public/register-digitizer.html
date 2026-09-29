@@ -7,7 +7,7 @@
     <title>Register Digitizer | Mohanlal Sukhadia University LMS</title>
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" type="image/png" href="/assets/mlsu-logo.png?v=4">
-    <link rel="stylesheet" href="css/style.css?v=6">
+    <link rel="stylesheet" href="css/style.css?v=7">
   </head>
   <body class="protected-page">
     <header class="app-header">
@@ -37,8 +37,9 @@
             <button class="btn btn-primary" id="chooseDigitizerFilesBtn" type="button">Choose Files</button>
           </div>
           <div class="toolbar">
-            <button class="btn btn-primary" id="startDigitizerExtractionBtn" type="button">Start Extraction</button>
-            <button class="btn btn-muted" id="clearDigitizerFilesBtn" type="button">Clear</button>
+            <button class="btn btn-primary" id="startDigitizerExtractionBtn" type="button">Run Digitizer</button>
+            <button class="btn btn-muted" id="downloadDigitizerTemplateBtn" type="button">Download Sample Template</button>
+            <button class="btn btn-muted" id="clearDigitizerFilesBtn" type="button">Clear Session</button>
           </div>
           <div id="digitizerConfigMessage" class="empty">OCR provider status will appear here.</div>
           <div id="digitizerPageList" class="digitizer-page-list"></div>
@@ -54,19 +55,37 @@
         </article>
       </section>
 
-      <section class="panel">
+      <section class="panel digitizer-review-panel">
         <div class="panel-head-row">
           <div>
             <h2>Human Review Grid</h2>
-            <p class="helper-text">Review and edit every cell before export or import. Low confidence rows require manual correction.</p>
+            <p class="helper-text">Ditto marks are resolved from the previous non-empty value in the same column. Review every row before export or import.</p>
           </div>
           <div class="toolbar">
+            <button class="btn btn-muted" id="addDigitizerRowBtn" type="button">Add Row</button>
             <button class="btn btn-muted" id="validateDigitizerRowsBtn" type="button">Validate</button>
             <button class="btn btn-muted" id="exportDigitizerExcelBtn" type="button">Export Excel</button>
             <button class="btn btn-primary" id="importDigitizerRowsBtn" type="button">Import to LMS</button>
           </div>
         </div>
         <div id="digitizerSummary" class="digitizer-summary"></div>
+        <div class="digitizer-review-tools">
+          <label class="field">
+            <span>Search rows</span>
+            <input id="digitizerSearchInput" type="search" placeholder="Accession, author, title, publisher, call no...">
+          </label>
+          <label class="field">
+            <span>Validation status</span>
+            <select id="digitizerStatusFilter">
+              <option value="all">All rows</option>
+              <option value="Ready">Ready</option>
+              <option value="Needs Review">Needs Review</option>
+              <option value="Duplicate">Duplicate</option>
+              <option value="Invalid">Invalid</option>
+            </select>
+          </label>
+          <div id="digitizerVisibleCount" class="helper-text" aria-live="polite"></div>
+        </div>
         <div id="digitizerImportProgress" class="empty">No import started.</div>
         <div id="digitizerReviewGrid" class="table-scroll"></div>
       </section>
@@ -75,6 +94,6 @@
     <div id="toast" class="toast"></div>
     <script src="./js/pwa.js?v=7" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="./js/register-digitizer.js"></script>
+    <script type="module" src="./js/register-digitizer.js?v=2"></script>
   </body>
 </html>
