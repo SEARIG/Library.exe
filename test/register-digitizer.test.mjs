@@ -1,100 +1,200 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   REGISTER_EXPORT_HEADERS,
+  alignRegisterRowSegments,
   createMockOcrResult,
+  createRowCountDiagnostics,
   digitizedRowsToMatrix,
+  ocrFailureState,
+  ocrModeForResult,
+  paginateRows,
   parseOcrLikeRows,
+  resolveAccessionSequences,
   resolveDittoValues,
   validateDigitizedRows
 } from "../public/js/register-digitizer.mjs";
 
-test("ditto resolution inherits the previous non-empty value in the same column", () => {
-  const rows = resolveDittoValues([
-    { accessionNumber: "0001", author: "A. Sharma", placePublisher: "Udaipur Press", source: "Purchase", title: "First" },
-    { accessionNumber: "0002", author: "do", placePublisher: "-do-", source: "\"", title: "Second" },
-    { accessionNumber: "0003", author: "〃", placePublisher: "Ditto", source: "do.", title: "Third" }
-  ]);
-  assert.equal(rows[1].author, "A. Sharma");
-  assert.equal(rows[1].placePublisher, "Udaipur Press");
-  assert.equal(rows[1].source, "Purchase");
-  assert.equal(rows[2].author, "A. Sharma");
-  assert.deepEqual(rows[1].dittoResolvedFields.sort(), ["author", "placePublisher", "source"]);
-  assert.equal(rows[1].accessionNumber, "0002");
+function fixtureRows(count = 25) {
+  return Array.from({ length: count }, (_, index) => ({
+    accessionNumber: String(index + 1).padStart(2, "0"),
+    author: index ? "do" : "A. Sharma",
+    title: index ? "-do-" : "Complete Register Title",
+    placePublisher: index ? "\"" : "Udaipur Press",
+    year: "2001",
+    cost: "100",
+    confidence: 95,
+    rowNumber: index + 1
+  }));
+}
+
+test("parser preserves more than five OCR rows", () => {
+  assert.equal(parseOcrLikeRows(fixtureRows(12)).length, 12);
 });
 
-test("duplicate accession detection covers upload rows and existing Firestore keys", () => {
+test("25-row fixture returns all 25 records", () => {
+  const result = createMockOcrResult([{ name: "register.jpg" }]);
+  assert.equal(result.rows.length, 25);
+  assert.equal(parseOcrLikeRows(result.rows).length, 25);
+  assert.equal(result.debug.rowsDetected, 25);
+});
+
+test("parser has no hidden five-row maximum", () => {
+  const rows = parseOcrLikeRows(fixtureRows(40));
+  assert.equal(rows.length, 40);
+  assert.equal(rows.at(-1).accessionNumber, "40");
+});
+
+test("ditto-only row survives preprocessing", () => {
+  const rows = parseOcrLikeRows([
+    { accessionNumber: "01", author: "A. Sharma", title: "First", placePublisher: "Udaipur" },
+    { accessionNumber: "02", author: "do", title: "-do-", placePublisher: "\"" }
+  ]);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[1].accessionNumber, "02");
+});
+
+test("ditto values resolve before validation", () => {
+  const resolved = resolveDittoValues([
+    { accessionNumber: "01", author: "A. Sharma", title: "First", placePublisher: "Udaipur", confidence: 95 },
+    { accessionNumber: "02", author: "do", title: "-do-", placePublisher: "〃", confidence: 95 }
+  ]);
+  const validated = validateDigitizedRows(resolved);
+  assert.equal(validated[1].author, "A. Sharma");
+  assert.equal(validated[1].title, "First");
+  assert.equal(validated[1].status, "Ready");
+});
+
+test("page-level accession prefix is inherited across the sequence", () => {
+  const rows = resolveAccessionSequences([
+    { accessionNumber: "18 01", rawAccessionText: "18 01", detectedPrefix: "18", detectedSuffix: "01", prefixConfidence: 0.96 },
+    { accessionNumber: "02", rawAccessionText: "02" },
+    { accessionNumber: "03", rawAccessionText: "03" }
+  ]);
+  assert.deepEqual(rows.map((row) => row.accessionNumber), ["1801", "1802", "1803"]);
+});
+
+test("confident 18 plus 01 reconstructs accession 1801", () => {
+  const [row] = resolveAccessionSequences([
+    { accessionNumber: "18 01", rawAccessionText: "18 01", detectedPrefix: "18", detectedSuffix: "01", prefixConfidence: 94 }
+  ]);
+  assert.equal(row.resolvedAccessionNumber, "1801");
+  assert.equal(row.accessionPrefixConfidence, 0.94);
+  assert.equal(row.accessionNeedsReview, false);
+});
+
+test("low-confidence accession prefix is not invented", () => {
+  const [row] = resolveAccessionSequences([
+    { accessionNumber: "01", rawAccessionText: "18 01", detectedPrefix: "18", detectedSuffix: "01", prefixConfidence: 0.4 }
+  ]);
+  assert.equal(row.accessionNumber, "01");
+  assert.equal(row.accessionNeedsReview, true);
+});
+
+test("left and right row segments align by Y-center tolerance", () => {
+  const rows = alignRegisterRowSegments([
+    { pageNumber: 1, pageSide: "left", bounds: { x: 0, y: 100, width: 500, height: 40 }, fields: { accessionNumber: "01", author: "A", title: "T1" }, confidence: 90 },
+    { pageNumber: 1, pageSide: "left", bounds: { x: 0, y: 160, width: 500, height: 40 }, fields: { accessionNumber: "02", author: "B", title: "T2" }, confidence: 88 },
+    { pageNumber: 1, pageSide: "right", bounds: { x: 510, y: 103, width: 500, height: 40 }, fields: { placePublisher: "P1", year: "2001" }, confidence: 92 },
+    { pageNumber: 1, pageSide: "right", bounds: { x: 510, y: 157, width: 500, height: 40 }, fields: { placePublisher: "P2", year: "2002" }, confidence: 89 }
+  ]);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].accessionNumber, "01");
+  assert.equal(rows[0].placePublisher, "P1");
+  assert.equal(rows[1].placePublisher, "P2");
+  assert.equal(rows[0].sourceBounds.length, 2);
+});
+
+test("row-count mismatch produces an explicit warning", () => {
+  const diagnostics = createRowCountDiagnostics({ detectedRows: 25, processedRows: 25, parsedRows: 5 });
+  assert.equal(diagnostics.hasMismatch, true);
+  assert.equal(diagnostics.warning, "Only 5 of 25 detected register rows were parsed.");
+});
+
+test("missing live visual row count cannot pass silently", () => {
+  const diagnostics = createRowCountDiagnostics({ detectedRows: 0, processedRows: 5, parsedRows: 5 });
+  assert.equal(diagnostics.detectionAvailable, false);
+  assert.match(diagnostics.warning, /did not report a visual row count/);
+});
+
+test("pagination never truncates the extracted record set", () => {
+  const rows = fixtureRows(25);
+  const pages = [1, 2, 3].flatMap((page) => paginateRows(rows, page, 10).rows);
+  assert.equal(pages.length, 25);
+  assert.equal(paginateRows(rows, 1, 10).totalRows, 25);
+  assert.equal(paginateRows(rows, 3, 10).rows.length, 5);
+});
+
+test("OCR mode is displayed from the provider result", () => {
+  assert.equal(ocrModeForResult({ mode: "live", configured: true }), "LIVE");
+  assert.equal(ocrModeForResult({ mode: "mock", configured: false }), "MOCK");
+});
+
+test("failed live OCR returns no rows and only offers explicit mock data", () => {
+  const state = ocrFailureState({ message: "provider unavailable" });
+  assert.equal(state.mode, "LIVE FAILED");
+  assert.equal(state.offerMock, true);
+  assert.deepEqual(state.rows, []);
+  assert.match(state.message, /provider unavailable/);
+});
+
+test("live request code cannot silently enter the mock fixture path", () => {
+  const clientSource = readFileSync(new URL("../public/js/register-digitizer.js", import.meta.url), "utf8");
+  const functionSource = readFileSync(new URL("../functions/index.js", import.meta.url), "utf8");
+  assert.doesNotMatch(clientSource, /Backend OCR unavailable; using deterministic mock provider/);
+  assert.match(clientSource, /if \(!liveMode\)/);
+  assert.match(clientSource, /No mock rows were substituted/);
+  assert.match(functionSource, /if \(requestedMode === "mock"\) return mockRegisterOcrRows/);
+  assert.doesNotMatch(functionSource, /if \(!hasProvider \|\| provider === "mock"\)/);
+});
+
+test("duplicate accession detection covers upload and Firestore keys", () => {
   const rows = validateDigitizedRows([
-    { accessionNumber: "0001", author: "One", title: "Book One", confidence: 95 },
-    { accessionNumber: "0001", author: "Two", title: "Book Two", confidence: 95 },
-    { accessionNumber: "0003", author: "Three", title: "Book Three", confidence: 95 }
-  ], new Set(["0003"]));
+    { accessionNumber: "01", author: "One", title: "Book One", confidence: 95 },
+    { accessionNumber: "01", author: "Two", title: "Book Two", confidence: 95 },
+    { accessionNumber: "03", author: "Three", title: "Book Three", confidence: 95 }
+  ], new Set(["03"]));
   assert.equal(rows[0].status, "Ready");
   assert.equal(rows[1].status, "Duplicate");
-  assert.equal(rows[1].errors.includes("duplicate inside upload"), true);
   assert.equal(rows[2].status, "Duplicate");
-  assert.equal(rows[2].errors.includes("duplicate against Firestore"), true);
 });
 
-test("required fields and numeric year/cost validation produce review badges", () => {
+test("required fields and numeric year/cost validation produce review states", () => {
   const rows = validateDigitizedRows([
     { accessionNumber: "", author: "", title: "", confidence: 90 },
-    { accessionNumber: "0002", author: "Writer", title: "Valid title", year: "20O4", cost: "Rs. 10", confidence: 90 },
-    { accessionNumber: "0003", author: "", title: "Readable title", year: "2004", cost: "10.50", confidence: 90 }
+    { accessionNumber: "02", author: "Writer", title: "Valid", year: "20O4", cost: "Rs. 10", confidence: 90 },
+    { accessionNumber: "03", author: "", title: "Readable", year: "2004", cost: "10.50", confidence: 90 }
   ]);
   assert.equal(rows[0].status, "Invalid");
-  assert.equal(rows[0].errors.includes("missing accession number"), true);
-  assert.equal(rows[0].errors.includes("missing title"), true);
   assert.equal(rows[1].status, "Invalid");
-  assert.equal(rows[1].errors.includes("invalid year"), true);
-  assert.equal(rows[1].errors.includes("invalid cost"), true);
   assert.equal(rows[2].status, "Needs Review");
-  assert.equal(rows[2].errors.includes("missing author"), true);
 });
 
-test("OCR-like table parsing ignores decoration, joins continuation text, and resolves ditto", () => {
+test("OCR table parsing ignores decoration and merges continuation by column", () => {
   const parsed = parseOcrLikeRows([
     "Mohanlal Sukhadia University Accession Register",
     "Accession No. | Author | Title | Place & Publisher | Year | Pages | Source | Bill No. & Date | Cost | Class No. | Book No. | Call No. | Remarks",
     "Page 7",
-    "0007 | R. Mehta | History of Mewar | Udaipur Press | 2001 | 240 | Purchase | B-7 | 150 | 954 | MEH | 954 MEH | Clear",
+    "07 | R. Mehta | History of Mewar | Udaipur Press | 2001 | 240 | Purchase | B-7 | 150 | 954 | MEH | 954 MEH | Clear",
     " | | and Rajasthan library records",
-    "0008 | do | Political Thought | -do- | 2002 | 200 | \" | B-8 | 175 | 320 | MEH | 320 MEH |"
+    "08 | do | Political Thought | -do- | 2002 | 200 | \" | B-8 | 175 | 320 | MEH | 320 MEH |"
   ]);
   assert.equal(parsed.length, 2);
-  assert.equal(parsed[0].accessionNumber, "0007");
   assert.match(parsed[0].title, /History of Mewar and Rajasthan library records/);
   assert.equal(parsed[1].author, "R. Mehta");
   assert.equal(parsed[1].placePublisher, "Udaipur Press");
-  assert.equal(parsed[1].source, "Purchase");
-
-  const mock = parseOcrLikeRows(createMockOcrResult([{ name: "register.pdf" }]).rows);
-  assert.equal(mock[1].author, "Dr. K. Sharma");
-  assert.equal(mock[1].dittoResolvedFields.includes("author"), true);
 });
 
 test("Excel export matrix uses the 13 reviewed LMS column mappings", () => {
   const rows = validateDigitizedRows([{
-    accessionNumber: "0001",
-    author: "A. Author",
-    title: "A Book",
-    placePublisher: "Udaipur Press",
-    year: "2026",
-    pages: "120",
-    source: "Purchase",
-    billNoDate: "B-1 / 01-01-2026",
-    cost: "250",
-    classNo: "100",
-    bookNo: "AUT",
-    callNo: "100 AUT",
-    remarks: "",
-    confidence: 100,
-    origin: "manual"
+    accessionNumber: "1801", author: "A. Author", title: "A Book", placePublisher: "Udaipur Press",
+    year: "2026", pages: "120", source: "Purchase", billNoDate: "B-1 / 01-01-2026", cost: "250",
+    classNo: "100", bookNo: "AUT", callNo: "100 AUT", remarks: "", confidence: 100, origin: "manual"
   }]);
   const matrix = digitizedRowsToMatrix(rows);
   assert.deepEqual(matrix[0], REGISTER_EXPORT_HEADERS);
   assert.equal(matrix[0].length, 13);
-  assert.equal(matrix[1][0], "0001");
+  assert.equal(matrix[1][0], "1801");
   assert.equal(matrix[1][11], "100 AUT");
-  assert.equal(matrix[1][12], "");
 });

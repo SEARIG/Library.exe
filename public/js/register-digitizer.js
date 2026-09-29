@@ -24,16 +24,21 @@ import {
   REGISTER_EXPORT_HEADERS,
   REGISTER_FIELD_LABELS,
   REGISTER_FIELDS,
+  alignRegisterRowSegments,
   createEmptyRegisterRow,
   createMockOcrResult,
+  createRowCountDiagnostics,
   digitizedRowToExportRow,
   digitizedRowsToMatrix,
+  ocrFailureState,
+  ocrModeForResult,
   parseOcrLikeRows,
+  resolveAccessionSequences,
   resolveDittoValues,
   rowsReadyForImport,
   summarizeDigitizedRows,
   validateDigitizedRows
-} from "./register-digitizer.mjs?v=2";
+} from "./register-digitizer.mjs?v=3";
 import {
   accessionBookData,
   parseAccessionRegister
@@ -48,6 +53,7 @@ let digitizerRows = [];
 let zoom = 1;
 let searchText = "";
 let statusFilter = "all";
+let lastFilePayload = [];
 
 const fileInput = $("#digitizerFileInput");
 const dropzone = $("#digitizerDropzone");
@@ -64,11 +70,18 @@ $("#clearDigitizerFilesBtn")?.addEventListener("click", () => {
   if ($("#digitizerSearchInput")) $("#digitizerSearchInput").value = "";
   if ($("#digitizerStatusFilter")) $("#digitizerStatusFilter").value = "all";
   $("#digitizerConfigMessage").textContent = "OCR provider status will appear here.";
+  $("#digitizerOcrMode").innerHTML = "<strong>OCR MODE: NOT RUN</strong>";
+  $("#digitizerDebugInfo").textContent = "Image and row-detection diagnostics will appear here.";
   $("#digitizerImportProgress").textContent = "No import started.";
+  $("#retryFullPageDigitizerBtn").hidden = true;
+  $("#useMockDigitizerBtn").hidden = true;
+  lastFilePayload = [];
   renderFiles();
   renderRows();
 });
-$("#startDigitizerExtractionBtn")?.addEventListener("click", () => startExtraction().catch(handleError));
+$("#startDigitizerExtractionBtn")?.addEventListener("click", () => startExtraction("live", false).catch(handleError));
+$("#retryFullPageDigitizerBtn")?.addEventListener("click", () => startExtraction("live", true).catch(handleError));
+$("#useMockDigitizerBtn")?.addEventListener("click", () => startExtraction("mock", false).catch(handleError));
 $("#validateDigitizerRowsBtn")?.addEventListener("click", () => validateRowsFromGrid().catch(handleError));
 $("#exportDigitizerExcelBtn")?.addEventListener("click", () => exportReviewedExcel().catch(handleError));
 $("#importDigitizerRowsBtn")?.addEventListener("click", () => importReviewedRows().catch(handleError));
@@ -92,6 +105,7 @@ $("#zoomOutDigitizerBtn")?.addEventListener("click", () => {
   zoom = Math.max(0.5, zoom - 0.1);
   renderPreview();
 });
+$("#closeDigitizerSourceBtn")?.addEventListener("click", () => $("#digitizerSourceDialog")?.close());
 
 dropzone?.addEventListener("dragover", (event) => {
   event.preventDefault();
@@ -123,17 +137,30 @@ function addFiles(files = []) {
   renderFiles();
 }
 
+function imageDimensions(dataUrl, type) {
+  if (!String(type || "").startsWith("image/")) return Promise.resolve({ width: 0, height: 0 });
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth || 0, height: image.naturalHeight || 0 });
+    image.onerror = () => resolve({ width: 0, height: 0 });
+    image.src = dataUrl;
+  });
+}
+
 function fileToPayload(item, pageNumber) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const dataUrl = String(reader.result || "");
+      const dimensions = await imageDimensions(dataUrl, item.type);
       resolve({
         name: item.name,
         type: item.type || (item.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "application/octet-stream"),
         size: item.size,
         pageNumber,
         rotation: item.rotation,
+        width: dimensions.width,
+        height: dimensions.height,
         dataUrl,
         base64: dataUrl.includes(",") ? dataUrl.split(",").pop() : dataUrl
       });
@@ -209,28 +236,84 @@ async function existingAccessionSet() {
     .filter(Boolean));
 }
 
-async function startExtraction() {
+async function startExtraction(mode = "live", retryFullPage = false) {
   if (!digitizerFiles.length) throw new Error("Choose register images or PDFs first.");
-  $("#digitizerConfigMessage").innerHTML = `<div class="empty">Extracting rows...</div>`;
-  const filePayload = await Promise.all(digitizerFiles.map((item, index) => fileToPayload(item, index + 1)));
+  const liveMode = mode === "live";
+  $("#startDigitizerExtractionBtn").disabled = true;
+  $("#retryFullPageDigitizerBtn").disabled = true;
+  $("#useMockDigitizerBtn").hidden = true;
+  $("#digitizerOcrMode").innerHTML = `<strong>OCR MODE: ${liveMode ? "LIVE — RUNNING" : "MOCK — RUNNING"}</strong>`;
+  $("#digitizerConfigMessage").innerHTML = `<div class="empty">${liveMode ? "Scanning the complete register page..." : "Loading explicit mock test rows..."}</div>`;
+  lastFilePayload = await Promise.all(digitizerFiles.map((item, index) => fileToPayload(item, index + 1)));
   let result;
   try {
-    result = (await extractRegisterOcr({ files: filePayload })).data;
+    result = (await extractRegisterOcr({ files: lastFilePayload, mode, fullPage: true, retryFullPage })).data;
   } catch (error) {
-    console.warn("Backend OCR unavailable; using deterministic mock provider.", error);
-    result = createMockOcrResult(filePayload);
+    if (!liveMode) {
+      console.warn("Explicit backend mock unavailable; using local mock test data.", error);
+      result = createMockOcrResult(lastFilePayload);
+    } else {
+      const failure = ocrFailureState(error);
+      digitizerRows = [];
+      $("#digitizerOcrMode").innerHTML = `<strong>OCR MODE: ${failure.mode}</strong>`;
+      $("#digitizerConfigMessage").innerHTML = `<div class="empty"><strong>Live OCR failed</strong><span>${escapeHtml(error.code || "error")}: ${escapeHtml(failure.message)}</span><span>No mock rows were substituted.</span></div>`;
+      $("#digitizerDebugInfo").innerHTML = `<strong>Live extraction returned no rows.</strong>`;
+      $("#retryFullPageDigitizerBtn").hidden = false;
+      $("#useMockDigitizerBtn").hidden = false;
+      renderRows();
+      showToast(`Live OCR failed: ${failure.message}`, "error");
+      return;
+    }
+  } finally {
+    $("#startDigitizerExtractionBtn").disabled = false;
+    $("#retryFullPageDigitizerBtn").disabled = false;
   }
+
+  const providerRows = Array.isArray(result.segments) && result.segments.length
+    ? alignRegisterRowSegments(result.segments)
+    : (result.rows || []);
   const existing = await existingAccessionSet();
-  const parsedRows = parseOcrLikeRows(result.rows || []);
-  const resolvedRows = resolveDittoValues(parsedRows);
+  const parsedRows = parseOcrLikeRows(providerRows);
+  const accessionRows = resolveAccessionSequences(parsedRows);
+  const resolvedRows = resolveDittoValues(accessionRows);
   digitizerRows = validateDigitizedRows(resolvedRows, existing);
   const dittoCount = digitizerRows.reduce((total, row) => total + (row.dittoResolvedFields?.length || 0), 0);
+  const diagnostics = createRowCountDiagnostics({
+    detectedRows: result.debug?.rowsDetected ?? (mode === "mock" ? providerRows.length : 0),
+    processedRows: result.debug?.rowsProcessed ?? providerRows.length,
+    parsedRows: digitizerRows.length
+  });
+  const modeLabel = ocrModeForResult(result);
+  const firstFile = lastFilePayload[0] || {};
+  const debug = result.debug || {};
+  const rejectedRows = Math.max(0, diagnostics.detectedRows - diagnostics.parsedRows);
+  $("#digitizerOcrMode").innerHTML = `<strong>OCR MODE: ${modeLabel}</strong>`;
   $("#digitizerConfigMessage").innerHTML = `
     <div class="${result.configured ? "success-box" : "empty"}">
       <strong>Provider: ${escapeHtml(result.provider || "mock")}</strong>
       <span>${escapeHtml(result.message || "")}</span>
       <span>Pages processed: ${Number(result.pages || digitizerFiles.length)} · Rows: ${digitizerRows.length} · Ditto cells resolved: ${dittoCount}</span>
+      ${diagnostics.warning ? `<strong>${escapeHtml(diagnostics.warning)}</strong>` : ""}
     </div>`;
+  $("#digitizerDebugInfo").innerHTML = `
+    <strong>[REGISTER-OCR]</strong>
+    <span>image=${Number(debug.imageWidth || firstFile.width || 0)}x${Number(debug.imageHeight || firstFile.height || 0)}</span>
+    <span>cropBounds=${escapeHtml(JSON.stringify(debug.cropBounds || "full-image"))}</span>
+    <span>tableTop=${Number(debug.tableTop || 0)} · tableBottom=${Number(debug.tableBottom || firstFile.height || 0)}</span>
+    <span>rowsDetected=${diagnostics.detectedRows} · rowsProcessed=${diagnostics.processedRows} · rowsParsed=${diagnostics.parsedRows} · rowsRejected=${rejectedRows}</span>`;
+  console.log("[REGISTER-OCR]", {
+    mode: modeLabel,
+    image: `${Number(debug.imageWidth || firstFile.width || 0)}x${Number(debug.imageHeight || firstFile.height || 0)}`,
+    cropBounds: debug.cropBounds || "full-image",
+    tableTop: Number(debug.tableTop || 0),
+    tableBottom: Number(debug.tableBottom || firstFile.height || 0),
+    rowsDetected: diagnostics.detectedRows,
+    rowsProcessed: diagnostics.processedRows,
+    rowsParsed: diagnostics.parsedRows,
+    rowsRejected: rejectedRows
+  });
+  $("#retryFullPageDigitizerBtn").hidden = !(diagnostics.hasMismatch || (modeLabel === "LIVE" && !diagnostics.detectionAvailable));
+  $("#useMockDigitizerBtn").hidden = modeLabel === "LIVE";
   renderRows();
 }
 
@@ -278,7 +361,7 @@ function renderRows() {
             <td>${escapeHtml(row.rowNumber || "")}</td>
             ${REGISTER_FIELDS.map((field) => `<td><input data-row-index="${rowIndex}" data-field="${field}" value="${escapeHtml(row[field] || "")}" aria-label="${escapeHtml(REGISTER_FIELD_LABELS[field])} row ${rowIndex + 1}"></td>`).join("")}
             <td><span class="digitizer-validation-text">${escapeHtml((row.errors || []).join("; ") || "Valid")}</span></td>
-            <td><button class="btn btn-danger digitizer-delete-row" data-delete-row="${rowIndex}" type="button">Delete</button></td>
+            <td><div class="row-actions"><button class="btn btn-muted" data-view-source="${rowIndex}" type="button">View Source</button><button class="btn btn-danger digitizer-delete-row" data-delete-row="${rowIndex}" type="button">Delete</button></div></td>
           </tr>`).join("")}
       </tbody>
     </table>`;
@@ -295,6 +378,78 @@ function renderRows() {
       showToast("Row deleted from this review session.", "success");
     });
   });
+  target.querySelectorAll("[data-view-source]").forEach((button) => {
+    button.addEventListener("click", () => showSourceForRow(Number(button.dataset.viewSource)).catch(handleError));
+  });
+}
+
+function combinedSourceBounds(row, image) {
+  const bounds = (row.sourceBounds?.length ? row.sourceBounds : (row.bounds ? [row.bounds] : []))
+    .map((bound) => {
+      let x = Number(bound.x ?? bound.left ?? 0);
+      let y = Number(bound.y ?? bound.top ?? 0);
+      let width = Number(bound.width ?? Math.max(0, Number(bound.right || 0) - x));
+      let height = Number(bound.height ?? Math.max(0, Number(bound.bottom || 0) - y));
+      if ([x, y, width, height].every((value) => value >= 0 && value <= 1)) {
+        x *= image.naturalWidth;
+        y *= image.naturalHeight;
+        width *= image.naturalWidth;
+        height *= image.naturalHeight;
+      }
+      return { x, y, width, height };
+    })
+    .filter((bound) => bound.width > 0 && bound.height > 0);
+  if (!bounds.length) return null;
+  const padding = Math.max(8, Math.round(Math.max(...bounds.map((bound) => bound.height)) * 0.2));
+  const left = Math.max(0, Math.min(...bounds.map((bound) => bound.x)) - padding);
+  const top = Math.max(0, Math.min(...bounds.map((bound) => bound.y)) - padding);
+  const right = Math.min(image.naturalWidth, Math.max(...bounds.map((bound) => bound.x + bound.width)) + padding);
+  const bottom = Math.min(image.naturalHeight, Math.max(...bounds.map((bound) => bound.y + bound.height)) + padding);
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+async function showSourceForRow(rowIndex) {
+  const row = digitizerRows[rowIndex];
+  if (!row) return;
+  const pageIndex = Math.max(0, Number(row.pageNumber || 1) - 1);
+  const file = digitizerFiles[pageIndex];
+  const dialog = $("#digitizerSourceDialog");
+  const canvas = $("#digitizerSourceCanvas");
+  const fallback = $("#digitizerSourceFallback");
+  $("#digitizerSourceDebug").textContent = JSON.stringify({
+    visualRow: row.rowNumber,
+    rawAccessionText: row.rawAccessionText || row.accessionNumber,
+    detectedPrefix: row.detectedPrefix || "",
+    detectedSuffix: row.detectedSuffix || "",
+    resolvedAccessionNumber: row.resolvedAccessionNumber || row.accessionNumber,
+    prefixConfidence: row.accessionPrefixConfidence || 0,
+    confidence: row.confidence || 0,
+    rawText: row.rawText || "",
+    sourceBounds: row.sourceBounds || row.bounds || []
+  }, null, 2);
+  canvas.hidden = true;
+  fallback.hidden = false;
+  fallback.textContent = "Source geometry was not returned for this row.";
+  if (file && !file.name.toLowerCase().endsWith(".pdf")) {
+    const image = new Image();
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error("Could not load the source register image."));
+      image.src = file.objectUrl;
+    });
+    const crop = combinedSourceBounds(row, image);
+    if (crop) {
+      const scale = Math.min(1, 900 / crop.width);
+      canvas.width = Math.max(1, Math.round(crop.width * scale));
+      canvas.height = Math.max(1, Math.round(crop.height * scale));
+      canvas.getContext("2d").drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
+      canvas.hidden = false;
+      fallback.hidden = true;
+    }
+  } else if (file?.name.toLowerCase().endsWith(".pdf")) {
+    fallback.textContent = "Row crop preview requires image geometry. Use the full PDF preview above for this page.";
+  }
+  dialog?.showModal();
 }
 
 function renderSummary() {
@@ -362,7 +517,7 @@ async function exportReviewedExcel() {
 
 async function downloadSampleTemplate() {
   const sample = [digitizedRowToExportRow(createEmptyRegisterRow({
-    accessionNumber: "0001", author: "Author name", title: "Book title", placePublisher: "Place: Publisher",
+    accessionNumber: "SAMPLE-01", author: "Author name", title: "Book title", placePublisher: "Place: Publisher",
     year: "2026", pages: "250", source: "Purchase", billNoDate: "B-001 / 01-01-2026", cost: "500",
     classNo: "000", bookNo: "AUT", callNo: "000 AUT", remarks: ""
   }))];

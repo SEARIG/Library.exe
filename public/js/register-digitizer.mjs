@@ -117,7 +117,13 @@ function objectToRegisterRow(source = {}, index = 0) {
     rowNumber: source.rowNumber || index + 1,
     confidence: Number(source.confidence ?? 0),
     rawText: cleanCell(source.rawText || REGISTER_FIELDS.map((field) => row[field]).filter(Boolean).join(" | ")),
-    rawCells: source.rawCells || null
+    rawCells: source.rawCells || null,
+    rawAccessionText: cleanCell(source.rawAccessionText || row.accessionNumber),
+    detectedPrefix: cleanCell(source.detectedPrefix),
+    detectedSuffix: cleanCell(source.detectedSuffix),
+    prefixConfidence: Number(source.prefixConfidence ?? source.accessionPrefixConfidence ?? 0),
+    bounds: source.bounds || null,
+    sourceBounds: Array.isArray(source.sourceBounds) ? source.sourceBounds : (source.bounds ? [source.bounds] : [])
   };
 }
 
@@ -167,38 +173,190 @@ export function confidenceStatus(confidence = 0) {
   return "low";
 }
 
+function confidenceRatio(value = 0) {
+  const number = Number(value || 0);
+  return number > 1 ? number / 100 : number;
+}
+
+export function resolveAccessionSequences(rows = [], minimumConfidence = 0.85) {
+  const candidates = new Map();
+  rows.forEach((row) => {
+    const raw = cleanCell(row.rawAccessionText || row.accessionNumber);
+    const spaced = raw.match(/^(\d{1,6})[\s\-/]+(\d{1,3})$/);
+    const prefix = cleanCell(row.detectedPrefix || spaced?.[1]);
+    const confidence = confidenceRatio(row.prefixConfidence ?? row.accessionPrefixConfidence ?? (spaced ? 0.9 : 0));
+    if (prefix && confidence >= minimumConfidence) {
+      const entry = candidates.get(prefix) || { count: 0, confidence: 0 };
+      entry.count += 1;
+      entry.confidence = Math.max(entry.confidence, confidence);
+      candidates.set(prefix, entry);
+    }
+  });
+  const ranked = [...candidates.entries()].sort((a, b) => b[1].count - a[1].count || b[1].confidence - a[1].confidence);
+  const pagePrefix = ranked.length && (!ranked[1] || ranked[0][1].count > ranked[1][1].count || ranked[0][0] === ranked[1][0])
+    ? ranked[0][0]
+    : "";
+  const pagePrefixConfidence = pagePrefix ? ranked[0][1].confidence : 0;
+
+  return rows.map((sourceRow) => {
+    const row = { ...sourceRow };
+    const raw = cleanCell(row.rawAccessionText || row.accessionNumber);
+    const spaced = raw.match(/^(\d{1,6})[\s\-/]+(\d{1,3})$/);
+    const detectedPrefix = cleanCell(row.detectedPrefix || spaced?.[1] || pagePrefix);
+    let detectedSuffix = cleanCell(row.detectedSuffix || spaced?.[2]);
+    if (!detectedSuffix && pagePrefix && /^\d{1,3}$/.test(raw)) detectedSuffix = raw;
+    if (!detectedSuffix && pagePrefix && raw.startsWith(pagePrefix) && raw.length > pagePrefix.length) {
+      detectedSuffix = raw.slice(pagePrefix.length);
+    }
+    const explicitConfidence = confidenceRatio(row.prefixConfidence ?? row.accessionPrefixConfidence ?? 0);
+    const resolvedConfidence = Math.max(explicitConfidence, detectedPrefix === pagePrefix ? pagePrefixConfidence : 0);
+    const canResolve = Boolean(pagePrefix && detectedPrefix === pagePrefix && detectedSuffix && resolvedConfidence >= minimumConfidence);
+    const lowConfidencePrefix = Boolean(detectedPrefix && detectedSuffix && !canResolve);
+    const resolved = canResolve ? `${pagePrefix}${detectedSuffix}` : cleanCell(row.accessionNumber || raw);
+    return {
+      ...row,
+      rawAccessionText: raw,
+      detectedPrefix,
+      detectedSuffix,
+      resolvedAccessionNumber: resolved,
+      accessionNumber: resolved,
+      accessionPrefixConfidence: resolvedConfidence,
+      accessionNeedsReview: lowConfidencePrefix
+    };
+  });
+}
+
+function segmentBounds(segment = {}) {
+  const source = segment.bounds || segment.sourceBounds?.[0] || {};
+  const y = Number(source.y ?? source.top ?? segment.y ?? 0);
+  const height = Math.max(1, Number(source.height ?? segment.height ?? 1));
+  return { ...source, y, height, centerY: y + height / 2 };
+}
+
+function segmentFields(segment = {}) {
+  return segment.fields || segment.row || segment.cells || segment;
+}
+
+export function alignRegisterRowSegments(segments = [], toleranceRatio = 0.7) {
+  const indexed = segments.map((segment, index) => ({
+    ...segment,
+    _index: index,
+    _bounds: segmentBounds(segment),
+    pageNumber: Number(segment.pageNumber || 1),
+    pageSide: cleanCell(segment.pageSide || segment.side).toLowerCase()
+  }));
+  const standalone = indexed.filter((item) => !["left", "right"].includes(item.pageSide));
+  const left = indexed.filter((item) => item.pageSide === "left");
+  const right = indexed.filter((item) => item.pageSide === "right");
+  const usedRight = new Set();
+  const merged = left.map((leftSegment) => {
+    const candidates = right
+      .filter((rightSegment) => rightSegment.pageNumber === leftSegment.pageNumber && !usedRight.has(rightSegment._index))
+      .map((rightSegment) => ({
+        rightSegment,
+        distance: Math.abs(leftSegment._bounds.centerY - rightSegment._bounds.centerY),
+        tolerance: Math.max(leftSegment._bounds.height, rightSegment._bounds.height) * toleranceRatio
+      }))
+      .filter((match) => match.distance <= match.tolerance)
+      .sort((a, b) => a.distance - b.distance);
+    const match = candidates[0]?.rightSegment;
+    if (match) usedRight.add(match._index);
+    const leftFields = segmentFields(leftSegment);
+    const rightFields = match ? segmentFields(match) : {};
+    return {
+      ...leftFields,
+      ...Object.fromEntries(Object.entries(rightFields).filter(([, value]) => cleanCell(value))),
+      pageNumber: leftSegment.pageNumber,
+      pageSide: match ? "both" : "left",
+      rowNumber: leftSegment.rowNumber || match?.rowNumber || leftSegment._index + 1,
+      confidence: Math.min(Number(leftSegment.confidence ?? 100), Number(match?.confidence ?? 100)),
+      rawText: cleanCell(`${leftSegment.rawText || ""} ${match?.rawText || ""}`),
+      sourceBounds: [leftSegment._bounds, ...(match ? [match._bounds] : [])]
+    };
+  });
+  right.filter((item) => !usedRight.has(item._index)).forEach((item) => {
+    merged.push({ ...segmentFields(item), pageNumber: item.pageNumber, pageSide: "right",
+      rowNumber: item.rowNumber || item._index + 1, confidence: Number(item.confidence ?? 0),
+      rawText: cleanCell(item.rawText), sourceBounds: [item._bounds] });
+  });
+  standalone.forEach((item) => merged.push({ ...segmentFields(item), ...item, sourceBounds: [item._bounds] }));
+  return merged.sort((a, b) => Number(a.pageNumber || 1) - Number(b.pageNumber || 1)
+    || Math.min(...(a.sourceBounds || [{ centerY: a.rowNumber || 0 }]).map((bound) => Number(bound.centerY ?? bound.y ?? 0)))
+    - Math.min(...(b.sourceBounds || [{ centerY: b.rowNumber || 0 }]).map((bound) => Number(bound.centerY ?? bound.y ?? 0))));
+}
+
+export function createRowCountDiagnostics({ detectedRows = 0, processedRows = 0, parsedRows = 0 } = {}) {
+  const detected = Math.max(0, Number(detectedRows || 0));
+  const processed = Math.max(0, Number(processedRows || parsedRows || 0));
+  const parsed = Math.max(0, Number(parsedRows || 0));
+  const detectionAvailable = detected > 0;
+  return {
+    detectedRows: detected,
+    processedRows: processed,
+    parsedRows: parsed,
+    detectionAvailable,
+    hasMismatch: detectionAvailable && detected > parsed,
+    warning: !detectionAvailable && parsed
+      ? "Live OCR did not report a visual row count. Verify the full page before export."
+      : detected > parsed ? `Only ${parsed} of ${detected} detected register rows were parsed.` : ""
+  };
+}
+
+export function paginateRows(rows = [], page = 1, pageSize = 10) {
+  const safeSize = Math.max(1, Number(pageSize || 10));
+  const totalPages = Math.max(1, Math.ceil(rows.length / safeSize));
+  const safePage = Math.min(totalPages, Math.max(1, Number(page || 1)));
+  return { rows: rows.slice((safePage - 1) * safeSize, safePage * safeSize), page: safePage, pageSize: safeSize,
+    totalRows: rows.length, totalPages };
+}
+
+export function ocrModeForResult(result = {}) {
+  return result.mode === "live" || result.configured === true ? "LIVE" : "MOCK";
+}
+
+export function ocrFailureState(error = {}) {
+  return {
+    mode: "LIVE FAILED",
+    offerMock: true,
+    rows: [],
+    message: cleanCell(error.message || "Live OCR failed.")
+  };
+}
+
 export function createMockOcrResult(files = []) {
   const pageCount = files.reduce((sum, file) => sum + (String(file.name || "").toLowerCase().endsWith(".pdf") ? 2 : 1), 0) || 1;
+  const rows = Array.from({ length: 25 }, (_, index) => {
+    const number = String(index + 1).padStart(2, "0");
+    return {
+      accessionNumber: `MOCK-${number}`,
+      rawAccessionText: `MOCK-${number}`,
+      author: index === 0 ? "Mock Author" : "do",
+      title: index === 0 ? "Mock Register Book 01" : `Mock Register Book ${number}`,
+      placePublisher: index === 0 ? "Mock Place: Test Publisher" : "-do-",
+      year: "2000",
+      pages: String(100 + index),
+      source: index === 0 ? "Test Data" : "\"",
+      billNoDate: `TEST-${number}`,
+      cost: "0",
+      classNo: "000",
+      bookNo: `M${number}`,
+      callNo: `000 M${number}`,
+      remarks: "Explicit mock test row",
+      pageNumber: 1,
+      pageSide: "both",
+      rowNumber: index + 1,
+      confidence: 100,
+      rawText: `MOCK-${number} explicit test data`
+    };
+  });
   return {
     provider: "mock",
+    mode: "mock",
     configured: false,
-    message: "OCR credentials are not configured. Mock register rows are shown for review/testing.",
+    message: "Explicit mock test data. No uploaded handwriting was read.",
     pages: pageCount,
-    rows: [
-      { accessionNumber: "0001", author: "Dr. K. Sharma", title: "Fundamentals of Physics",
-        placePublisher: "Udaipur: Academic Press", year: "1998", pages: "412", source: "Purchase",
-        billNoDate: "B-12 / 01-07-1998", cost: "125.00", classNo: "530", bookNo: "SHA", callNo: "530 SHA",
-        remarks: "clean handwriting", pageNumber: 1, pageSide: "left", rowNumber: 1, confidence: 96,
-        rawText: "0001 Dr K Sharma Fundamentals of Physics" },
-      { accessionNumber: "0002", author: "do", title: "Organic Chemistry Notes", placePublisher: "-do-",
-        year: "1999", pages: "288", source: "\"", billNoDate: "B-13 / 02-07-1998", cost: "90", classNo: "547",
-        bookNo: "ORG", callNo: "547 ORG", remarks: "low-confidence title", pageNumber: 1, pageSide: "left",
-        rowNumber: 2, confidence: 82, rawText: "0002 do Organic Chemistry Notes -do-" },
-      { accessionNumber: "0003", author: "M. Jain", title: "Data Structures and Algorithms",
-        placePublisher: "Delhi: Tech House", year: "20O1", pages: "", source: "Donation", billNoDate: "", cost: "abc",
-        classNo: "005.73", bookNo: "JAI", callNo: "005.73 JAI", remarks: "unclear year and blank cell",
-        pageNumber: Math.min(2, pageCount), pageSide: "right", rowNumber: 3, confidence: 74,
-        rawText: "0003 M Jain Data Structures and Algorithms 20O1" },
-      { accessionNumber: "0002", author: "Duplicate Author", title: "Repeated OCR Row", placePublisher: "",
-        year: "2001", pages: "100", source: "", billNoDate: "", cost: "50", classNo: "", bookNo: "", callNo: "",
-        remarks: "duplicate accession", pageNumber: Math.min(2, pageCount), pageSide: "right", rowNumber: 4,
-        confidence: 91, rawText: "0002 Duplicate Author Repeated OCR Row" },
-      { accessionNumber: "0004", author: "A. Mehta",
-        title: "Multi-line title: History of Rajasthan and Mewar Library Records", placePublisher: "Udaipur",
-        year: "2004", pages: "350", source: "Gift", billNoDate: "", cost: "0", classNo: "954.4", bookNo: "MEH",
-        callNo: "954.4 MEH", remarks: "multi-line title", pageNumber: pageCount, pageSide: "left", rowNumber: 5,
-        confidence: 88, rawText: "0004 A Mehta History of Rajasthan / and Mewar Library Records" }
-    ]
+    debug: { rowsDetected: rows.length, rowsProcessed: rows.length, rowsReturned: rows.length, mock: true },
+    rows
   };
 }
 
@@ -219,6 +377,7 @@ export function validateDigitizedRows(rows = [], existingAccessions = new Set())
     if (row.cost && Number.isNaN(Number(cleanCell(row.cost).replace(/,/g, "")))) errors.push("invalid cost");
     if (row.rawText && seen.get(key)?.rawText === row.rawText) errors.push("repeated OCR row");
     if (["author", "title", "placePublisher"].some((field) => cleanCell(row[field]).includes("?"))) errors.push("uncertain OCR text");
+    if (row.accessionNeedsReview) errors.push("uncertain accession prefix");
     if (Number(row.confidence || 0) < 80 && !["manual", "reviewed"].includes(row.origin)) errors.push("low confidence");
     if (key && !seen.has(key)) seen.set(key, row);
     const status = errors.some((error) => error.includes("duplicate")) ? "Duplicate"

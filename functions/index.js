@@ -489,132 +489,42 @@ function tenantFields(root) {
 
 function mockRegisterOcrRows(files = []) {
   const pageCount = files.reduce((sum, file) => sum + (String(file.name || "").toLowerCase().endsWith(".pdf") ? 2 : 1), 0) || 1;
+  const rows = Array.from({ length: 25 }, (_, index) => {
+    const number = String(index + 1).padStart(2, "0");
+    return {
+      accessionNumber: `MOCK-${number}`,
+      rawAccessionText: `MOCK-${number}`,
+      author: index === 0 ? "Mock Author" : "do",
+      title: index === 0 ? "Mock Register Book 01" : `Mock Register Book ${number}`,
+      placePublisher: index === 0 ? "Mock Place: Test Publisher" : "-do-",
+      year: "2000",
+      pages: String(100 + index),
+      source: index === 0 ? "Test Data" : "\"",
+      billNoDate: `TEST-${number}`,
+      cost: "0",
+      classNo: "000",
+      bookNo: `M${number}`,
+      callNo: `000 M${number}`,
+      remarks: "Explicit mock test row",
+      pageNumber: 1,
+      pageSide: "both",
+      rowNumber: index + 1,
+      confidence: 100,
+      rawText: `MOCK-${number} explicit test data`
+    };
+  });
   return {
     provider: "mock",
+    mode: "mock",
     configured: false,
-    message: "OCR credentials are not configured. Deterministic mock register data is returned for review/testing.",
+    message: "Explicit mock test data. No uploaded handwriting was read.",
     pages: pageCount,
-    rows: [
-      {
-        accessionNumber: "0001",
-        accessionDate: "01/07/1998",
-        author: "Dr. K. Sharma",
-        title: "Fundamentals of Physics",
-        placePublisher: "Udaipur: Academic Press",
-        year: "1998",
-        pages: "412",
-        volume: "I",
-        source: "Purchase",
-        billNoDate: "B-12 / 01-07-1998",
-        cost: "125.00",
-        classNo: "530",
-        bookNo: "SHA",
-        callNo: "530 SHA",
-        remarks: "",
-        imageUrl: "",
-        notes: "clean handwriting",
-        pageNumber: 1,
-        rowNumber: 1,
-        confidence: 96,
-        rawText: "0001 Dr K Sharma Fundamentals of Physics"
-      },
-      {
-        accessionNumber: "0002",
-        accessionDate: "02/07/1998",
-        author: "do",
-        title: "Organic Chemistry Notes",
-        placePublisher: "-do-",
-        year: "1999",
-        pages: "288",
-        volume: "",
-        source: "\"",
-        billNoDate: "B-13 / 02-07-1998",
-        cost: "90",
-        classNo: "547",
-        bookNo: "ORG",
-        callNo: "547 ORG",
-        remarks: "",
-        imageUrl: "",
-        notes: "low-confidence author",
-        pageNumber: 1,
-        rowNumber: 2,
-        confidence: 82,
-        rawText: "0002 S? Organic Chemistry Notes"
-      },
-      {
-        accessionNumber: "0003",
-        accessionDate: "03/07/1998",
-        author: "M. Jain",
-        title: "Data Structures and Algorithms",
-        placePublisher: "Delhi: Tech House",
-        year: "20O1",
-        pages: "",
-        volume: "",
-        source: "Donation",
-        billNoDate: "",
-        cost: "abc",
-        classNo: "005.73",
-        bookNo: "JAI",
-        callNo: "005.73 JAI",
-        remarks: "",
-        imageUrl: "",
-        notes: "unclear year and blank cell",
-        pageNumber: Math.min(2, pageCount),
-        rowNumber: 3,
-        confidence: 74,
-        rawText: "0003 M Jain Data Structures and Algorithms 20O1"
-      },
-      {
-        accessionNumber: "0002",
-        accessionDate: "04/07/1998",
-        author: "Duplicate Author",
-        title: "Repeated OCR Row",
-        placePublisher: "",
-        year: "2001",
-        pages: "100",
-        volume: "",
-        source: "",
-        billNoDate: "",
-        cost: "50",
-        classNo: "",
-        bookNo: "",
-        callNo: "",
-        remarks: "",
-        imageUrl: "",
-        notes: "duplicate accession",
-        pageNumber: Math.min(2, pageCount),
-        rowNumber: 4,
-        confidence: 91,
-        rawText: "0002 Duplicate Author Repeated OCR Row"
-      },
-      {
-        accessionNumber: "0004",
-        accessionDate: "05/07/1998",
-        author: "A. Mehta",
-        title: "Multi-line title: History of Rajasthan and Mewar Library Records",
-        placePublisher: "Udaipur",
-        year: "2004",
-        pages: "350",
-        volume: "II",
-        source: "Gift",
-        billNoDate: "",
-        cost: "0",
-        classNo: "954.4",
-        bookNo: "MEH",
-        callNo: "954.4 MEH",
-        remarks: "",
-        imageUrl: "",
-        notes: "multi-line title",
-        pageNumber: pageCount,
-        rowNumber: 5,
-        confidence: 88,
-        rawText: "0004 A Mehta History of Rajasthan / and Mewar Library Records"
-      }
-    ]
+    debug: { rowsDetected: rows.length, rowsProcessed: rows.length, rowsReturned: rows.length, mock: true },
+    rows
   };
 }
 
-async function callRegisterOcrProvider(files = [], provider = "custom") {
+async function callRegisterOcrProvider(files = [], provider = "custom", options = {}) {
   const endpoint = clean(process.env.REGISTER_OCR_ENDPOINT || "");
   const apiKey = clean(process.env.REGISTER_OCR_API_KEY || "");
   if (!endpoint) {
@@ -637,18 +547,29 @@ async function callRegisterOcrProvider(files = [], provider = "custom") {
       ],
       instructions: [
         "Extract one accession-register record per visual table row.",
+        "Process the complete image height and never cap or sample the number of rows.",
+        "Detect rows using horizontal ruling lines, OCR bounding boxes, Y positions, and row spacing.",
+        "Return left and right row segments with bounding boxes when an open register spans two pages.",
+        "Match left and right segments by Y-center tolerance and preserve rows containing only accession plus ditto marks.",
         "Ignore page decoration, page numbers, headings, and printed column labels.",
         "Keep multi-word and multi-line author/title text in a single field.",
         "Preserve do, -do-, quote, and ditto marks verbatim; the review client resolves them by column.",
-        "Use pageNumber, pageSide (left/right), rowNumber, confidence, and rawText for review alignment.",
+        "Use pageNumber, pageSide (left/right), rowNumber, confidence, rawText, rawAccessionText, detectedPrefix, detectedSuffix, prefixConfidence, and sourceBounds.",
+        "Return debug imageWidth, imageHeight, cropBounds, tableTop, tableBottom, rowsDetected, rowsProcessed, and rowsReturned.",
         "Leave unreadable cells blank instead of guessing."
       ],
+      fullPage: true,
+      retryFullPage: options.retryFullPage === true,
+      preserveAllRows: true,
+      returnGeometry: true,
       files: files.map((file, index) => ({
         name: clean(file.name || `page-${index + 1}`),
         type: clean(file.type || "application/octet-stream"),
         size: Number(file.size || 0),
         pageNumber: Number(file.pageNumber || index + 1),
         rotation: Number(file.rotation || 0),
+        width: Number(file.width || 0),
+        height: Number(file.height || 0),
         base64: clean(file.base64 || "")
       }))
     })
@@ -663,15 +584,39 @@ async function callRegisterOcrProvider(files = [], provider = "custom") {
   if (!response.ok) {
     throw new HttpsError("internal", payload?.message || `OCR provider failed with HTTP ${response.status}`);
   }
-  if (!payload || !Array.isArray(payload.rows)) {
-    throw new HttpsError("internal", "OCR provider response must include a rows array.");
+  if (!payload || (!Array.isArray(payload.rows) && !Array.isArray(payload.segments))) {
+    throw new HttpsError("internal", "OCR provider response must include rows or geometry-aware row segments.");
   }
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  const debug = {
+    imageWidth: Number(payload.debug?.imageWidth || files[0]?.width || 0),
+    imageHeight: Number(payload.debug?.imageHeight || files[0]?.height || 0),
+    cropBounds: payload.debug?.cropBounds || null,
+    tableTop: Number(payload.debug?.tableTop || 0),
+    tableBottom: Number(payload.debug?.tableBottom || files[0]?.height || 0),
+    rowsDetected: Number(payload.debug?.rowsDetected ?? payload.rowsDetected ?? 0),
+    rowsProcessed: Number(payload.debug?.rowsProcessed ?? payload.rowsProcessed ?? rows.length),
+    rowsReturned: Number(payload.debug?.rowsReturned ?? rows.length)
+  };
+  console.log("[REGISTER-OCR]", {
+    provider,
+    image: `${debug.imageWidth}x${debug.imageHeight}`,
+    cropBounds: debug.cropBounds,
+    tableTop: debug.tableTop,
+    tableBottom: debug.tableBottom,
+    rowsDetected: debug.rowsDetected,
+    rowsProcessed: debug.rowsProcessed,
+    rowsReturned: debug.rowsReturned
+  });
   return {
     provider: payload.provider || provider,
+    mode: "live",
     configured: true,
     message: payload.message || "OCR provider returned extracted rows. Review before import.",
     pages: Number(payload.pages || files.length || 1),
-    rows: payload.rows
+    debug,
+    rows,
+    segments: Array.isArray(payload.segments) ? payload.segments : []
   };
 }
 
@@ -687,14 +632,22 @@ exports.extractRegisterOcr = onCall({
     const size = Number(file.size || 0);
     if (size > 8 * 1024 * 1024) throw new HttpsError("invalid-argument", "Each register page/PDF must be 8 MB or smaller.");
   }
-  const provider = clean(process.env.REGISTER_OCR_PROVIDER || "mock").toLowerCase();
-  const hasProvider = Boolean(clean(process.env.REGISTER_OCR_ENDPOINT || ""));
+  const requestedMode = clean(request.data?.mode || "live").toLowerCase();
+  if (!["live", "mock"].includes(requestedMode)) {
+    throw new HttpsError("invalid-argument", "OCR mode must be live or mock.");
+  }
+  if (requestedMode === "mock") return mockRegisterOcrRows(files);
 
-  if (!hasProvider || provider === "mock") {
-    return mockRegisterOcrRows(files);
+  const hasProvider = Boolean(clean(process.env.REGISTER_OCR_ENDPOINT || ""));
+  if (!hasProvider) {
+    throw new HttpsError("failed-precondition", "Live register OCR is not configured. Set REGISTER_OCR_ENDPOINT or use the separate Mock Test Data action.");
+  }
+  const provider = clean(process.env.REGISTER_OCR_PROVIDER || "custom").toLowerCase();
+  if (provider === "mock") {
+    throw new HttpsError("failed-precondition", "REGISTER_OCR_PROVIDER is set to mock. Configure a live provider before running live OCR.");
   }
 
-  return callRegisterOcrProvider(files, provider);
+  return callRegisterOcrProvider(files, provider, { retryFullPage: request.data?.retryFullPage === true });
 });
 
 async function getBookByBarcode(profile, libraryBarcode) {

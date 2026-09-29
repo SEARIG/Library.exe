@@ -38,10 +38,14 @@
           </div>
           <div class="toolbar">
             <button class="btn btn-primary" id="startDigitizerExtractionBtn" type="button">Run Digitizer</button>
+            <button class="btn btn-muted" id="retryFullPageDigitizerBtn" type="button" hidden>Retry Full Page Extraction</button>
+            <button class="btn btn-muted" id="useMockDigitizerBtn" type="button" hidden>Use Mock Test Data</button>
             <button class="btn btn-muted" id="downloadDigitizerTemplateBtn" type="button">Download Sample Template</button>
             <button class="btn btn-muted" id="clearDigitizerFilesBtn" type="button">Clear Session</button>
           </div>
-          <div id="digitizerConfigMessage" class="empty">OCR provider status will appear here.</div>
+          <div id="digitizerOcrMode" class="empty"><strong>OCR MODE: NOT RUN</strong></div>
+          <div id="digitizerConfigMessage" class="empty">Live OCR provider status will appear here.</div>
+          <div id="digitizerDebugInfo" class="empty">Image and row-detection diagnostics will appear here.</div>
           <div id="digitizerPageList" class="digitizer-page-list"></div>
         </article>
 
@@ -91,9 +95,26 @@
       </section>
     </main>
 
+    <dialog id="digitizerSourceDialog">
+      <div class="dialog-inner">
+        <div class="dialog-top">
+          <div>
+            <h2>Register Row Source</h2>
+            <p class="link-line">Original image crop and OCR debugging details for this row.</p>
+          </div>
+          <button class="btn btn-muted dialog-close" id="closeDigitizerSourceBtn" type="button" aria-label="Close">X</button>
+        </div>
+        <div class="digitizer-preview">
+          <canvas id="digitizerSourceCanvas" style="display:block;max-width:100%;height:auto;margin:auto;"></canvas>
+          <div id="digitizerSourceFallback" class="empty" hidden></div>
+        </div>
+        <pre id="digitizerSourceDebug" class="empty" style="white-space:pre-wrap;overflow-wrap:anywhere;"></pre>
+      </div>
+    </dialog>
+
     <div id="toast" class="toast"></div>
     <script src="./js/pwa.js?v=7" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="./js/register-digitizer.js?v=2"></script>
+    <script type="module" src="./js/register-digitizer.js?v=3"></script>
   </body>
 </html>
