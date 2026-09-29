@@ -51,6 +51,7 @@
             <button class="btn btn-primary" data-open-modal="addBookModal" type="button">Add Book</button>
             <a class="btn btn-muted" href="library.html">Library</a>
             <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Book Database</button>
+            <a class="btn btn-muted" href="register-digitizer.html">Register Digitizer</a>
             <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Import Books</button>
             <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Export Books</button>
             <button class="btn btn-muted" data-open-modal="barcodeManagerModal" type="button">Barcode Manager</button>
@@ -87,6 +88,9 @@
 
         <article class="panel span-6 librarian-active">
           <h2>Active Issues</h2>
+          <label class="full-width">Search active issues
+            <input id="activeIssueSearch" placeholder="Accession no., book title, student name, roll no., enrollment no.">
+          </label>
           <div id="activeIssues" class="list-stack"></div>
         </article>
 
@@ -268,8 +272,29 @@
         </div>
         <div id="confirmReturnRequestDetails" class="list-stack"></div>
         <form id="confirmReturnRequestForm" class="form-grid">
-          <label>Library Barcode<input id="confirmReturnBarcode" placeholder="BOOK-1" required></label>
+          <label>Library Barcode / Accession No. (optional)<input id="confirmReturnBarcode" placeholder="Leave blank to use request accession"></label>
           <button class="btn btn-primary" type="submit">Confirm Return</button>
+        </form>
+      </div>
+    </dialog>
+
+    <dialog id="pickupApprovalDialog">
+      <div class="dialog-inner">
+        <div class="dialog-top">
+          <div>
+            <h2>Approve for Pickup</h2>
+            <p class="link-line">Approval reserves pickup only. It does not issue the book.</p>
+          </div>
+          <button class="btn btn-muted dialog-close" type="button" aria-label="Close">X</button>
+        </div>
+        <div id="pickupApprovalDetails" class="list-stack"></div>
+        <form id="pickupApprovalForm" class="form-grid">
+          <label>Pickup Date<input id="pickupDateInput" type="date" required></label>
+          <label>Start Time<input id="pickupStartTimeInput" type="time" required></label>
+          <label>End Time<input id="pickupEndTimeInput" type="time" required></label>
+          <label>Expiration<input id="pickupExpirationInput" type="datetime-local" required></label>
+          <label class="span-2">Notes<textarea id="pickupNotesInput" rows="2" placeholder="Bring student ID and collect during approved slot."></textarea></label>
+          <button class="btn btn-primary" type="submit">Approve for Pickup</button>
         </form>
       </div>
     </dialog>

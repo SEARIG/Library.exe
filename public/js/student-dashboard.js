@@ -206,11 +206,12 @@ function renderIssuedBooks(docs) {
 function renderPendingRequests(docs) {
   const target = $("#issueHistory");
   setMetric("#metricStudentRequests", docs.length);
+  const pickupCount = docs.filter((item) => item.data().status === "approved_for_pickup").length;
   setText("#pendingRequestsSummary", docs.length
-    ? `${docs.length} request${docs.length === 1 ? "" : "s"} waiting for librarian review.`
+    ? `${docs.length} active request${docs.length === 1 ? "" : "s"}${pickupCount ? ` (${pickupCount} approved for pickup)` : " waiting for librarian review"}.`
     : "No pending requests.");
   if (!docs.length) {
-    renderEmpty(target, "No pending issue requests.");
+    renderEmpty(target, "No pending or pickup-approved issue requests.");
     return;
   }
   target.innerHTML = docs
@@ -222,6 +223,8 @@ function renderPendingRequests(docs) {
           <div>
             <strong>${escapeHtml(request.bookTitle || request.bookId || "Issue request")}</strong>
             <span>Requested ${formatDate(request.createdAt)} | Due ${formatDate(request.dueDate)}</span>
+            ${request.status === "approved_for_pickup" ? `<span>Pickup: ${escapeHtml(request.pickupDate || "-")} ${escapeHtml(request.pickupStartTime || "")} - ${escapeHtml(request.pickupEndTime || "")}</span>` : ""}
+            ${request.pickupNotes ? `<span>${escapeHtml(request.pickupNotes)}</span>` : ""}
           </div>
           ${statusBadge(request.status)}
         </article>`;
@@ -364,7 +367,7 @@ if (user) {
 
     listenToQuery(
       "pending requests query",
-      query(collection(db, "issueRequests"), where("studentUid", "==", user.uid), where("status", "==", "pending")),
+      query(collection(db, "issueRequests"), where("studentUid", "==", user.uid), where("status", "in", ["pending", "approved_for_pickup"])),
       (snap) => renderPendingRequests(snap.docs),
       "#issueHistory",
       "Could not load pending requests."

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0F766E">
+    <title>Register Digitizer | Mohanlal Sukhadia University LMS</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/png" href="/assets/mlsu-logo.png?v=4">
+    <link rel="stylesheet" href="css/style.css?v=6">
+  </head>
+  <body class="protected-page">
+    <header class="app-header">
+      <div class="header-inner">
+        <a class="brand" href="index.html">
+          <img src="./assets/mlsu-logo.png?v=2" alt="Mohanlal Sukhadia University LMS Logo" class="nav-logo">
+          <span>Mohanlal Sukhadia University LMS</span>
+        </a>
+        <div class="nav-skeleton"><span></span><span></span><span></span></div>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <section class="page-title">
+        <h1>Register Digitizer</h1>
+        <p>Convert old handwritten accession registers into reviewed Excel files compatible with the existing LMS importer.</p>
+      </section>
+
+      <section class="digitizer-grid">
+        <article class="panel digitizer-upload-panel">
+          <h2>Upload Register Pages</h2>
+          <p class="helper-text">Supports JPG, JPEG, PNG, PDF, multi-page PDF, and multiple images. OCR never imports directly into Firestore.</p>
+          <div id="digitizerDropzone" class="digitizer-dropzone" tabindex="0">
+            <strong>Drag and drop files here</strong>
+            <span>or choose images / PDF files</span>
+            <input id="digitizerFileInput" type="file" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" multiple hidden>
+            <button class="btn btn-primary" id="chooseDigitizerFilesBtn" type="button">Choose Files</button>
+          </div>
+          <div class="toolbar">
+            <button class="btn btn-primary" id="startDigitizerExtractionBtn" type="button">Start Extraction</button>
+            <button class="btn btn-muted" id="clearDigitizerFilesBtn" type="button">Clear</button>
+          </div>
+          <div id="digitizerConfigMessage" class="empty">OCR provider status will appear here.</div>
+          <div id="digitizerPageList" class="digitizer-page-list"></div>
+        </article>
+
+        <article class="panel digitizer-preview-panel">
+          <h2>Preview</h2>
+          <div class="toolbar">
+            <button class="btn btn-muted" id="zoomOutDigitizerBtn" type="button">Zoom -</button>
+            <button class="btn btn-muted" id="zoomInDigitizerBtn" type="button">Zoom +</button>
+          </div>
+          <div id="digitizerPreview" class="digitizer-preview">Upload pages to preview them here.</div>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head-row">
+          <div>
+            <h2>Human Review Grid</h2>
+            <p class="helper-text">Review and edit every cell before export or import. Low confidence rows require manual correction.</p>
+          </div>
+          <div class="toolbar">
+            <button class="btn btn-muted" id="validateDigitizerRowsBtn" type="button">Validate</button>
+            <button class="btn btn-muted" id="exportDigitizerExcelBtn" type="button">Export Excel</button>
+            <button class="btn btn-primary" id="importDigitizerRowsBtn" type="button">Import to LMS</button>
+          </div>
+        </div>
+        <div id="digitizerSummary" class="digitizer-summary"></div>
+        <div id="digitizerImportProgress" class="empty">No import started.</div>
+        <div id="digitizerReviewGrid" class="table-scroll"></div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast"></div>
+    <script src="./js/pwa.js?v=7" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script type="module" src="./js/register-digitizer.js"></script>
+  </body>
+</html>

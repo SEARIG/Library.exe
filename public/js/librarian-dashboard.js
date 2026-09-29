@@ -15,6 +15,7 @@ import {
 import {
   accessionBarcode,
   accessionNumberOf,
+  addDays,
   calculatePenalty,
   canStudentIssueBook,
   compareAccessionNumbers,
@@ -52,6 +53,7 @@ import {
   runTransaction,
   serverTimestamp,
   setDoc,
+  Timestamp,
   updateDoc,
   where
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
@@ -88,6 +90,7 @@ let latestPenalties = [];
 let latestActiveIssues = [];
 let latestBarcodeDataUrl = "";
 let selectedReturnRequest = null;
+let selectedPickupRequest = null;
 let pendingBookImportRows = [];
 let pendingBookImportMatrix = [];
 let pendingBookImportSheetName = "";
@@ -559,7 +562,27 @@ async function resolveIssueStudent(issue = {}) {
   return { name: "Unknown student", email: "" };
 }
 
-async function approveRequest(requestId) {
+function asDate(value) {
+  if (!value) return null;
+  if (value.toDate) return value.toDate();
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function pickupWindowLabel(request = {}) {
+  const parts = [
+    request.pickupDate || "",
+    request.pickupStartTime && request.pickupEndTime ? `${request.pickupStartTime} - ${request.pickupEndTime}` : ""
+  ].filter(Boolean);
+  return parts.join(", ") || "-";
+}
+
+function pickupExpired(request = {}, now = new Date()) {
+  const expiresAt = asDate(request.pickupExpiresAt);
+  return Boolean(expiresAt && expiresAt.getTime() < now.getTime());
+}
+
+async function approveForPickup(requestId, pickup = {}) {
   console.log("Selected requestId:", requestId);
   const requestRef = doc(db, "issueRequests", requestId);
   const precheckSnap = await getDoc(requestRef);
@@ -630,12 +653,141 @@ async function approveRequest(requestId) {
       return { conflict: true };
     }
 
+    const studentData = studentSnap.exists() ? studentSnap.data() : {};
+    const studentName = requestData.studentName || studentData.name || "Unknown student";
+    const studentEmail = requestData.studentEmail || studentData.email || "";
+    const expiresAtDate = new Date(pickup.expiresAt);
+    if (Number.isNaN(expiresAtDate.getTime())) {
+      throw new Error("Enter a valid pickup expiration time.");
+    }
+    const requestUpdate = {
+      status: "approved_for_pickup",
+      pickupDate: pickup.date || "",
+      pickupStartTime: pickup.startTime || "",
+      pickupEndTime: pickup.endTime || "",
+      pickupNotes: pickup.notes || "",
+      pickupExpiresAt: Timestamp.fromDate(expiresAtDate),
+      approvedForPickupBy: auth.currentUser.uid,
+      approvedForPickupAt: serverTimestamp(),
+      reviewedBy: auth.currentUser.uid,
+      reviewedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+
+    console.log("Updating issue request for pickup approval:", { requestId, requestUpdate });
+    transaction.update(requestRef, requestUpdate);
+    notificationPayload = {
+      studentUid: requestData.studentUid,
+      studentName,
+      studentEmail,
+      bookTitle: requestData.title || requestData.bookTitle || requestData.bname || bookTitle(bookData),
+      pickupDate: requestUpdate.pickupDate,
+      pickupStartTime: requestUpdate.pickupStartTime,
+      pickupEndTime: requestUpdate.pickupEndTime,
+      pickupNotes: requestUpdate.pickupNotes
+    };
+    return { conflict: false };
+  });
+
+  if (transactionResult?.conflict) {
+    return { conflict: true };
+  }
+
+  if (notificationPayload?.studentUid) {
+    const studentSnap = await getDoc(doc(db, "students", notificationPayload.studentUid));
+    const student = studentSnap.exists() ? studentSnap.data() : {};
+    notificationPayload.studentEmail = notificationPayload.studentEmail || student.email || "";
+    notificationPayload.studentName = notificationPayload.studentName || student.name || "Student";
+  }
+
+  return { conflict: false, notificationPayload };
+}
+
+async function markIssuedRequest(requestId) {
+  console.log("Mark issued requestId:", requestId);
+  const requestRef = doc(db, "issueRequests", requestId);
+  const precheckSnap = await getDoc(requestRef);
+  if (!precheckSnap.exists()) {
+    throw new Error("Issue request not found.");
+  }
+  const precheckData = precheckSnap.data();
+  if (precheckData.status !== "approved_for_pickup") {
+    throw new Error("Only pickup-approved requests can be marked issued.");
+  }
+  if (pickupExpired(precheckData)) {
+    await updateDoc(requestRef, {
+      status: "expired",
+      expiredAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    throw new Error("This pickup approval has expired. Ask the student to request again.");
+  }
+  const eligibility = await canStudentIssueBook({
+    uid: precheckData.studentUid,
+    studentUid: precheckData.studentUid,
+    name: precheckData.studentName,
+    email: precheckData.studentEmail,
+    rollNumber: precheckData.rollNumber,
+    enrollmentNumber: precheckData.enrollmentNumber
+  });
+  if (!eligibility.eligible) {
+    const error = issueEligibilityError(eligibility);
+    error.message = `Cannot issue. Student has unresolved library dues. Pending Penalty: Rs.${Number(eligibility.totalPendingPenalty || 0).toFixed(2)}. Overdue Books: ${eligibility.overdueBooks || 0}.`;
+    throw error;
+  }
+
+  let notificationPayload = null;
+  const transactionResult = await runTransaction(db, async (transaction) => {
+    const requestSnap = await transaction.get(requestRef);
+    if (!requestSnap.exists()) {
+      throw new Error("Issue request not found.");
+    }
+
+    const requestData = requestSnap.data();
+    if (requestData.status !== "approved_for_pickup") {
+      throw new Error("Only pickup-approved requests can be marked issued.");
+    }
+    if (pickupExpired(requestData)) {
+      transaction.update(requestRef, {
+        status: "expired",
+        expiredAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      return { expired: true };
+    }
+
     const issueRef = doc(collection(db, "bookIssues"));
     const issueId = issueRef.id;
+    const bookDocId = requestData.b_id || requestData.bookId;
+    if (!bookDocId) {
+      throw new Error("Missing book id in issue request.");
+    }
+    const bookRef = doc(db, "books", bookDocId);
+    const studentRef = doc(db, "students", requestData.studentUid);
+    const [bookSnap, studentSnap] = await Promise.all([
+      transaction.get(bookRef),
+      transaction.get(studentRef)
+    ]);
+    if (!bookSnap.exists()) {
+      throw new Error(`Book ${bookDocId} not found.`);
+    }
+    const bookData = bookSnap.data();
+    if (bookData.status !== "available") {
+      transaction.update(requestRef, {
+        status: "rejected",
+        reviewedBy: auth.currentUser.uid,
+        reviewedAt: serverTimestamp(),
+        rejectionReason: "Book already issued or unavailable.",
+        updatedAt: serverTimestamp()
+      });
+      return { conflict: true };
+    }
     const studentData = studentSnap.exists() ? studentSnap.data() : {};
     const studentName = requestData.studentName || studentData.name || "Unknown student";
     const studentEmail = requestData.studentEmail || studentData.email || "";
     const studentPhone = requestData.studentPhone || studentData.phone || "";
+    const issuedAt = new Date();
+    const dueAt = addDays(issuedAt, 45);
     const issuePayload = {
       issueId,
       requestId,
@@ -658,8 +810,9 @@ async function approveRequest(requestId) {
       bookTitle: requestData.title || requestData.bookTitle || requestData.bname || bookTitle(bookData),
       subject: requestData.subject || bookData.subject || "",
       category: requestData.category || bookData.category || "",
-      issueDate: requestData.issueDate,
-      dueDate: requestData.dueDate,
+      issueDate: Timestamp.fromDate(issuedAt),
+      issuedAt: Timestamp.fromDate(issuedAt),
+      dueDate: Timestamp.fromDate(dueAt),
       returnDate: null,
       status: "issued",
       penaltyPerDay: 5,
@@ -686,10 +839,13 @@ async function approveRequest(requestId) {
       updatedAt: serverTimestamp()
     };
     const requestUpdate = {
-      status: "approved",
+      status: "issued",
       reviewedBy: auth.currentUser.uid,
       reviewedAt: serverTimestamp(),
-      issueId
+      issuedBy: auth.currentUser.uid,
+      issuedAt: serverTimestamp(),
+      issueId,
+      updatedAt: serverTimestamp()
     };
 
     console.log("Creating bookIssues payload:", issuePayload);
@@ -703,14 +859,17 @@ async function approveRequest(requestId) {
       studentName,
       studentEmail,
       bookTitle: issuePayload.bookTitle,
-      issueDate: requestData.issueDate,
-      dueDate: requestData.dueDate
+      issueDate: issuedAt,
+      dueDate: dueAt
     };
     return { conflict: false };
   });
 
   if (transactionResult?.conflict) {
     return { conflict: true };
+  }
+  if (transactionResult?.expired) {
+    throw new Error("This pickup approval has expired. Ask the student to request again.");
   }
 
   if (notificationPayload?.studentUid) {
@@ -742,7 +901,7 @@ async function rejectRequest(requestId) {
       bookBarcodeValue: requestData.bookBarcodeValue
     });
 
-    if (requestData.status !== "pending") {
+    if (!["pending", "approved_for_pickup"].includes(requestData.status)) {
       throw new Error("This request was already processed.");
     }
 
@@ -2745,13 +2904,14 @@ $("#penaltyDetailsList")?.addEventListener("click", async (event) => {
 });
 
 onSnapshot(
-  query(collection(db, "issueRequests"), where("status", "==", "pending")),
+  query(collection(db, "issueRequests"), where("status", "in", ["pending", "approved_for_pickup"])),
   (snap) => {
     latestPendingRequests = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
     const pendingMetric = $("#metricPendingRequests");
     const newRequestMetric = $("#metricNewBookRequests");
-    if (pendingMetric) pendingMetric.textContent = String(snap.size);
-    if (newRequestMetric) newRequestMetric.textContent = String(snap.size);
+    const pendingCount = latestPendingRequests.filter((item) => item.data.status === "pending").length;
+    if (pendingMetric) pendingMetric.textContent = String(latestPendingRequests.length);
+    if (newRequestMetric) newRequestMetric.textContent = String(pendingCount);
     renderPendingRequests();
     renderRecentActivity();
   }
@@ -2793,45 +2953,91 @@ onSnapshot(
 function renderPendingRequests() {
   const target = $("#pendingRequests");
   if (!latestPendingRequests.length) {
-    renderEmpty(target, "No pending issue requests.");
+    renderEmpty(target, "No pending or pickup-approved issue requests.");
     return;
   }
   target.innerHTML = latestPendingRequests.sort((a, b) => timeOf(a.data.createdAt) - timeOf(b.data.createdAt)).map((item) => {
     const request = item.data;
     const book = localBookForRequest(request);
     const unavailable = book && book.status !== "available";
+    const status = request.status || "pending";
+    const expired = status === "approved_for_pickup" && pickupExpired(request);
+    const noDuesText = request.noDuesStatus || request.eligibilityStatus || "";
+    const penaltyText = Number(request.pendingPenalty || request.totalPendingPenalty || request.penaltyAmount || 0);
     return `
       <article class="request-card" data-request-id="${item.id}">
         <img src="${escapeHtml(request.bookImage || "assets/book-placeholder.svg")}" alt="">
         <div>
-          <strong>${escapeHtml(request.bookTitle)}</strong>
-          <span>${escapeHtml(request.bookId)} requested by ${escapeHtml(request.studentName)}</span>
+          <strong>${escapeHtml(request.bookTitle || request.title || "Requested book")}</strong>
+          <span>Accession: ${escapeHtml(request.accessionNumber || request.bookId || request.b_id || "-")}</span>
+          <span>Student: ${escapeHtml(request.studentName || "-")} | Roll: ${escapeHtml(request.rollNumber || "-")} | Enrollment: ${escapeHtml(request.enrollmentNumber || "-")}</span>
           <span>Requested ${formatDate(request.requestedAt || request.createdAt)} | Slot ${escapeHtml(request.preferredSlot || "-")}</span>
-          <span>Issue ${formatDate(request.issueDate)} | Due ${formatDate(request.dueDate)}</span>
+          ${status === "approved_for_pickup" ? `<span>Pickup: ${escapeHtml(pickupWindowLabel(request))} | Expires ${formatDate(request.pickupExpiresAt)}</span>` : ""}
+          ${request.pickupNotes ? `<span>Note: ${escapeHtml(request.pickupNotes)}</span>` : ""}
+          ${noDuesText ? `<span>No Dues: ${escapeHtml(noDuesText)}</span>` : ""}
+          ${penaltyText > 0 ? `<span>Pending penalty: Rs.${penaltyText.toFixed(2)}</span>` : ""}
           ${unavailable ? `<span class="badge badge-issued">Book already issued</span>` : ""}
+          ${statusBadge(expired ? "expired" : status.replaceAll("_", " "))}
         </div>
         <div class="row-actions">
-          <button class="btn btn-primary approve-request-btn" data-request-id="${item.id}" type="button" ${unavailable ? "disabled" : ""}>Approve</button>
+          ${status === "pending" ? `<button class="btn btn-primary approve-request-btn" data-request-id="${item.id}" type="button" ${unavailable ? "disabled" : ""}>Approve for Pickup</button>` : ""}
+          ${status === "approved_for_pickup" ? `<button class="btn btn-primary mark-issued-request-btn" data-request-id="${item.id}" type="button" ${unavailable || expired ? "disabled" : ""}>Mark Issued</button>` : ""}
           <button class="btn btn-muted reject-request-btn" data-request-id="${item.id}" type="button">Reject</button>
         </div>
       </article>`;
   }).join("");
 }
 
+async function openPickupApprovalDialog(requestItem) {
+  selectedPickupRequest = requestItem;
+  const request = requestItem.data;
+  const today = new Date();
+  const schedule = await getIssueReturnSchedule().catch(() => null);
+  const pickupDate = schedule?.startDate || today.toISOString().slice(0, 10);
+  const startTime = schedule?.startTime || "10:00";
+  const endTime = schedule?.endTime || "16:00";
+  const expirationDate = schedule?.endDate || pickupDate;
+  const expiration = `${expirationDate}T${endTime}`;
+  $("#pickupApprovalDetails").innerHTML = `
+    <article class="list-row">
+      <div>
+        <strong>${escapeHtml(request.bookTitle || request.title || "Requested book")}</strong>
+        <span>Accession: ${escapeHtml(request.accessionNumber || request.bookId || request.b_id || "-")}</span>
+        <span>Student: ${escapeHtml(request.studentName || "-")}</span>
+        <span>Roll: ${escapeHtml(request.rollNumber || "-")} | Enrollment: ${escapeHtml(request.enrollmentNumber || "-")}</span>
+        <span>Current issue/return slot: ${escapeHtml(scheduleLabel(schedule || {}))}</span>
+      </div>
+    </article>`;
+  $("#pickupDateInput").value = pickupDate;
+  $("#pickupStartTimeInput").value = startTime;
+  $("#pickupEndTimeInput").value = endTime;
+  $("#pickupExpirationInput").value = expiration;
+  $("#pickupNotesInput").value = request.pickupNotes || "Bring student ID and collect during the approved library slot.";
+  $("#pickupApprovalDialog").showModal();
+}
+
 $("#pendingRequests").addEventListener("click", async (event) => {
   const approveBtn = event.target.closest(".approve-request-btn");
+  const markIssuedBtn = event.target.closest(".mark-issued-request-btn");
   const rejectBtn = event.target.closest(".reject-request-btn");
-  if (!approveBtn && !rejectBtn) return;
-  const button = approveBtn || rejectBtn;
+  if (!approveBtn && !markIssuedBtn && !rejectBtn) return;
+  const button = approveBtn || markIssuedBtn || rejectBtn;
   const requestId = button.dataset.requestId;
-  if (approveBtn) console.log("Approve clicked:", requestId);
+  if (approveBtn) console.log("Approve for pickup clicked:", requestId);
+  if (markIssuedBtn) console.log("Mark issued clicked:", requestId);
   if (rejectBtn) console.log("Reject clicked:", requestId);
-  const confirmed = await confirmAction(approveBtn ? "Approve this book issue?" : "Reject this issue request?");
+  if (approveBtn) {
+    const requestItem = latestPendingRequests.find((item) => item.id === requestId);
+    if (!requestItem) return;
+    openPickupApprovalDialog(requestItem);
+    return;
+  }
+  const confirmed = await confirmAction(markIssuedBtn ? "Mark this pickup-approved request as issued now?" : "Reject this issue request?");
   if (!confirmed) return;
   button.disabled = true;
   try {
-    if (approveBtn) {
-      const result = await approveRequest(requestId);
+    if (markIssuedBtn) {
+      const result = await markIssuedRequest(requestId);
       if (result?.conflict) {
         showToast("This book is already issued or unavailable.", "warning");
         return;
@@ -2865,10 +3071,10 @@ $("#pendingRequests").addEventListener("click", async (event) => {
       showToast("Issue request rejected.", "success");
     }
   } catch (error) {
-    if (approveBtn) {
-      console.error("Approve failed full error:", error);
-      console.error("Approve failed code:", error.code);
-      console.error("Approve failed message:", error.message);
+    if (markIssuedBtn) {
+      console.error("Mark issued failed full error:", error);
+      console.error("Mark issued failed code:", error.code);
+      console.error("Mark issued failed message:", error.message);
     } else {
       console.error("Reject failed full error:", error);
       console.error("Reject failed code:", error.code);
@@ -2885,6 +3091,54 @@ $("#pendingRequests").addEventListener("click", async (event) => {
     }
   } finally {
     button.disabled = false;
+  }
+});
+
+$("#pickupApprovalDialog")?.querySelector(".dialog-close")?.addEventListener("click", () => {
+  $("#pickupApprovalDialog").close();
+});
+
+$("#pickupApprovalForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!selectedPickupRequest) return;
+  setLoading(event.target, true);
+  try {
+    const result = await approveForPickup(selectedPickupRequest.id, {
+      date: $("#pickupDateInput").value,
+      startTime: $("#pickupStartTimeInput").value,
+      endTime: $("#pickupEndTimeInput").value,
+      expiresAt: $("#pickupExpirationInput").value,
+      notes: $("#pickupNotesInput").value.trim()
+    });
+    if (result?.conflict) {
+      showToast("This book is already issued or unavailable.", "warning");
+      return;
+    }
+    try {
+      await sendEmailNotification("Book Issue Approved", {
+        ...result.notificationPayload,
+        issueDate: result.notificationPayload?.pickupDate || "-",
+        dueDate: `${result.notificationPayload?.pickupStartTime || ""} - ${result.notificationPayload?.pickupEndTime || ""}`.trim(),
+        returnDate: "-",
+        penaltyAmount: 0
+      });
+      showToast("Pickup approved. Email sent.", "success");
+    } catch (emailError) {
+      console.error("Pickup approval email failed:", emailError);
+      showToast("Pickup approved, but email failed.", "warning");
+    }
+    $("#pickupApprovalDialog").close();
+  } catch (error) {
+    console.error("Pickup approval failed:", error);
+    if (error.code === "penalty/unpaid" || error.code === "dues/blocked") {
+      showToast(error.message, "warning");
+    } else if (error.message.includes("not available")) {
+      showToast("This book is already issued or unavailable.", "warning");
+    } else {
+      showToast(`${error.code || "error"}: ${error.message}`, "error");
+    }
+  } finally {
+    setLoading(event.target, false);
   }
 });
 
@@ -2955,10 +3209,16 @@ $("#confirmReturnRequestForm")?.addEventListener("submit", async (event) => {
   try {
     const scanned = $("#confirmReturnBarcode").value.trim().replace(/\s+/g, "");
     const expected = String(selectedReturnRequest.data.bookBarcodeValue || selectedReturnRequest.data.barcodeValue || "").trim();
-    if (!scanned) throw new Error("Scan or enter the library barcode.");
-    if (expected && scanned !== expected) {
+    if (scanned && expected && scanned !== expected) {
       throw new Error("Scanned barcode does not match this return request.");
     }
+    const lookupValue = scanned
+      || selectedReturnRequest.data.bookBarcodeValue
+      || selectedReturnRequest.data.barcodeValue
+      || selectedReturnRequest.data.accessionNumber
+      || selectedReturnRequest.data.b_id
+      || selectedReturnRequest.data.bookId;
+    if (!lookupValue) throw new Error("This return request is missing a book/accession reference.");
     const bookDocId = selectedReturnRequest.data.b_id || selectedReturnRequest.data.bookId;
     if (bookDocId && selectedReturnRequest.data.currentIssueId) {
       const bookSnap = await getDoc(doc(db, "books", bookDocId));
@@ -2967,7 +3227,7 @@ $("#confirmReturnRequestForm")?.addEventListener("submit", async (event) => {
         throw new Error("This return request does not match the current active issue.");
       }
     }
-    const data = await returnBook(scanned);
+    const data = await returnBook(lookupValue);
     await updateDoc(doc(db, "returnRequests", selectedReturnRequest.id), {
       status: "completed",
       completedAt: serverTimestamp(),
@@ -3003,36 +3263,130 @@ $("#confirmReturnRequestForm")?.addEventListener("submit", async (event) => {
   }
 });
 
+async function issueStudentDetails(issue = {}) {
+  const base = {
+    name: issue.studentName || issue.issuedToName || "",
+    email: issue.studentEmail || issue.issuedToEmail || "",
+    rollNumber: issue.rollNumber || issue.rollNo || "",
+    enrollmentNumber: issue.enrollmentNumber || issue.enrollmentNo || "",
+    uid: issue.studentUid || issue.userId || ""
+  };
+  if (!base.uid) return base;
+  try {
+    const studentSnap = await getDoc(doc(db, "students", base.uid));
+    if (!studentSnap.exists()) return base;
+    const student = studentSnap.data();
+    return {
+      ...base,
+      name: base.name || student.name || "Unknown student",
+      email: base.email || student.email || "",
+      rollNumber: base.rollNumber || student.rollNumber || student.rollNo || "",
+      enrollmentNumber: base.enrollmentNumber || student.enrollmentNumber || student.enrollmentNo || ""
+    };
+  } catch (error) {
+    console.warn("Active issue student lookup failed:", error);
+    return base;
+  }
+}
+
+async function renderActiveIssues() {
+  const target = $("#activeIssues");
+  if (!target) return;
+  if (!latestActiveIssues.length) {
+    renderEmpty(target, "No active issues.");
+    return;
+  }
+  const searchTerm = ($("#activeIssueSearch")?.value || "").trim().toLowerCase();
+  const sortedIssues = [...latestActiveIssues].sort((a, b) => timeOf(a.data.dueDate) - timeOf(b.data.dueDate));
+  const hydrated = await Promise.all(sortedIssues.map(async (item) => ({
+    ...item,
+    student: await issueStudentDetails(item.data)
+  })));
+  const filtered = hydrated.filter((item) => {
+    if (!searchTerm) return true;
+    const issue = item.data;
+    const student = item.student;
+    const haystack = [
+      issue.accessionNumber,
+      issue.bookBarcodeValue,
+      issue.barcodeValue,
+      issue.title,
+      issue.bookTitle,
+      issue.bookId,
+      issue.b_id,
+      student.name,
+      student.rollNumber,
+      student.enrollmentNumber,
+      student.uid
+    ].join(" ").toLowerCase();
+    return haystack.includes(searchTerm);
+  });
+  if (!filtered.length) {
+    renderEmpty(target, "No active issues match this search.");
+    return;
+  }
+  const cards = filtered.slice(0, 12).map((item) => {
+    const issue = item.data;
+    const student = item.student;
+    const accessionNumber = issue.accessionNumber || issue.bookId || issue.b_id || "";
+    const lookupValue = issue.bookBarcodeValue || issue.barcodeValue || accessionNumber || issue.bookId || issue.b_id || "";
+    return `
+      <article class="list-row active-issue-row">
+        <div>
+          <strong>${escapeHtml(issue.bookTitle || issue.title || issue.bookId || issue.b_id || "Issued book")}</strong>
+          <span>Accession No.: ${escapeHtml(accessionNumber || "-")}</span>
+          <span>Student: ${escapeHtml(student.name || "Unknown student")} ${student.uid ? `(${escapeHtml(shortUid(student.uid))})` : ""}</span>
+          <span>Roll: ${escapeHtml(student.rollNumber || "-")} | Enrollment: ${escapeHtml(student.enrollmentNumber || "-")}</span>
+          <span>Issue: ${formatDate(issue.issueDate || issue.issuedAt)} | Due: ${formatDate(issue.dueDate)}</span>
+        </div>
+        <div class="row-actions">
+          ${statusBadge(issue.status)}
+          <button class="btn btn-muted return-active-issue-btn" data-issue-id="${item.id}" data-lookup="${escapeHtml(lookupValue)}" type="button">Confirm Return</button>
+        </div>
+      </article>`;
+  });
+  target.innerHTML = `${cards.join("")}${filtered.length > 12 ? `<a class="btn btn-muted dashboard-view-all" href="no-dues.html?filter=activeBook">View All Active Issues</a>` : ""}`;
+}
+
 onSnapshot(
   query(collection(db, "bookIssues"), where("status", "==", "issued")),
   async (snap) => {
     latestActiveIssues = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
     renderPenaltyDetails();
-    const target = $("#activeIssues");
-    if (snap.empty) {
-      renderEmpty(target, "No active issues.");
-      return;
-    }
-    const sortedIssues = snap.docs.sort((a, b) => timeOf(a.data().dueDate) - timeOf(b.data().dueDate));
-    const cards = await Promise.all(sortedIssues.slice(0, 8).map(async (item) => {
-      const issue = item.data();
-      const student = await resolveIssueStudent(issue);
-      const accessionNumber = issue.accessionNumber || issue.bookId || issue.b_id || "";
-      return `
-        <article class="list-row active-issue-row">
-          <div>
-            <strong>${escapeHtml(issue.bookTitle || issue.title || issue.bookId || issue.b_id || "Issued book")}</strong>
-            <span>Accession No.: ${escapeHtml(accessionNumber || "-")}</span>
-            <span>Student: ${escapeHtml(student.name)} ${issue.studentUid ? `(${escapeHtml(shortUid(issue.studentUid))})` : ""}</span>
-            <span>Issue: ${formatDate(issue.issueDate)} | Due: ${formatDate(issue.dueDate)}</span>
-          </div>
-          ${statusBadge(issue.status)}
-        </article>`;
-    }));
-    target.innerHTML = `${cards.join("")}${sortedIssues.length > 8 ? `<a class="btn btn-muted dashboard-view-all" href="no-dues.html?filter=activeBook">View All Active Issues</a>` : ""}`;
+    await renderActiveIssues();
     renderRecentActivity();
   }
 );
+
+$("#activeIssueSearch")?.addEventListener("input", () => {
+  renderActiveIssues();
+});
+
+$("#activeIssues")?.addEventListener("click", (event) => {
+  const button = event.target.closest(".return-active-issue-btn");
+  if (!button) return;
+  const issueItem = latestActiveIssues.find((item) => item.id === button.dataset.issueId);
+  if (!issueItem) return;
+  const issue = issueItem.data;
+  const lookupValue = button.dataset.lookup || issue.bookBarcodeValue || issue.barcodeValue || issue.accessionNumber || issue.bookId || issue.b_id || "";
+  if (!lookupValue) {
+    showToast("This active issue is missing an accession/barcode reference.", "warning");
+    return;
+  }
+  const book = localBookForIssue(issue) || {};
+  const penalty = calculatePenalty(issue, new Date());
+  selectedQuickReturn = { lookupValue, book, issue };
+  $("#quickReturnDetails").innerHTML = `
+    <span>Accession Number</span><strong>${escapeHtml(issue.accessionNumber || accessionNumberOf(book) || "-")}</strong>
+    <span>Author</span><strong>${escapeHtml(issue.author || book.author || "-")}</strong>
+    <span>Title</span><strong>${escapeHtml(issue.title || issue.bookTitle || bookTitle(book) || "-")}</strong>
+    <span>Student UID</span><strong>${escapeHtml(issue.studentUid || "-")}</strong>
+    <span>Student Name</span><strong>${escapeHtml(issue.studentName || "-")}</strong>
+    <span>Issue Date</span><strong>${escapeHtml(formatDate(issue.issueDate || issue.issuedAt))}</strong>
+    <span>Due Date</span><strong>${escapeHtml(formatDate(issue.dueDate))}</strong>
+    <span>Penalty</span><strong>Rs.${Number(penalty.calculatedPenalty || 0).toFixed(2)}</strong>`;
+  $("#quickReturnDialog").showModal();
+});
 
 onSnapshot(
   query(collection(db, "bookIssues"), where("status", "==", "returned"), limit(25)),

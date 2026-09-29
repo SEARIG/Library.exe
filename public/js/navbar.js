@@ -18,6 +18,7 @@ const roleLinks = {
     ["Library", "library.html"],
     ["Add Book", "librarian-dashboard.html#addBookModal"],
     ["Book Database", "librarian-dashboard.html#bookDatabaseModal"],
+    ["Register Digitizer", "register-digitizer.html"],
     ["Import Books", "librarian-dashboard.html#bookDatabaseModal"],
     ["Export Books", "librarian-dashboard.html#bookDatabaseModal"],
     ["Barcode Manager", "librarian-dashboard.html#barcodeManagerModal"],
@@ -31,6 +32,7 @@ const roleLinks = {
     ["Library", "library.html"],
     ["Users", "admin-dashboard.html#userManagementModal"],
     ["Import Students", "admin-dashboard.html#studentImportModal"],
+    ["Register Digitizer", "register-digitizer.html"],
     ["Reports", "reports.html"],
     ["No Dues", "no-dues.html"],
     ["Settings", "admin-dashboard.html#settingsModal"]

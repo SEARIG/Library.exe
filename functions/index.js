@@ -487,6 +487,199 @@ function tenantFields(root) {
   };
 }
 
+function mockRegisterOcrRows(files = []) {
+  const pageCount = files.reduce((sum, file) => sum + (String(file.name || "").toLowerCase().endsWith(".pdf") ? 2 : 1), 0) || 1;
+  return {
+    provider: "mock",
+    configured: false,
+    message: "OCR credentials are not configured. Deterministic mock register data is returned for review/testing.",
+    pages: pageCount,
+    rows: [
+      {
+        accessionNumber: "0001",
+        accessionDate: "01/07/1998",
+        author: "Dr. K. Sharma",
+        title: "Fundamentals of Physics",
+        placePublisher: "Udaipur: Academic Press",
+        year: "1998",
+        pages: "412",
+        volume: "I",
+        source: "Purchase",
+        billNoDate: "B-12 / 01-07-1998",
+        cost: "125.00",
+        classNo: "530",
+        bookNo: "SHA",
+        withdrawalRemarks: "",
+        imageUrl: "",
+        notes: "clean handwriting",
+        pageNumber: 1,
+        rowNumber: 1,
+        confidence: 96,
+        rawText: "0001 Dr K Sharma Fundamentals of Physics"
+      },
+      {
+        accessionNumber: "0002",
+        accessionDate: "02/07/1998",
+        author: "S. ?",
+        title: "Organic Chemistry Notes",
+        placePublisher: "Jaipur: College Pub.",
+        year: "1999",
+        pages: "288",
+        volume: "",
+        source: "Purchase",
+        billNoDate: "B-13 / 02-07-1998",
+        cost: "90",
+        classNo: "547",
+        bookNo: "ORG",
+        withdrawalRemarks: "",
+        imageUrl: "",
+        notes: "low-confidence author",
+        pageNumber: 1,
+        rowNumber: 2,
+        confidence: 82,
+        rawText: "0002 S? Organic Chemistry Notes"
+      },
+      {
+        accessionNumber: "0003",
+        accessionDate: "03/07/1998",
+        author: "M. Jain",
+        title: "Data Structures and Algorithms",
+        placePublisher: "Delhi: Tech House",
+        year: "20O1",
+        pages: "",
+        volume: "",
+        source: "Donation",
+        billNoDate: "",
+        cost: "abc",
+        classNo: "005.73",
+        bookNo: "JAI",
+        withdrawalRemarks: "",
+        imageUrl: "",
+        notes: "unclear year and blank cell",
+        pageNumber: Math.min(2, pageCount),
+        rowNumber: 3,
+        confidence: 74,
+        rawText: "0003 M Jain Data Structures and Algorithms 20O1"
+      },
+      {
+        accessionNumber: "0002",
+        accessionDate: "04/07/1998",
+        author: "Duplicate Author",
+        title: "Repeated OCR Row",
+        placePublisher: "",
+        year: "2001",
+        pages: "100",
+        volume: "",
+        source: "",
+        billNoDate: "",
+        cost: "50",
+        classNo: "",
+        bookNo: "",
+        withdrawalRemarks: "",
+        imageUrl: "",
+        notes: "duplicate accession",
+        pageNumber: Math.min(2, pageCount),
+        rowNumber: 4,
+        confidence: 91,
+        rawText: "0002 Duplicate Author Repeated OCR Row"
+      },
+      {
+        accessionNumber: "0004",
+        accessionDate: "05/07/1998",
+        author: "A. Mehta",
+        title: "Multi-line title: History of Rajasthan and Mewar Library Records",
+        placePublisher: "Udaipur",
+        year: "2004",
+        pages: "350",
+        volume: "II",
+        source: "Gift",
+        billNoDate: "",
+        cost: "0",
+        classNo: "954.4",
+        bookNo: "MEH",
+        withdrawalRemarks: "",
+        imageUrl: "",
+        notes: "multi-line title",
+        pageNumber: pageCount,
+        rowNumber: 5,
+        confidence: 88,
+        rawText: "0004 A Mehta History of Rajasthan / and Mewar Library Records"
+      }
+    ]
+  };
+}
+
+async function callRegisterOcrProvider(files = [], provider = "custom") {
+  const endpoint = clean(process.env.REGISTER_OCR_ENDPOINT || "");
+  const apiKey = clean(process.env.REGISTER_OCR_API_KEY || "");
+  if (!endpoint) {
+    throw new HttpsError(
+      "failed-precondition",
+      "REGISTER_OCR_ENDPOINT is required for production register OCR. Leave provider unset/mock to use deterministic mock data."
+    );
+  }
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {})
+    },
+    body: JSON.stringify({
+      provider,
+      files: files.map((file, index) => ({
+        name: clean(file.name || `page-${index + 1}`),
+        type: clean(file.type || "application/octet-stream"),
+        size: Number(file.size || 0),
+        pageNumber: Number(file.pageNumber || index + 1),
+        rotation: Number(file.rotation || 0),
+        base64: clean(file.base64 || "")
+      }))
+    })
+  });
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch (error) {
+    throw new HttpsError("internal", `OCR provider returned invalid JSON: ${error.message}`);
+  }
+  if (!response.ok) {
+    throw new HttpsError("internal", payload?.message || `OCR provider failed with HTTP ${response.status}`);
+  }
+  if (!payload || !Array.isArray(payload.rows)) {
+    throw new HttpsError("internal", "OCR provider response must include a rows array.");
+  }
+  return {
+    provider: payload.provider || provider,
+    configured: true,
+    message: payload.message || "OCR provider returned extracted rows. Review before import.",
+    pages: Number(payload.pages || files.length || 1),
+    rows: payload.rows
+  };
+}
+
+exports.extractRegisterOcr = onCall({
+  timeoutSeconds: 120,
+  memory: "512MiB"
+}, async (request) => {
+  await requireUser(request.auth, STAFF_ROLES.concat(["admin"]));
+  const files = Array.isArray(request.data?.files) ? request.data.files : [];
+  if (!files.length) throw new HttpsError("invalid-argument", "At least one register image or PDF is required.");
+  if (files.length > 30) throw new HttpsError("invalid-argument", "Upload at most 30 register pages per extraction batch.");
+  for (const file of files) {
+    const size = Number(file.size || 0);
+    if (size > 8 * 1024 * 1024) throw new HttpsError("invalid-argument", "Each register page/PDF must be 8 MB or smaller.");
+  }
+  const provider = clean(process.env.REGISTER_OCR_PROVIDER || "mock").toLowerCase();
+  const hasProvider = Boolean(clean(process.env.REGISTER_OCR_ENDPOINT || ""));
+
+  if (!hasProvider || provider === "mock") {
+    return mockRegisterOcrRows(files);
+  }
+
+  return callRegisterOcrProvider(files, provider);
+});
+
 async function getBookByBarcode(profile, libraryBarcode) {
   let query = db.collectionGroup("books").where("libraryBarcode", "==", normalizeBarcode(libraryBarcode)).limit(5);
   const matches = await query.get();
