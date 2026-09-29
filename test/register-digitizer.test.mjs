@@ -149,6 +149,15 @@ test("live request code cannot silently enter the mock fixture path", () => {
   assert.doesNotMatch(functionSource, /if \(!hasProvider \|\| provider === "mock"\)/);
 });
 
+test("Register OCR uses a region-matched Firebase callable invocation", () => {
+  const clientSource = readFileSync(new URL("../public/js/register-digitizer.js", import.meta.url), "utf8");
+  const functionSource = readFileSync(new URL("../functions/index.js", import.meta.url), "utf8");
+  assert.match(clientSource, /getFunctions\(app, "us-central1"\)/);
+  assert.match(clientSource, /httpsCallable\(functions, "extractRegisterOcr"\)/);
+  assert.doesNotMatch(clientSource, /cloudfunctions\.net\/extractRegisterOcr/);
+  assert.match(functionSource, /exports\.extractRegisterOcr = onCall\(\{[\s\S]*?region: "us-central1"/);
+});
+
 test("duplicate accession detection covers upload and Firestore keys", () => {
   const rows = validateDigitizedRows([
     { accessionNumber: "01", author: "One", title: "Book One", confidence: 95 },

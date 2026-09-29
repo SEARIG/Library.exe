@@ -45,7 +45,7 @@ import {
 } from "./accession-register.mjs";
 
 const session = await requireAuth(["admin", "librarian"]);
-const functions = getFunctions(app);
+const functions = getFunctions(app, "us-central1");
 const extractRegisterOcr = httpsCallable(functions, "extractRegisterOcr");
 
 let digitizerFiles = [];

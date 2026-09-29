@@ -621,6 +621,7 @@ async function callRegisterOcrProvider(files = [], provider = "custom", options 
 }
 
 exports.extractRegisterOcr = onCall({
+  region: "us-central1",
   timeoutSeconds: 120,
   memory: "512MiB"
 }, async (request) => {
