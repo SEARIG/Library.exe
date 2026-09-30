@@ -37,9 +37,10 @@ test("blocks existing accessions unless update mode is enabled", () => {
 });
 
 test("creates the required barcode and accession export headers", () => {
-  const data = accessionBookData({ accessionNumber: "005", accessionDate: 44351, title: "Book" });
+  const data = accessionBookData({ accessionNumber: "005", accessionDate: 44351, title: "Book", classNo: "100", bookNo: "AUT" });
   assert.equal(data.barcodeValue, "ACC-005");
   assert.equal(data.accessionDate, "04/06/2021");
+  assert.equal(data.callNo, "100 AUT");
   const exported = accessionExportRow({ ...data, status: "available" });
   assert.equal(exported["Accession No."], "005");
   assert.equal(exported["Barcode Value"], "ACC-005");

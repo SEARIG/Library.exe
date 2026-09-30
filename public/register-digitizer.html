@@ -29,7 +29,7 @@
       <section class="digitizer-grid">
         <article class="panel digitizer-upload-panel">
           <h2>Upload Register Pages</h2>
-          <p class="helper-text">Supports JPG, JPEG, PNG, PDF, multi-page PDF, and multiple images. OCR never imports directly into Firestore.</p>
+          <p class="helper-text">Supports JPG, JPEG, PNG, PDF, multi-page PDF, and multiple images. OCR runs locally in this browser; images are not uploaded to an OCR server.</p>
           <div id="digitizerDropzone" class="digitizer-dropzone" tabindex="0">
             <strong>Drag and drop files here</strong>
             <span>or choose images / PDF files</span>
@@ -44,7 +44,7 @@
             <button class="btn btn-muted" id="clearDigitizerFilesBtn" type="button">Clear Session</button>
           </div>
           <div id="digitizerOcrMode" class="empty"><strong>OCR MODE: NOT RUN</strong></div>
-          <div id="digitizerConfigMessage" class="empty">Live OCR provider status will appear here.</div>
+          <div id="digitizerConfigMessage" class="empty">Local OCR status will appear here. Review every uncertain field before export.</div>
           <div id="digitizerDebugInfo" class="empty">Image and row-detection diagnostics will appear here.</div>
           <div id="digitizerPageList" class="digitizer-page-list"></div>
         </article>
@@ -63,7 +63,7 @@
         <div class="panel-head-row">
           <div>
             <h2>Human Review Grid</h2>
-            <p class="helper-text">Ditto marks are resolved from the previous non-empty value in the same column. Review every row before export or import.</p>
+            <p class="helper-text">-do-, -does-, paired quotes, and ditto marks repeat the previous non-empty value in the same column. Review every row before export or import.</p>
           </div>
           <div class="toolbar">
             <button class="btn btn-muted" id="addDigitizerRowBtn" type="button">Add Row</button>
@@ -115,6 +115,7 @@
     <div id="toast" class="toast"></div>
     <script src="./js/pwa.js?v=7" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="./js/register-digitizer.js?v=3"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+    <script type="module" src="./js/register-digitizer.js?v=4"></script>
   </body>
 </html>

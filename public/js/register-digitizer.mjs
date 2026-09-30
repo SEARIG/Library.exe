@@ -1,51 +1,75 @@
 export const REGISTER_EXPORT_HEADERS = [
-  "Accession No.", "Author", "Title", "Place & Publisher", "Year", "Pages", "Source",
-  "Bill No. & Date", "Cost (Rs.)", "Class No.", "Book No.", "Call No.",
-  "Withdrawal No., Date & Remarks"
+  "Accession No.", "Date", "Author", "Title", "Place & Publisher", "Year", "Pages", "Vol.",
+  "Source", "Bill No. & Date", "Cost (Rs.)", "Class No.", "Book No.",
+  "Withdrawal No., Date & Remarks", "Image URL", "Notes"
 ];
 
 export const REGISTER_FIELDS = [
-  "accessionNumber", "author", "title", "placePublisher", "year", "pages", "source",
-  "billNoDate", "cost", "classNo", "bookNo", "callNo", "remarks"
+  "accessionNumber", "accessionDate", "author", "title", "placePublisher", "year", "pages", "volume",
+  "source", "billNoDate", "cost", "classNo", "bookNo", "callNo", "remarks", "imageUrl", "notes"
 ];
 
 export const REGISTER_FIELD_LABELS = {
   accessionNumber: "Accession No.",
+  accessionDate: "Date",
   author: "Author",
   title: "Title",
   placePublisher: "Place & Publisher",
   year: "Year",
   pages: "Pages",
+  volume: "Vol.",
   source: "Source",
   billNoDate: "Bill No. & Date",
   cost: "Cost (Rs.)",
   classNo: "Class No.",
   bookNo: "Book No.",
   callNo: "Call No.",
-  remarks: "Withdrawal No., Date & Remarks"
+  remarks: "Withdrawal No., Date & Remarks",
+  imageUrl: "Image URL",
+  notes: "Notes"
 };
 
 const FIELD_ALIASES = {
   accessionNumber: ["accessionNumber", "accession", "accessionNo", "accession no", "accession no."],
+  accessionDate: ["accessionDate", "date"],
   author: ["author", "authors"],
   title: ["title", "book title"],
   placePublisher: ["placePublisher", "place publisher", "place & publisher", "publisher"],
   year: ["year", "publication year"],
   pages: ["pages", "page"],
+  volume: ["volume", "vol", "vol."],
   source: ["source", "acquisition source"],
   billNoDate: ["billNoDate", "bill no date", "bill no. & date", "bill"],
   cost: ["cost", "cost rs", "price"],
   classNo: ["classNo", "class no", "class no."],
   bookNo: ["bookNo", "book no", "book no."],
   callNo: ["callNo", "call no", "call no."],
-  remarks: ["remarks", "withdrawalRemarks", "withdrawal remarks", "withdrawal no., date & remarks"]
+  remarks: ["remarks", "withdrawalRemarks", "withdrawal remarks", "withdrawal no., date & remarks"],
+  imageUrl: ["imageUrl", "image url", "cover url"],
+  notes: ["notes", "note"]
 };
 
-const HEADER_BY_FIELD = Object.fromEntries(
-  REGISTER_FIELDS.map((field) => [field, REGISTER_FIELD_LABELS[field]])
-);
+const EXPORT_FIELD_BY_HEADER = {
+  "Accession No.": "accessionNumber",
+  Date: "accessionDate",
+  Author: "author",
+  Title: "title",
+  "Place & Publisher": "placePublisher",
+  Year: "year",
+  Pages: "pages",
+  "Vol.": "volume",
+  Source: "source",
+  "Bill No. & Date": "billNoDate",
+  "Cost (Rs.)": "cost",
+  "Class No.": "classNo",
+  "Book No.": "bookNo",
+  "Withdrawal No., Date & Remarks": "remarks",
+  "Image URL": "imageUrl",
+  Notes: "notes"
+};
 const DITTO_FIELDS = REGISTER_FIELDS.filter((field) => field !== "accessionNumber");
-const DITTO_MARKS = new Set(["do", "do.", "-do-", "-do.-", "ditto", "\"", "''", "“", "”", "„", "〃", "″"]);
+const DITTO_WORDS = new Set(["do", "does", "ditto"]);
+const OCR_DITTO_WORDS = new Set(["olo", "dlo", "ao"]);
 
 function normalizedLabel(value = "") {
   return String(value || "").trim().toLowerCase().replace(/&/g, "and").replace(/[.,()]/g, "").replace(/\s+/g, " ");
@@ -70,13 +94,20 @@ export function normalizeAccessionKey(value = "") {
 }
 
 export function isDittoValue(value = "") {
-  return DITTO_MARKS.has(cleanCell(value).toLowerCase());
+  const raw = cleanCell(value).toLowerCase();
+  if (!raw) return false;
+  if (/^(?:["'“”„‟〃″`´]{1,4})$/.test(raw)) return true;
+  const normalized = raw.replace(/[\s.\-–—_"'“”„‟〃″`´]/g, "");
+  if (DITTO_WORDS.has(normalized)) return true;
+  const hasRepeatDashes = /[-–—_]/.test(raw);
+  return hasRepeatDashes && OCR_DITTO_WORDS.has(normalized);
 }
 
 export function resolveDittoValues(rows = []) {
   const previous = {};
   return rows.map((sourceRow) => {
     const row = createEmptyRegisterRow(sourceRow);
+    row.rawCells = sourceRow.rawCells || Object.fromEntries(REGISTER_FIELDS.map((field) => [field, cleanCell(sourceRow[field])]));
     const resolvedFields = [];
     DITTO_FIELDS.forEach((field) => {
       const value = cleanCell(row[field]);
@@ -89,6 +120,7 @@ export function resolveDittoValues(rows = []) {
       if (cleanCell(row[field])) previous[field] = cleanCell(row[field]);
     });
     row.accessionNumber = cleanCell(row.accessionNumber);
+    row.resolvedCells = Object.fromEntries(REGISTER_FIELDS.map((field) => [field, cleanCell(row[field])]));
     row.dittoResolvedFields = [...new Set([...(sourceRow.dittoResolvedFields || []), ...resolvedFields])];
     return row;
   });
@@ -311,12 +343,13 @@ export function paginateRows(rows = [], page = 1, pageSize = 10) {
 }
 
 export function ocrModeForResult(result = {}) {
+  if (result.mode === "local") return "LOCAL";
   return result.mode === "live" || result.configured === true ? "LIVE" : "MOCK";
 }
 
-export function ocrFailureState(error = {}) {
+export function ocrFailureState(error = {}, mode = "LIVE FAILED") {
   return {
-    mode: "LIVE FAILED",
+    mode,
     offerMock: true,
     rows: [],
     message: cleanCell(error.message || "Live OCR failed.")
@@ -400,7 +433,7 @@ export function summarizeDigitizedRows(rows = []) {
 }
 
 export function digitizedRowToExportRow(row = {}) {
-  return Object.fromEntries(REGISTER_FIELDS.map((field) => [HEADER_BY_FIELD[field], cleanCell(row[field])]));
+  return Object.fromEntries(REGISTER_EXPORT_HEADERS.map((header) => [header, cleanCell(row[EXPORT_FIELD_BY_HEADER[header]])]));
 }
 
 export function digitizedRowsToMatrix(rows = []) {

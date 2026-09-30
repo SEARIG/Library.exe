@@ -1,4 +1,4 @@
-import { app, db } from "./firebase-config.js";
+import { db } from "./firebase-config.js";
 import {
   $,
   confirmAction,
@@ -17,10 +17,6 @@ import {
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 import {
-  getFunctions,
-  httpsCallable
-} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js";
-import {
   REGISTER_EXPORT_HEADERS,
   REGISTER_FIELD_LABELS,
   REGISTER_FIELDS,
@@ -38,16 +34,14 @@ import {
   rowsReadyForImport,
   summarizeDigitizedRows,
   validateDigitizedRows
-} from "./register-digitizer.mjs?v=3";
+} from "./register-digitizer.mjs?v=4";
+import { extractRegisterLocally } from "./local-register-ocr.mjs?v=1";
 import {
   accessionBookData,
   parseAccessionRegister
 } from "./accession-register.mjs";
 
 const session = await requireAuth(["admin", "librarian"]);
-const functions = getFunctions(app, "us-central1");
-const extractRegisterOcr = httpsCallable(functions, "extractRegisterOcr");
-
 let digitizerFiles = [];
 let digitizerRows = [];
 let zoom = 1;
@@ -79,8 +73,8 @@ $("#clearDigitizerFilesBtn")?.addEventListener("click", () => {
   renderFiles();
   renderRows();
 });
-$("#startDigitizerExtractionBtn")?.addEventListener("click", () => startExtraction("live", false).catch(handleError));
-$("#retryFullPageDigitizerBtn")?.addEventListener("click", () => startExtraction("live", true).catch(handleError));
+$("#startDigitizerExtractionBtn")?.addEventListener("click", () => startExtraction("local", false).catch(handleError));
+$("#retryFullPageDigitizerBtn")?.addEventListener("click", () => startExtraction("local", true).catch(handleError));
 $("#useMockDigitizerBtn")?.addEventListener("click", () => startExtraction("mock", false).catch(handleError));
 $("#validateDigitizerRowsBtn")?.addEventListener("click", () => validateRowsFromGrid().catch(handleError));
 $("#exportDigitizerExcelBtn")?.addEventListener("click", () => exportReviewedExcel().catch(handleError));
@@ -236,34 +230,38 @@ async function existingAccessionSet() {
     .filter(Boolean));
 }
 
-async function startExtraction(mode = "live", retryFullPage = false) {
+async function startExtraction(mode = "local", retryFullPage = false) {
   if (!digitizerFiles.length) throw new Error("Choose register images or PDFs first.");
-  const liveMode = mode === "live";
+  const localMode = mode === "local";
   $("#startDigitizerExtractionBtn").disabled = true;
   $("#retryFullPageDigitizerBtn").disabled = true;
   $("#useMockDigitizerBtn").hidden = true;
-  $("#digitizerOcrMode").innerHTML = `<strong>OCR MODE: ${liveMode ? "LIVE — RUNNING" : "MOCK — RUNNING"}</strong>`;
-  $("#digitizerConfigMessage").innerHTML = `<div class="empty">${liveMode ? "Scanning the complete register page..." : "Loading explicit mock test rows..."}</div>`;
+  $("#digitizerOcrMode").innerHTML = `<strong>OCR MODE: ${localMode ? "LOCAL — RUNNING" : "MOCK — RUNNING"}</strong>`;
+  $("#digitizerConfigMessage").innerHTML = `<div class="empty">${localMode ? "Scanning the complete register page locally..." : "Loading explicit mock test rows..."}</div>`;
   lastFilePayload = await Promise.all(digitizerFiles.map((item, index) => fileToPayload(item, index + 1)));
   let result;
   try {
-    result = (await extractRegisterOcr({ files: lastFilePayload, mode, fullPage: true, retryFullPage })).data;
+    result = mode === "mock"
+      ? createMockOcrResult(lastFilePayload)
+      : await extractRegisterLocally(lastFilePayload, {
+        retryFullPage,
+        onProgress: (progress) => {
+          if (!localMode) return;
+          const percent = Math.round(Number(progress.progress || 0) * 100);
+          $("#digitizerConfigMessage").innerHTML = `<div class="empty">Local OCR: ${escapeHtml(progress.status || "working")} ${percent}%</div>`;
+        }
+      });
   } catch (error) {
-    if (!liveMode) {
-      console.warn("Explicit backend mock unavailable; using local mock test data.", error);
-      result = createMockOcrResult(lastFilePayload);
-    } else {
-      const failure = ocrFailureState(error);
-      digitizerRows = [];
-      $("#digitizerOcrMode").innerHTML = `<strong>OCR MODE: ${failure.mode}</strong>`;
-      $("#digitizerConfigMessage").innerHTML = `<div class="empty"><strong>Live OCR failed</strong><span>${escapeHtml(error.code || "error")}: ${escapeHtml(failure.message)}</span><span>No mock rows were substituted.</span></div>`;
-      $("#digitizerDebugInfo").innerHTML = `<strong>Live extraction returned no rows.</strong>`;
-      $("#retryFullPageDigitizerBtn").hidden = false;
-      $("#useMockDigitizerBtn").hidden = false;
-      renderRows();
-      showToast(`Live OCR failed: ${failure.message}`, "error");
-      return;
-    }
+    const failure = ocrFailureState(error, localMode ? "LOCAL FAILED" : "MOCK FAILED");
+    digitizerRows = [];
+    $("#digitizerOcrMode").innerHTML = `<strong>OCR MODE: ${failure.mode}</strong>`;
+    $("#digitizerConfigMessage").innerHTML = `<div class="empty"><strong>Local OCR failed</strong><span>${escapeHtml(error.code || "error")}: ${escapeHtml(failure.message)}</span><span>No mock rows were substituted.</span></div>`;
+    $("#digitizerDebugInfo").innerHTML = `<strong>Local extraction returned no rows.</strong>`;
+    $("#retryFullPageDigitizerBtn").hidden = false;
+    $("#useMockDigitizerBtn").hidden = false;
+    renderRows();
+    showToast(`Local OCR failed: ${failure.message}`, "error");
+    return;
   } finally {
     $("#startDigitizerExtractionBtn").disabled = false;
     $("#retryFullPageDigitizerBtn").disabled = false;
@@ -279,7 +277,7 @@ async function startExtraction(mode = "live", retryFullPage = false) {
   digitizerRows = validateDigitizedRows(resolvedRows, existing);
   const dittoCount = digitizerRows.reduce((total, row) => total + (row.dittoResolvedFields?.length || 0), 0);
   const diagnostics = createRowCountDiagnostics({
-    detectedRows: result.debug?.rowsDetected ?? (mode === "mock" ? providerRows.length : 0),
+    detectedRows: result.debug?.rowsDetected ?? providerRows.length,
     processedRows: result.debug?.rowsProcessed ?? providerRows.length,
     parsedRows: digitizerRows.length
   });
@@ -312,8 +310,8 @@ async function startExtraction(mode = "live", retryFullPage = false) {
     rowsParsed: diagnostics.parsedRows,
     rowsRejected: rejectedRows
   });
-  $("#retryFullPageDigitizerBtn").hidden = !(diagnostics.hasMismatch || (modeLabel === "LIVE" && !diagnostics.detectionAvailable));
-  $("#useMockDigitizerBtn").hidden = modeLabel === "LIVE";
+  $("#retryFullPageDigitizerBtn").hidden = !(diagnostics.hasMismatch || (modeLabel === "LOCAL" && !diagnostics.detectionAvailable));
+  $("#useMockDigitizerBtn").hidden = modeLabel === "LOCAL";
   renderRows();
 }
 
@@ -590,7 +588,7 @@ async function createBookFromRegisterRow(row, importBatchId) {
     const bookRef = doc(db, "books", bId);
     transaction.set(bookRef, {
       ...registerData,
-      callNo: String(row.callNo || "").trim(),
+      callNo: String(row.callNo || registerData.callNo || "").trim(),
       remarks: String(row.remarks || row.withdrawalRemarks || "").trim(),
       b_id: bId,
       bname: registerData.title,

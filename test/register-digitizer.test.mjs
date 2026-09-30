@@ -7,6 +7,7 @@ import {
   createMockOcrResult,
   createRowCountDiagnostics,
   digitizedRowsToMatrix,
+  isDittoValue,
   ocrFailureState,
   ocrModeForResult,
   paginateRows,
@@ -15,6 +16,10 @@ import {
   resolveDittoValues,
   validateDigitizedRows
 } from "../public/js/register-digitizer.mjs";
+import {
+  buildVisualRowsFromWords,
+  selectAccessionAnchors
+} from "../public/js/local-register-ocr.mjs";
 
 function fixtureRows(count = 25) {
   return Array.from({ length: count }, (_, index) => ({
@@ -64,6 +69,21 @@ test("ditto values resolve before validation", () => {
   assert.equal(validated[1].author, "A. Sharma");
   assert.equal(validated[1].title, "First");
   assert.equal(validated[1].status, "Ready");
+});
+
+test("do, does, paired quotes, and handwritten dash variants repeat by column", () => {
+  ["do", "-do-", "does", "-does-", "\"\"", "''", "〃", "—olo—", "—Ao—"].forEach((value) => {
+    assert.equal(isDittoValue(value), true, `${value} should be a ditto marker`);
+  });
+  const resolved = resolveDittoValues([
+    { accessionNumber: "01", author: "Author One", title: "Title One", placePublisher: "Publisher One" },
+    { accessionNumber: "02", author: "-does-", title: "\"\"", placePublisher: "—olo—" }
+  ]);
+  assert.equal(resolved[1].author, "Author One");
+  assert.equal(resolved[1].title, "Title One");
+  assert.equal(resolved[1].placePublisher, "Publisher One");
+  assert.equal(resolved[1].rawCells.author, "-does-");
+  assert.equal(resolved[1].resolvedCells.author, "Author One");
 });
 
 test("page-level accession prefix is inherited across the sequence", () => {
@@ -127,35 +147,56 @@ test("pagination never truncates the extracted record set", () => {
 });
 
 test("OCR mode is displayed from the provider result", () => {
+  assert.equal(ocrModeForResult({ mode: "local", configured: true }), "LOCAL");
   assert.equal(ocrModeForResult({ mode: "live", configured: true }), "LIVE");
   assert.equal(ocrModeForResult({ mode: "mock", configured: false }), "MOCK");
 });
 
 test("failed live OCR returns no rows and only offers explicit mock data", () => {
-  const state = ocrFailureState({ message: "provider unavailable" });
-  assert.equal(state.mode, "LIVE FAILED");
+  const state = ocrFailureState({ message: "engine unavailable" }, "LOCAL FAILED");
+  assert.equal(state.mode, "LOCAL FAILED");
   assert.equal(state.offerMock, true);
   assert.deepEqual(state.rows, []);
-  assert.match(state.message, /provider unavailable/);
+  assert.match(state.message, /engine unavailable/);
 });
 
-test("live request code cannot silently enter the mock fixture path", () => {
+test("local OCR failure cannot silently enter the mock fixture path", () => {
   const clientSource = readFileSync(new URL("../public/js/register-digitizer.js", import.meta.url), "utf8");
-  const functionSource = readFileSync(new URL("../functions/index.js", import.meta.url), "utf8");
-  assert.doesNotMatch(clientSource, /Backend OCR unavailable; using deterministic mock provider/);
-  assert.match(clientSource, /if \(!liveMode\)/);
+  assert.match(clientSource, /extractRegisterLocally/);
+  const catchBlock = clientSource.slice(clientSource.indexOf("} catch (error) {"), clientSource.indexOf("} finally {"));
+  assert.doesNotMatch(catchBlock, /createMockOcrResult/);
   assert.match(clientSource, /No mock rows were substituted/);
-  assert.match(functionSource, /if \(requestedMode === "mock"\) return mockRegisterOcrRows/);
-  assert.doesNotMatch(functionSource, /if \(!hasProvider \|\| provider === "mock"\)/);
 });
 
-test("Register OCR uses a region-matched Firebase callable invocation", () => {
+test("Register OCR runs locally without a Firebase callable dependency", () => {
   const clientSource = readFileSync(new URL("../public/js/register-digitizer.js", import.meta.url), "utf8");
-  const functionSource = readFileSync(new URL("../functions/index.js", import.meta.url), "utf8");
-  assert.match(clientSource, /getFunctions\(app, "us-central1"\)/);
-  assert.match(clientSource, /httpsCallable\(functions, "extractRegisterOcr"\)/);
+  const localSource = readFileSync(new URL("../public/js/local-register-ocr.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(clientSource, /getFunctions|httpsCallable|extractRegisterOcr/);
+  assert.match(clientSource, /extractRegisterLocally/);
+  assert.match(localSource, /Tesseract\.createWorker/);
   assert.doesNotMatch(clientSource, /cloudfunctions\.net\/extractRegisterOcr/);
-  assert.match(functionSource, /exports\.extractRegisterOcr = onCall\(\{[\s\S]*?region: "us-central1"/);
+});
+
+test("local OCR accession anchors preserve all 25 visual rows", () => {
+  const words = Array.from({ length: 25 }, (_, index) => ({
+    text: index === 12 ? "413" : String(index + 1).padStart(2, "0"),
+    confidence: 95,
+    left: 500,
+    top: 400 + index * 105,
+    width: 50,
+    height: 35,
+    centerX: 525,
+    centerY: 417.5 + index * 105
+  }));
+  words.push({ text: "Author", confidence: 90, left: 800, top: 400, width: 100, height: 30, centerX: 850, centerY: 415 });
+  words.push({ text: "Title", confidence: 90, left: 1500, top: 400, width: 100, height: 30, centerX: 1550, centerY: 415 });
+  const anchors = selectAccessionAnchors(words, 4096, 3072);
+  const result = buildVisualRowsFromWords(words, 4096, 3072, { anchors, prefix: "18", prefixConfidence: 60, pageNumber: 1 });
+  assert.equal(anchors.length, 25);
+  assert.equal(result.detectedRows, 25);
+  assert.equal(result.rows[0].accessionNumber, "1801");
+  assert.equal(result.rows[12].accessionNumber, "1813");
+  assert.equal(result.rows[24].accessionNumber, "1825");
 });
 
 test("duplicate accession detection covers upload and Firestore keys", () => {
@@ -183,11 +224,11 @@ test("required fields and numeric year/cost validation produce review states", (
 test("OCR table parsing ignores decoration and merges continuation by column", () => {
   const parsed = parseOcrLikeRows([
     "Mohanlal Sukhadia University Accession Register",
-    "Accession No. | Author | Title | Place & Publisher | Year | Pages | Source | Bill No. & Date | Cost | Class No. | Book No. | Call No. | Remarks",
+    "Accession No. | Date | Author | Title | Place & Publisher | Year | Pages | Vol. | Source | Bill No. & Date | Cost | Class No. | Book No. | Call No. | Remarks | Image URL | Notes",
     "Page 7",
-    "07 | R. Mehta | History of Mewar | Udaipur Press | 2001 | 240 | Purchase | B-7 | 150 | 954 | MEH | 954 MEH | Clear",
-    " | | and Rajasthan library records",
-    "08 | do | Political Thought | -do- | 2002 | 200 | \" | B-8 | 175 | 320 | MEH | 320 MEH |"
+    "07 | | R. Mehta | History of Mewar | Udaipur Press | 2001 | 240 | | Purchase | B-7 | 150 | 954 | MEH | 954 MEH | Clear | |",
+    " | | | and Rajasthan library records",
+    "08 | | do | Political Thought | -do- | 2002 | 200 | | \" | B-8 | 175 | 320 | MEH | 320 MEH | | |"
   ]);
   assert.equal(parsed.length, 2);
   assert.match(parsed[0].title, /History of Mewar and Rajasthan library records/);
@@ -195,15 +236,17 @@ test("OCR table parsing ignores decoration and merges continuation by column", (
   assert.equal(parsed[1].placePublisher, "Udaipur Press");
 });
 
-test("Excel export matrix uses the 13 reviewed LMS column mappings", () => {
+test("Excel export matrix uses the exact 16-column LMS import template", () => {
   const rows = validateDigitizedRows([{
-    accessionNumber: "1801", author: "A. Author", title: "A Book", placePublisher: "Udaipur Press",
-    year: "2026", pages: "120", source: "Purchase", billNoDate: "B-1 / 01-01-2026", cost: "250",
-    classNo: "100", bookNo: "AUT", callNo: "100 AUT", remarks: "", confidence: 100, origin: "manual"
+    accessionNumber: "1801", accessionDate: "01/01/2026", author: "A. Author", title: "A Book", placePublisher: "Udaipur Press",
+    year: "2026", pages: "120", volume: "1", source: "Purchase", billNoDate: "B-1 / 01-01-2026", cost: "250",
+    classNo: "100", bookNo: "AUT", callNo: "100 AUT", remarks: "", imageUrl: "", notes: "Reviewed", confidence: 100, origin: "manual"
   }]);
   const matrix = digitizedRowsToMatrix(rows);
   assert.deepEqual(matrix[0], REGISTER_EXPORT_HEADERS);
-  assert.equal(matrix[0].length, 13);
+  assert.equal(matrix[0].length, 16);
   assert.equal(matrix[1][0], "1801");
-  assert.equal(matrix[1][11], "100 AUT");
+  assert.equal(matrix[1][1], "01/01/2026");
+  assert.equal(matrix[1][7], "1");
+  assert.equal(matrix[1][15], "Reviewed");
 });
