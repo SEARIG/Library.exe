@@ -30,7 +30,7 @@ import {
 import { renderNavbar } from "./navbar.js";
 import { bookCardThemeStyle, getBookCardTheme } from "./book-card-theme.mjs?v=1";
 
-const pageSize = 25;
+const pageSize = 32;
 let allBooks = [];
 let currentPage = 1;
 let currentUser = null;
