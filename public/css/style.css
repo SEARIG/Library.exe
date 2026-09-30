@@ -4034,12 +4034,68 @@ select {
 
 .digitizer-table textarea {
   min-width: 180px;
-  min-height: 42px;
+  min-height: 64px;
   padding: 8px 9px;
   border-radius: 10px;
+  resize: vertical;
+  white-space: pre-wrap;
 }
 
-.digitizer-table .status-ready td {
+.digitizer-field-cell {
+  min-width: 130px;
+  vertical-align: top;
+}
+
+.digitizer-field-control {
+  display: grid;
+  gap: 5px;
+}
+
+.digitizer-field-author textarea,
+.digitizer-field-placePublisher textarea {
+  min-width: 260px;
+}
+
+.digitizer-field-title textarea {
+  min-width: 360px;
+}
+
+.digitizer-field-accessionNumber input {
+  min-width: 130px;
+}
+
+.digitizer-field-year input,
+.digitizer-field-volume input {
+  min-width: 84px;
+  max-width: 110px;
+}
+
+.digitizer-field-confidence {
+  display: inline-flex;
+  width: fit-content;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.69rem;
+  font-weight: 800;
+}
+
+.digitizer-field-confidence.confidence-high {
+  color: #05654f;
+  background: rgba(5, 150, 105, 0.14);
+}
+
+.digitizer-field-confidence.confidence-medium {
+  color: #8a5a00;
+  background: rgba(247, 181, 0, 0.2);
+}
+
+.digitizer-field-confidence.confidence-low {
+  color: #a22525;
+  background: rgba(213, 64, 64, 0.14);
+}
+
+.digitizer-table .status-ready td,
+.digitizer-table .status-valid td {
   background: rgba(0, 121, 107, 0.04);
 }
 
@@ -4090,6 +4146,115 @@ select {
 .digitizer-delete-row {
   padding: 8px 12px;
   white-space: nowrap;
+}
+
+.digitizer-quality-warning {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(217, 119, 6, 0.28);
+  border-radius: 14px;
+  color: #7c4a03;
+  background: rgba(251, 191, 36, 0.13);
+  line-height: 1.45;
+}
+
+.digitizer-cell-debug-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.digitizer-cell-debug-card {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.digitizer-cell-debug-card strong,
+.digitizer-cell-debug-card span {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.digitizer-cell-debug-card img {
+  display: block;
+  width: 100%;
+  max-height: 150px;
+  object-fit: contain;
+  margin-top: 6px;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.digitizer-calibration-dialog-inner {
+  width: min(1180px, 94vw);
+}
+
+.digitizer-calibration-stage {
+  position: relative;
+  width: 100%;
+  max-height: 70vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #eef4f3;
+}
+
+.digitizer-calibration-stage img {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+  pointer-events: none;
+}
+
+.digitizer-calibration-overlay {
+  position: absolute;
+  inset: 0;
+}
+
+.digitizer-calibration-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  transform: translateX(-2px);
+  cursor: ew-resize;
+  background: rgba(220, 38, 38, 0.78);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.75);
+  touch-action: none;
+}
+
+.digitizer-calibration-line::before {
+  content: attr(data-label);
+  position: sticky;
+  top: 6px;
+  display: inline-block;
+  transform: translateX(5px);
+  padding: 3px 6px;
+  color: #fff;
+  background: #991b1b;
+  border-radius: 6px;
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+
+.digitizer-calibration-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.digitizer-calibration-legend span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.09);
+  color: var(--primary-dark);
+  font-size: 0.75rem;
+  font-weight: 700;
 }
 
 @media (max-width: 980px) {

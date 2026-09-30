@@ -7,7 +7,7 @@
     <title>Register Digitizer | Mohanlal Sukhadia University LMS</title>
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" type="image/png" href="/assets/mlsu-logo.png?v=4">
-    <link rel="stylesheet" href="css/style.css?v=7">
+    <link rel="stylesheet" href="css/style.css?v=8">
   </head>
   <body class="protected-page">
     <header class="app-header">
@@ -40,12 +40,14 @@
             <button class="btn btn-primary" id="startDigitizerExtractionBtn" type="button">Run Digitizer</button>
             <button class="btn btn-muted" id="retryFullPageDigitizerBtn" type="button" hidden>Retry Full Page Extraction</button>
             <button class="btn btn-muted" id="useMockDigitizerBtn" type="button" hidden>Use Mock Test Data</button>
+            <button class="btn btn-muted" id="calibrateDigitizerColumnsBtn" type="button" hidden>Calibrate Columns</button>
             <button class="btn btn-muted" id="downloadDigitizerTemplateBtn" type="button">Download Sample Template</button>
             <button class="btn btn-muted" id="clearDigitizerFilesBtn" type="button">Clear Session</button>
           </div>
           <div id="digitizerOcrMode" class="empty"><strong>OCR MODE: NOT RUN</strong></div>
           <div id="digitizerConfigMessage" class="empty">Local OCR status will appear here. Review every uncertain field before export.</div>
-          <div id="digitizerDebugInfo" class="empty">Image and row-detection diagnostics will appear here.</div>
+          <div id="digitizerQualityWarning" class="digitizer-quality-warning" hidden></div>
+          <div id="digitizerDebugInfo" class="empty" hidden>Image and row-detection diagnostics will appear here.</div>
           <div id="digitizerPageList" class="digitizer-page-list"></div>
         </article>
 
@@ -82,7 +84,7 @@
             <span>Validation status</span>
             <select id="digitizerStatusFilter">
               <option value="all">All rows</option>
-              <option value="Ready">Ready</option>
+              <option value="Valid">Valid</option>
               <option value="Needs Review">Needs Review</option>
               <option value="Duplicate">Duplicate</option>
               <option value="Invalid">Invalid</option>
@@ -108,7 +110,29 @@
           <canvas id="digitizerSourceCanvas" style="display:block;max-width:100%;height:auto;margin:auto;"></canvas>
           <div id="digitizerSourceFallback" class="empty" hidden></div>
         </div>
+        <div id="digitizerCellDebugGallery" class="digitizer-cell-debug-gallery" hidden></div>
         <pre id="digitizerSourceDebug" class="empty" style="white-space:pre-wrap;overflow-wrap:anywhere;"></pre>
+      </div>
+    </dialog>
+
+    <dialog id="digitizerCalibrationDialog">
+      <div class="dialog-inner digitizer-calibration-dialog-inner">
+        <div class="dialog-top">
+          <div>
+            <h2>Calibrate Register Columns</h2>
+            <p class="link-line">Drag the vertical separators so each label covers its complete register column. This layout is saved only in this browser.</p>
+          </div>
+          <button class="btn btn-muted dialog-close" id="closeDigitizerCalibrationBtn" type="button" aria-label="Close">X</button>
+        </div>
+        <div id="digitizerCalibrationStage" class="digitizer-calibration-stage">
+          <img id="digitizerCalibrationImage" alt="Register page for column calibration">
+          <div id="digitizerCalibrationOverlay" class="digitizer-calibration-overlay"></div>
+        </div>
+        <div id="digitizerCalibrationLegend" class="digitizer-calibration-legend"></div>
+        <div class="toolbar">
+          <button class="btn btn-primary" id="saveDigitizerCalibrationBtn" type="button">Save Calibration</button>
+          <button class="btn btn-muted" id="resetDigitizerCalibrationBtn" type="button">Reset Default</button>
+        </div>
       </div>
     </dialog>
 
@@ -116,6 +140,6 @@
     <script src="./js/pwa.js?v=7" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-    <script type="module" src="./js/register-digitizer.js?v=4"></script>
+    <script type="module" src="./js/register-digitizer.js?v=5"></script>
   </body>
 </html>

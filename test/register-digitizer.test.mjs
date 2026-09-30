@@ -17,7 +17,11 @@ import {
   validateDigitizedRows
 } from "../public/js/register-digitizer.mjs";
 import {
+  DEFAULT_COLUMN_LAYOUT,
   buildVisualRowsFromWords,
+  chooseBestOcrCandidate,
+  normalizeColumnLayout,
+  normalizeOcrFieldText,
   selectAccessionAnchors
 } from "../public/js/local-register-ocr.mjs";
 
@@ -68,7 +72,7 @@ test("ditto values resolve before validation", () => {
   const validated = validateDigitizedRows(resolved);
   assert.equal(validated[1].author, "A. Sharma");
   assert.equal(validated[1].title, "First");
-  assert.equal(validated[1].status, "Ready");
+  assert.equal(validated[1].status, "Valid");
 });
 
 test("do, does, paired quotes, and handwritten dash variants repeat by column", () => {
@@ -163,7 +167,9 @@ test("failed live OCR returns no rows and only offers explicit mock data", () =>
 test("local OCR failure cannot silently enter the mock fixture path", () => {
   const clientSource = readFileSync(new URL("../public/js/register-digitizer.js", import.meta.url), "utf8");
   assert.match(clientSource, /extractRegisterLocally/);
-  const catchBlock = clientSource.slice(clientSource.indexOf("} catch (error) {"), clientSource.indexOf("} finally {"));
+  const extractionStart = clientSource.indexOf("async function startExtraction");
+  const catchStart = clientSource.indexOf("} catch (error) {", extractionStart);
+  const catchBlock = clientSource.slice(catchStart, clientSource.indexOf("} finally {", catchStart));
   assert.doesNotMatch(catchBlock, /createMockOcrResult/);
   assert.match(clientSource, /No mock rows were substituted/);
 });
@@ -174,6 +180,9 @@ test("Register OCR runs locally without a Firebase callable dependency", () => {
   assert.doesNotMatch(clientSource, /getFunctions|httpsCallable|extractRegisterOcr/);
   assert.match(clientSource, /extractRegisterLocally/);
   assert.match(localSource, /Tesseract\.createWorker/);
+  assert.match(localSource, /recognizeCell/);
+  assert.match(localSource, /processedCellCanvas/);
+  assert.match(localSource, /detectedColumnLayout/);
   assert.doesNotMatch(clientSource, /cloudfunctions\.net\/extractRegisterOcr/);
 });
 
@@ -205,7 +214,7 @@ test("duplicate accession detection covers upload and Firestore keys", () => {
     { accessionNumber: "01", author: "Two", title: "Book Two", confidence: 95 },
     { accessionNumber: "03", author: "Three", title: "Book Three", confidence: 95 }
   ], new Set(["03"]));
-  assert.equal(rows[0].status, "Ready");
+  assert.equal(rows[0].status, "Valid");
   assert.equal(rows[1].status, "Duplicate");
   assert.equal(rows[2].status, "Duplicate");
 });
@@ -217,8 +226,54 @@ test("required fields and numeric year/cost validation produce review states", (
     { accessionNumber: "03", author: "", title: "Readable", year: "2004", cost: "10.50", confidence: 90 }
   ]);
   assert.equal(rows[0].status, "Invalid");
-  assert.equal(rows[1].status, "Invalid");
-  assert.equal(rows[2].status, "Needs Review");
+  assert.equal(rows[1].status, "Needs Review");
+  assert.equal(rows[2].status, "Valid");
+});
+
+test("field-specific OCR normalization only corrects numeric contexts", () => {
+  assert.equal(normalizeOcrFieldText(" 20O4 ", "year"), "2004");
+  assert.equal(normalizeOcrFieldText("18O1", "accessionNumber"), "1801");
+  assert.equal(normalizeOcrFieldText("  Reiser   (John)  ", "author"), "Reiser (John)");
+  assert.equal(normalizeOcrFieldText("xii + 465", "pages"), "xii + 465");
+});
+
+test("multi-pass selection rewards valid year and readable text", () => {
+  const year = chooseBestOcrCandidate([
+    { rawText: "2OO7", confidence: 62, variant: "original" },
+    { rawText: "2007", confidence: 58, variant: "threshold" }
+  ], "year");
+  assert.equal(year.normalizedText, "2007");
+  const author = chooseBestOcrCandidate([
+    { rawText: "R", confidence: 88, variant: "threshold" },
+    { rawText: "Reiser (John)", confidence: 72, variant: "contrast" }
+  ], "author");
+  assert.equal(author.normalizedText, "Reiser (John)");
+});
+
+test("column calibration preserves stable ordered page boundaries", () => {
+  const calibrated = DEFAULT_COLUMN_LAYOUT.map((item) => ({ ...item }));
+  calibrated[1].end = 0.181;
+  calibrated[2].start = 0.181;
+  const normalized = normalizeColumnLayout(calibrated);
+  assert.equal(normalized.length, DEFAULT_COLUMN_LAYOUT.length);
+  assert.equal(normalized[1].end, 0.181);
+  normalized.forEach((item, index) => {
+    assert.ok(item.end > item.start);
+    if (index) assert.ok(item.start >= normalized[index - 1].end);
+  });
+});
+
+test("weak optional metadata needs review but does not invalidate the row", () => {
+  const [row] = validateDigitizedRows([{
+    accessionNumber: "1801",
+    author: "Reiser",
+    title: "Engineering Thermodynamics",
+    year: "20O7",
+    confidence: 75,
+    fieldConfidence: { accessionNumber: 96, author: 72, title: 81, year: 44 }
+  }]);
+  assert.equal(row.status, "Needs Review");
+  assert.ok(row.errors.includes("invalid year"));
 });
 
 test("OCR table parsing ignores decoration and merges continuation by column", () => {

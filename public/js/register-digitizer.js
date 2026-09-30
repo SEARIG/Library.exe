@@ -34,23 +34,35 @@ import {
   rowsReadyForImport,
   summarizeDigitizedRows,
   validateDigitizedRows
-} from "./register-digitizer.mjs?v=4";
-import { extractRegisterLocally } from "./local-register-ocr.mjs?v=1";
+} from "./register-digitizer.mjs?v=5";
+import {
+  DEFAULT_COLUMN_LAYOUT,
+  extractRegisterLocally,
+  normalizeColumnLayout
+} from "./local-register-ocr.mjs?v=2";
 import {
   accessionBookData,
   parseAccessionRegister
 } from "./accession-register.mjs";
 
 const session = await requireAuth(["admin", "librarian"]);
+const DEBUG_MODE = new URLSearchParams(window.location.search).get("debug") === "true";
+const COLUMN_LAYOUT_STORAGE_KEY = "mlsu-register-column-layout-v1";
 let digitizerFiles = [];
 let digitizerRows = [];
 let zoom = 1;
 let searchText = "";
 let statusFilter = "all";
 let lastFilePayload = [];
+let lastOcrDebug = null;
+let columnLayout = loadColumnCalibration();
+let calibrationBoundaries = layoutToBoundaries(columnLayout);
 
 const fileInput = $("#digitizerFileInput");
 const dropzone = $("#digitizerDropzone");
+
+if (DEBUG_MODE && $("#digitizerDebugInfo")) $("#digitizerDebugInfo").hidden = false;
+if (session.profile?.role === "admin" && $("#calibrateDigitizerColumnsBtn")) $("#calibrateDigitizerColumnsBtn").hidden = false;
 
 $("#chooseDigitizerFilesBtn")?.addEventListener("click", () => fileInput.click());
 fileInput?.addEventListener("change", () => addFiles([...fileInput.files]));
@@ -67,9 +79,14 @@ $("#clearDigitizerFilesBtn")?.addEventListener("click", () => {
   $("#digitizerOcrMode").innerHTML = "<strong>OCR MODE: NOT RUN</strong>";
   $("#digitizerDebugInfo").textContent = "Image and row-detection diagnostics will appear here.";
   $("#digitizerImportProgress").textContent = "No import started.";
+  if ($("#digitizerQualityWarning")) {
+    $("#digitizerQualityWarning").hidden = true;
+    $("#digitizerQualityWarning").textContent = "";
+  }
   $("#retryFullPageDigitizerBtn").hidden = true;
   $("#useMockDigitizerBtn").hidden = true;
   lastFilePayload = [];
+  lastOcrDebug = null;
   renderFiles();
   renderRows();
 });
@@ -100,6 +117,10 @@ $("#zoomOutDigitizerBtn")?.addEventListener("click", () => {
   renderPreview();
 });
 $("#closeDigitizerSourceBtn")?.addEventListener("click", () => $("#digitizerSourceDialog")?.close());
+$("#calibrateDigitizerColumnsBtn")?.addEventListener("click", () => openColumnCalibration().catch(handleError));
+$("#closeDigitizerCalibrationBtn")?.addEventListener("click", () => $("#digitizerCalibrationDialog")?.close());
+$("#saveDigitizerCalibrationBtn")?.addEventListener("click", () => saveColumnCalibration());
+$("#resetDigitizerCalibrationBtn")?.addEventListener("click", () => resetColumnCalibration());
 
 dropzone?.addEventListener("dragover", (event) => {
   event.preventDefault();
@@ -114,6 +135,95 @@ dropzone?.addEventListener("drop", (event) => {
 dropzone?.addEventListener("keydown", (event) => {
   if (event.key === "Enter" || event.key === " ") fileInput.click();
 });
+
+function loadColumnCalibration() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COLUMN_LAYOUT_STORAGE_KEY) || "null");
+    return normalizeColumnLayout(saved || DEFAULT_COLUMN_LAYOUT);
+  } catch (error) {
+    console.warn("Register column calibration could not be read; defaults restored.", error);
+    return normalizeColumnLayout(DEFAULT_COLUMN_LAYOUT);
+  }
+}
+
+function layoutToBoundaries(layout) {
+  const normalized = normalizeColumnLayout(layout);
+  return [normalized[0].start, ...normalized.map((item) => item.end)];
+}
+
+function boundariesToLayout(boundaries) {
+  return DEFAULT_COLUMN_LAYOUT.map((item, index) => ({
+    field: item.field,
+    start: Number(boundaries[index]),
+    end: Number(boundaries[index + 1])
+  }));
+}
+
+async function openColumnCalibration() {
+  if (session.profile?.role !== "admin") throw new Error("Column calibration is available to administrators only.");
+  const file = digitizerFiles.find((item) => !item.name.toLowerCase().endsWith(".pdf"));
+  if (!file) throw new Error("Upload at least one register image before calibrating columns.");
+  calibrationBoundaries = layoutToBoundaries(columnLayout);
+  const image = $("#digitizerCalibrationImage");
+  image.src = file.objectUrl;
+  await new Promise((resolve, reject) => {
+    if (image.complete && image.naturalWidth) resolve();
+    else {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error("Could not load the register image for calibration."));
+    }
+  });
+  renderCalibrationOverlay();
+  $("#digitizerCalibrationDialog")?.showModal();
+}
+
+function renderCalibrationOverlay() {
+  const overlay = $("#digitizerCalibrationOverlay");
+  const legend = $("#digitizerCalibrationLegend");
+  if (!overlay || !legend) return;
+  const labels = DEFAULT_COLUMN_LAYOUT.map((item) => REGISTER_FIELD_LABELS[item.field] || item.field);
+  overlay.innerHTML = calibrationBoundaries.slice(1, -1).map((boundary, index) => `
+    <button class="digitizer-calibration-line" type="button" data-boundary-index="${index + 1}"
+      data-label="${escapeHtml(labels[index])}" aria-label="Boundary after ${escapeHtml(labels[index])}"
+      style="left:${boundary * 100}%"></button>`).join("");
+  legend.innerHTML = labels.map((label, index) => `<span>${index + 1}. ${escapeHtml(label)}</span>`).join("");
+  overlay.querySelectorAll("[data-boundary-index]").forEach((line) => {
+    line.addEventListener("pointerdown", (event) => {
+      const boundaryIndex = Number(line.dataset.boundaryIndex);
+      line.setPointerCapture(event.pointerId);
+      const move = (moveEvent) => {
+        const rect = overlay.getBoundingClientRect();
+        const minimum = calibrationBoundaries[boundaryIndex - 1] + 0.004;
+        const maximum = calibrationBoundaries[boundaryIndex + 1] - 0.004;
+        calibrationBoundaries[boundaryIndex] = Math.min(maximum, Math.max(minimum, (moveEvent.clientX - rect.left) / rect.width));
+        line.style.left = `${calibrationBoundaries[boundaryIndex] * 100}%`;
+      };
+      const finish = () => {
+        line.removeEventListener("pointermove", move);
+        line.removeEventListener("pointerup", finish);
+        line.removeEventListener("pointercancel", finish);
+      };
+      line.addEventListener("pointermove", move);
+      line.addEventListener("pointerup", finish);
+      line.addEventListener("pointercancel", finish);
+    });
+  });
+}
+
+function saveColumnCalibration() {
+  columnLayout = normalizeColumnLayout(boundariesToLayout(calibrationBoundaries));
+  localStorage.setItem(COLUMN_LAYOUT_STORAGE_KEY, JSON.stringify(columnLayout));
+  $("#digitizerCalibrationDialog")?.close();
+  showToast("Column calibration saved in this browser.", "success");
+}
+
+function resetColumnCalibration() {
+  columnLayout = normalizeColumnLayout(DEFAULT_COLUMN_LAYOUT);
+  calibrationBoundaries = layoutToBoundaries(columnLayout);
+  localStorage.removeItem(COLUMN_LAYOUT_STORAGE_KEY);
+  renderCalibrationOverlay();
+  showToast("Default register columns restored.", "success");
+}
 
 function addFiles(files = []) {
   const accepted = files.filter((file) => /(\.jpe?g|\.png|\.pdf)$/i.test(file.name) || ["image/jpeg", "image/png", "application/pdf"].includes(file.type));
@@ -245,6 +355,8 @@ async function startExtraction(mode = "local", retryFullPage = false) {
       ? createMockOcrResult(lastFilePayload)
       : await extractRegisterLocally(lastFilePayload, {
         retryFullPage,
+        columnLayout,
+        debug: DEBUG_MODE,
         onProgress: (progress) => {
           if (!localMode) return;
           const percent = Math.round(Number(progress.progress || 0) * 100);
@@ -284,6 +396,7 @@ async function startExtraction(mode = "local", retryFullPage = false) {
   const modeLabel = ocrModeForResult(result);
   const firstFile = lastFilePayload[0] || {};
   const debug = result.debug || {};
+  lastOcrDebug = debug;
   const rejectedRows = Math.max(0, diagnostics.detectedRows - diagnostics.parsedRows);
   $("#digitizerOcrMode").innerHTML = `<strong>OCR MODE: ${modeLabel}</strong>`;
   $("#digitizerConfigMessage").innerHTML = `
@@ -293,12 +406,19 @@ async function startExtraction(mode = "local", retryFullPage = false) {
       <span>Pages processed: ${Number(result.pages || digitizerFiles.length)} · Rows: ${digitizerRows.length} · Ditto cells resolved: ${dittoCount}</span>
       ${diagnostics.warning ? `<strong>${escapeHtml(diagnostics.warning)}</strong>` : ""}
     </div>`;
+  const qualityWarnings = Array.isArray(result.qualityWarnings) ? result.qualityWarnings.filter(Boolean) : [];
+  const qualityTarget = $("#digitizerQualityWarning");
+  if (qualityTarget) {
+    qualityTarget.hidden = !qualityWarnings.length;
+    qualityTarget.textContent = qualityWarnings.join(" ");
+  }
   $("#digitizerDebugInfo").innerHTML = `
     <strong>[REGISTER-OCR]</strong>
     <span>image=${Number(debug.imageWidth || firstFile.width || 0)}x${Number(debug.imageHeight || firstFile.height || 0)}</span>
     <span>cropBounds=${escapeHtml(JSON.stringify(debug.cropBounds || "full-image"))}</span>
     <span>tableTop=${Number(debug.tableTop || 0)} · tableBottom=${Number(debug.tableBottom || firstFile.height || 0)}</span>
-    <span>rowsDetected=${diagnostics.detectedRows} · rowsProcessed=${diagnostics.processedRows} · rowsParsed=${diagnostics.parsedRows} · rowsRejected=${rejectedRows}</span>`;
+    <span>rowsDetected=${diagnostics.detectedRows} · rowsProcessed=${diagnostics.processedRows} · rowsParsed=${diagnostics.parsedRows} · rowsRejected=${rejectedRows}</span>
+    <span>cellOcr=${Boolean(debug.cellOcr)} · columns=${escapeHtml(debug.pages?.[0]?.columnLayoutSource || "unknown")} · skew=${Number(debug.pages?.[0]?.skewDegrees || 0)}°</span>`;
   console.log("[REGISTER-OCR]", {
     mode: modeLabel,
     image: `${Number(debug.imageWidth || firstFile.width || 0)}x${Number(debug.imageHeight || firstFile.height || 0)}`,
@@ -320,6 +440,27 @@ async function validateRowsFromGrid() {
   digitizerRows = validateDigitizedRows(digitizerRows, await existingAccessionSet());
   renderRows();
   showToast("Rows validated.", "success");
+}
+
+function fieldConfidenceClass(confidence) {
+  const value = Number(confidence || 0);
+  if (value >= 85) return "high";
+  if (value >= 60) return "medium";
+  return "low";
+}
+
+function renderFieldControl(row, rowIndex, field) {
+  const value = row[field] || "";
+  const confidence = Number(row.fieldConfidence?.[field] || 0);
+  const label = REGISTER_FIELD_LABELS[field];
+  const longField = ["author", "title", "placePublisher", "source", "billNoDate", "remarks", "notes"].includes(field);
+  const control = longField
+    ? `<textarea data-row-index="${rowIndex}" data-field="${field}" aria-label="${escapeHtml(label)} row ${rowIndex + 1}">${escapeHtml(value)}</textarea>`
+    : `<input data-row-index="${rowIndex}" data-field="${field}" value="${escapeHtml(value)}" aria-label="${escapeHtml(label)} row ${rowIndex + 1}">`;
+  return `<td class="digitizer-field-cell digitizer-field-${field}"><div class="digitizer-field-control">
+    ${control}
+    <span class="digitizer-field-confidence confidence-${fieldConfidenceClass(confidence)}" data-confidence-field="${field}">${confidence}%</span>
+  </div></td>`;
 }
 
 function renderRows() {
@@ -357,7 +498,7 @@ function renderRows() {
             <td>${escapeHtml(row.pageNumber || "")}</td>
             <td>${escapeHtml(row.pageSide || "")}</td>
             <td>${escapeHtml(row.rowNumber || "")}</td>
-            ${REGISTER_FIELDS.map((field) => `<td><input data-row-index="${rowIndex}" data-field="${field}" value="${escapeHtml(row[field] || "")}" aria-label="${escapeHtml(REGISTER_FIELD_LABELS[field])} row ${rowIndex + 1}"></td>`).join("")}
+            ${REGISTER_FIELDS.map((field) => renderFieldControl(row, rowIndex, field)).join("")}
             <td><span class="digitizer-validation-text">${escapeHtml((row.errors || []).join("; ") || "Valid")}</span></td>
             <td><div class="row-actions"><button class="btn btn-muted" data-view-source="${rowIndex}" type="button">View Source</button><button class="btn btn-danger digitizer-delete-row" data-delete-row="${rowIndex}" type="button">Delete</button></div></td>
           </tr>`).join("")}
@@ -366,7 +507,15 @@ function renderRows() {
   target.querySelectorAll("[data-row-index][data-field]").forEach((input) => {
     input.addEventListener("input", () => {
       digitizerRows[Number(input.dataset.rowIndex)][input.dataset.field] = input.value;
-      digitizerRows[Number(input.dataset.rowIndex)].origin = "reviewed";
+      const row = digitizerRows[Number(input.dataset.rowIndex)];
+      row.origin = "reviewed";
+      row.reviewedFields = [...new Set([...(row.reviewedFields || []), input.dataset.field])];
+      row.fieldConfidence = { ...(row.fieldConfidence || {}), [input.dataset.field]: 100 };
+      const confidence = input.closest(".digitizer-field-control")?.querySelector("[data-confidence-field]");
+      if (confidence) {
+        confidence.textContent = "100%";
+        confidence.className = "digitizer-field-confidence confidence-high";
+      }
     });
   });
   target.querySelectorAll("[data-delete-row]").forEach((button) => {
@@ -414,6 +563,16 @@ async function showSourceForRow(rowIndex) {
   const dialog = $("#digitizerSourceDialog");
   const canvas = $("#digitizerSourceCanvas");
   const fallback = $("#digitizerSourceFallback");
+  const cellGallery = $("#digitizerCellDebugGallery");
+  const cellOcrSummary = Object.fromEntries(Object.entries(row.cellOcr || {}).map(([field, detail]) => [field, {
+    rawText: detail.rawText,
+    normalizedText: detail.normalizedText,
+    confidence: detail.confidence,
+    cropCoordinates: detail.cropCoordinates,
+    variant: detail.variant,
+    engine: detail.engine,
+    candidates: detail.candidates
+  }]));
   $("#digitizerSourceDebug").textContent = JSON.stringify({
     visualRow: row.rowNumber,
     rawAccessionText: row.rawAccessionText || row.accessionNumber,
@@ -422,9 +581,27 @@ async function showSourceForRow(rowIndex) {
     resolvedAccessionNumber: row.resolvedAccessionNumber || row.accessionNumber,
     prefixConfidence: row.accessionPrefixConfidence || 0,
     confidence: row.confidence || 0,
+    fieldConfidence: row.fieldConfidence || {},
+    accessionSequenceWarning: row.accessionSequenceWarning || "",
     rawText: row.rawText || "",
-    sourceBounds: row.sourceBounds || row.bounds || []
+    sourceBounds: row.sourceBounds || row.bounds || [],
+    cellOcr: cellOcrSummary
   }, null, 2);
+  if (cellGallery) {
+    const pageDebug = lastOcrDebug?.pages?.[pageIndex] || {};
+    const pageCards = pageDebug.debugPreview ? `
+      <article class="digitizer-cell-debug-card"><strong>Original page</strong><img src="${escapeHtml(pageDebug.debugPreview.original || "")}" alt="Original OCR page"></article>
+      <article class="digitizer-cell-debug-card"><strong>Corrected page</strong><img src="${escapeHtml(pageDebug.debugPreview.corrected || "")}" alt="Corrected OCR page"></article>` : "";
+    const cellCards = Object.entries(row.cellOcr || {}).filter(([, detail]) => detail.debugImages).map(([field, detail]) => `
+      <article class="digitizer-cell-debug-card">
+        <strong>${escapeHtml(REGISTER_FIELD_LABELS[field] || field)} · ${Number(detail.confidence || 0)}%</strong>
+        <span>${escapeHtml(detail.variant || "")} · ${escapeHtml(detail.normalizedText || "(blank)")}</span>
+        <img src="${escapeHtml(detail.debugImages.original || "")}" alt="Original ${escapeHtml(field)} crop">
+        <img src="${escapeHtml(detail.debugImages.processed || "")}" alt="Processed ${escapeHtml(field)} crop">
+      </article>`).join("");
+    cellGallery.innerHTML = DEBUG_MODE ? pageCards + cellCards : "";
+    cellGallery.hidden = !DEBUG_MODE || !(pageCards || cellCards);
+  }
   canvas.hidden = true;
   fallback.hidden = false;
   fallback.textContent = "Source geometry was not returned for this row.";
@@ -454,7 +631,7 @@ function renderSummary() {
   const summary = summarizeDigitizedRows(digitizerRows);
   $("#digitizerSummary").innerHTML = `
     <span class="metric">Total <strong>${summary.total}</strong></span>
-    <span class="metric metric-ready">Ready <strong>${summary.ready}</strong></span>
+    <span class="metric metric-ready">Valid <strong>${summary.ready}</strong></span>
     <span class="metric metric-review">Needs Review <strong>${summary.needsReview}</strong></span>
     <span class="metric metric-duplicate">Duplicates <strong>${summary.duplicates}</strong></span>
     <span class="metric metric-invalid">Invalid <strong>${summary.invalid}</strong></span>`;
@@ -496,7 +673,7 @@ function addManualRow() {
 async function validatedRowsForOutput() {
   digitizerRows = validateDigitizedRows(readRowsFromGrid(), await existingAccessionSet());
   renderRows();
-  const blocked = digitizerRows.filter((row) => row.status !== "Ready");
+  const blocked = digitizerRows.filter((row) => !["Valid", "Ready"].includes(row.status));
   if (blocked.length) throw new Error(`Resolve ${blocked.length} row(s) marked Needs Review, Duplicate, or Invalid before export/import.`);
   return digitizerRows;
 }
@@ -530,8 +707,8 @@ async function downloadSampleTemplate() {
 async function importReviewedRows() {
   const validatedRows = await validatedRowsForOutput();
   const readyRows = rowsReadyForImport(validatedRows);
-  if (!readyRows.length) throw new Error("No Ready rows available for import.");
-  const confirmed = await confirmAction(`Import ${readyRows.length} ready rows into LMS in safe chunks?`);
+  if (!readyRows.length) throw new Error("No Valid rows available for import.");
+  const confirmed = await confirmAction(`Import ${readyRows.length} valid rows into LMS in safe chunks?`);
   if (!confirmed) return;
 
   const parsed = parseAccessionRegister(digitizedRowsToMatrix(readyRows), await existingBookMap(), false);

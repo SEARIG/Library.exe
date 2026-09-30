@@ -154,6 +154,11 @@ function objectToRegisterRow(source = {}, index = 0) {
     detectedPrefix: cleanCell(source.detectedPrefix),
     detectedSuffix: cleanCell(source.detectedSuffix),
     prefixConfidence: Number(source.prefixConfidence ?? source.accessionPrefixConfidence ?? 0),
+    fieldConfidence: source.fieldConfidence && typeof source.fieldConfidence === "object" ? { ...source.fieldConfidence } : {},
+    cellOcr: source.cellOcr && typeof source.cellOcr === "object" ? { ...source.cellOcr } : {},
+    accessionSequenceWarning: cleanCell(source.accessionSequenceWarning),
+    rowBoundaryFailed: Boolean(source.rowBoundaryFailed),
+    reviewedFields: Array.isArray(source.reviewedFields) ? [...source.reviewedFields] : [],
     bounds: source.bounds || null,
     sourceBounds: Array.isArray(source.sourceBounds) ? source.sourceBounds : (source.bounds ? [source.bounds] : [])
   };
@@ -200,8 +205,8 @@ export function parseOcrLikeRows(input = []) {
 
 export function confidenceStatus(confidence = 0) {
   const value = Number(confidence || 0);
-  if (value >= 90) return "high";
-  if (value >= 80) return "medium";
+  if (value >= 85) return "high";
+  if (value >= 60) return "medium";
   return "low";
 }
 
@@ -402,8 +407,8 @@ export function validateDigitizedRows(rows = [], existingAccessions = new Set())
     const errors = [];
     let duplicateType = "";
     if (!accession) errors.push("missing accession number");
-    if (!cleanCell(row.title)) errors.push("missing title");
-    if (!cleanCell(row.author)) errors.push("missing author");
+    if (accession && !/^[0-9A-Z][0-9A-Z\-/]{0,31}$/i.test(accession)) errors.push("invalid accession number");
+    if (!cleanCell(row.title) && !cleanCell(row.author)) errors.push("missing author and title");
     if (key && seen.has(key)) { errors.push("duplicate inside upload"); duplicateType = "upload"; }
     if (key && existingAccessions.has(key)) { errors.push("duplicate against Firestore"); duplicateType ||= "firestore"; }
     if (row.year && !/^\d{4}$/.test(cleanCell(row.year))) errors.push("invalid year");
@@ -411,11 +416,23 @@ export function validateDigitizedRows(rows = [], existingAccessions = new Set())
     if (row.rawText && seen.get(key)?.rawText === row.rawText) errors.push("repeated OCR row");
     if (["author", "title", "placePublisher"].some((field) => cleanCell(row[field]).includes("?"))) errors.push("uncertain OCR text");
     if (row.accessionNeedsReview) errors.push("uncertain accession prefix");
-    if (Number(row.confidence || 0) < 80 && !["manual", "reviewed"].includes(row.origin)) errors.push("low confidence");
+    if (row.accessionSequenceWarning) errors.push(row.accessionSequenceWarning);
+    if (row.rowBoundaryFailed) errors.push("row boundary detection failed");
+    const reviewedFields = new Set(row.reviewedFields || []);
+    ["author", "title", "placePublisher", "year", "pages"].forEach((field) => {
+      const value = cleanCell(row[field]);
+      const confidence = Object.prototype.hasOwnProperty.call(row.fieldConfidence || {}, field)
+        ? Number(row.fieldConfidence[field] || 0)
+        : Number(row.confidence || 0);
+      if (value && confidence < 60 && !reviewedFields.has(field) && row.origin !== "manual") {
+        errors.push(`${REGISTER_FIELD_LABELS[field]} low confidence`);
+      }
+    });
+    if (Number(row.confidence || 0) < 60 && !["manual", "reviewed"].includes(row.origin)) errors.push("low confidence");
     if (key && !seen.has(key)) seen.set(key, row);
     const status = errors.some((error) => error.includes("duplicate")) ? "Duplicate"
-      : errors.some((error) => ["missing accession number", "missing title", "invalid year", "invalid cost"].includes(error)) ? "Invalid"
-        : errors.length ? "Needs Review" : "Ready";
+      : errors.some((error) => ["missing accession number", "invalid accession number", "row boundary detection failed"].includes(error)) ? "Invalid"
+        : errors.length ? "Needs Review" : "Valid";
     return { ...row, id: row.id || `ocr-row-${index + 1}`, accessionNumber: accession,
       confidence: Number(row.confidence || 0), confidenceStatus: confidenceStatus(row.confidence), duplicateType, errors, status };
   });
@@ -424,7 +441,7 @@ export function validateDigitizedRows(rows = [], existingAccessions = new Set())
 export function summarizeDigitizedRows(rows = []) {
   return rows.reduce((summary, row) => {
     summary.total += 1;
-    if (row.status === "Ready") summary.ready += 1;
+    if (["Valid", "Ready"].includes(row.status)) summary.ready += 1;
     if (row.status === "Needs Review") summary.needsReview += 1;
     if (row.status === "Duplicate") summary.duplicates += 1;
     if (row.status === "Invalid") summary.invalid += 1;
@@ -441,5 +458,5 @@ export function digitizedRowsToMatrix(rows = []) {
 }
 
 export function rowsReadyForImport(rows = []) {
-  return rows.filter((row) => row.status === "Ready");
+  return rows.filter((row) => ["Valid", "Ready"].includes(row.status));
 }
