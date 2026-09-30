@@ -12,7 +12,7 @@
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" type="image/png" href="/assets/mlsu-logo.png?v=4">
     <link rel="apple-touch-icon" href="/assets/mlsu-logo-192.png">
-    <link rel="stylesheet" href="css/style.css?v=6">
+    <link rel="stylesheet" href="css/style.css?v=9">
   </head>
   <body class="home-page">
     <header class="home-navbar">
@@ -27,10 +27,9 @@
         <span></span><span></span><span></span>
       </button>
       <nav class="home-nav-links" id="homeNavLinks" aria-label="Primary navigation">
-        <a href="#get-app">Get App</a>
         <a href="library.html">Browse Library</a>
+        <a href="#get-app">Get App</a>
         <a href="login.html">Login</a>
-        <a class="home-nav-cta" href="signup.html">Create Account</a>
       </nav>
     </header>
 
@@ -39,7 +38,7 @@
         <div class="home-hero-copy">
           <img class="home-hero-logo hero-logo" src="./assets/mlsu-logo.png?v=2" alt="Mohanlal Sukhadia University LMS Logo">
           <h1 id="homeHeroTitle">Mohanlal Sukhadia University LMS</h1>
-          <p>Smart barcode-based library system for students, librarians, and administrators.</p>
+          <p>Browse the university library online or download the MLSU LMS student app.</p>
           <div class="home-stats" aria-label="Library statistics">
             <article>
               <strong id="homeBooksCount">--</strong>
@@ -56,11 +55,13 @@
           </div>
         </div>
 
-        <aside class="home-login-card" aria-label="Student access">
-          <h2>Student Access</h2>
-          <p>Login to request books, track issued books, and view dues.</p>
-          <a class="btn btn-primary" href="login.html">Student Login</a>
-          <a class="btn btn-muted" href="signup.html">Create Account</a>
+        <aside class="home-login-card" aria-label="Library access options">
+          <span class="section-kicker">Library Access</span>
+          <h2>Start here</h2>
+          <p>Search the public catalog, get the Android app, or sign in to your authorized account.</p>
+          <a class="btn btn-primary" href="library.html">Browse Library</a>
+          <a class="btn btn-gold" href="#get-app">Download Student App</a>
+          <a class="btn btn-muted" href="login.html">Login</a>
           <button class="btn btn-muted" id="installAppBtn" type="button" onclick="installPWA()" style="display:none;">Install App</button>
         </aside>
       </section>
@@ -72,25 +73,22 @@
           </div>
           <div>
             <span class="section-kicker">Student Android App</span>
-            <h2 id="getAppTitle">Get the Student App</h2>
-            <p>Download the MLSU LMS Android app for students to browse books, request issue, request return, scan accession numbers, and check penalties.</p>
+            <h2 id="getAppTitle">Get the MLSU LMS Student App</h2>
+            <p>Students can browse books, request issue/return, check issued books and penalties, and use library services from the Android app.</p>
           </div>
         </div>
         <div class="get-app-actions-card" aria-label="MLSU LMS Android app download">
-          <div class="get-app-buttons">
-            <a href="download.html" class="btn btn-primary">
-              Get Android App
+          <div class="app-qr-card">
+            <a href="/downloads/MLSU-LMS.apk" download aria-label="Download the MLSU LMS Android APK">
+              <img src="./assets/mlsu-lms-apk-qr.svg" width="220" height="220" alt="QR code for downloading the MLSU LMS Android app">
             </a>
-            <a href="/library.html" class="btn btn-muted">Open Web App</a>
+            <strong>Scan to download MLSU LMS for Android</strong>
           </div>
-          <p class="install-note">Android only. Use the app page for the current APK availability and installation steps.</p>
-          <ol class="install-steps">
-            <li>Open the app download page</li>
-            <li>Open the downloaded APK</li>
-            <li>Allow installation from browser if asked</li>
-            <li>Tap Install</li>
-            <li>Open MLSU LMS</li>
-          </ol>
+          <div class="get-app-buttons">
+            <a href="/downloads/MLSU-LMS.apk" download class="btn btn-primary">Download APK</a>
+            <a href="download.html" class="btn btn-muted">Installation Help</a>
+          </div>
+          <p class="install-note">Android only. The signed release APK must be present at the official download path before deployment.</p>
           <dl class="app-details">
             <div>
               <dt>App Name</dt>
@@ -167,9 +165,8 @@
       <section>
         <h3>Quick Links</h3>
         <a href="library.html">Browse Library</a>
+        <a href="/downloads/MLSU-LMS.apk" download>Download Student App</a>
         <a href="login.html">Login</a>
-        <a href="signup.html">Create Account</a>
-        <a href="download.html">Get Android App</a>
       </section>
       <section>
         <h3>Developed By</h3>

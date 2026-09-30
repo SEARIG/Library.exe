@@ -1,10 +1,11 @@
-const CACHE_NAME = "msu-lms-pwa-v2";
+const CACHE_NAME = "msu-lms-pwa-v3";
 const STATIC_ASSETS = [
   "/",
   "/index.html",
   "/login.html",
   "/signup.html",
   "/library.html",
+  "/download.html",
   "/student-dashboard.html",
   "/librarian-dashboard.html",
   "/admin-dashboard.html",
@@ -15,6 +16,7 @@ const STATIC_ASSETS = [
   "/assets/mlsu-logo-512.png",
   "/assets/library-shelf-bg.jpg",
   "/assets/book-placeholder.svg",
+  "/assets/mlsu-lms-apk-qr.svg",
   "/css/style.css",
   "/css/styles.css",
   "/js/pwa.js"

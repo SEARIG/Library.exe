@@ -51,8 +51,7 @@
             <button class="btn btn-primary" data-open-modal="addBookModal" type="button">Add Book</button>
             <a class="btn btn-muted" href="library.html">Library</a>
             <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Book Database</button>
-            <a class="btn btn-muted" href="register-digitizer.html">Register Digitizer</a>
-            <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Import Books</button>
+            <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Import Accession Register Excel</button>
             <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Export Books</button>
             <button class="btn btn-muted" data-open-modal="barcodeManagerModal" type="button">Barcode Manager</button>
             <button class="btn btn-muted" data-open-modal="timeSlotModal" type="button">Set Issue / Return Time</button>
@@ -189,7 +188,7 @@
           <button class="btn btn-muted" data-close-modal type="button">Close</button>
         </div>
         <div class="toolbar">
-          <button class="btn btn-primary" id="importBooksBtn" type="button">Import Accession Register</button>
+          <button class="btn btn-primary" id="importBooksBtn" type="button">Import Accession Register Excel</button>
           <button class="btn btn-muted" id="downloadBooksTemplateBtn" type="button">Download Accession Register Template</button>
           <button class="btn btn-muted" id="confirmBookImportBtn" type="button" disabled>Confirm Import</button>
           <button class="btn btn-muted" id="exportBooksExcelBtn" type="button">Export Accession Register</button>
@@ -199,7 +198,7 @@
           <input id="updateExistingBooks" type="checkbox">
           <span>Update Existing (match by accession number; issue status and history remain unchanged)</span>
         </label>
-        <div id="bookImportResult" class="empty">Upload an accession register .xlsx or .csv file to preview it before import.</div>
+        <div id="bookImportResult" class="empty">Upload a verified Excel file containing accession register records. Accepted formats: .xlsx and .csv.</div>
         <div id="bookImportPreview" class="table-scroll"></div>
         <div class="library-controls">
           <label>Search Books<input id="bookSearch" placeholder="Search by accession number, title, author, publisher, year, ISBN, category, or subject"></label>
