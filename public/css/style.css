@@ -17,6 +17,8 @@
   --shadow: 0 22px 55px rgba(15, 23, 42, 0.11);
   --soft-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
   --radius: 18px;
+  --sidebar-width: 260px;
+  --desktop-gutter: 24px;
 }
 
 .reports-main {
@@ -831,7 +833,8 @@ canvas {
 }
 
 .header-inner {
-  width: min(1400px, calc(100% - 32px));
+  width: calc(100% - (var(--desktop-gutter) * 2));
+  max-width: none;
   min-height: 64px;
   margin: 0 auto;
   display: flex;
@@ -893,7 +896,7 @@ canvas {
   top: 64px;
   left: 0;
   z-index: 45;
-  width: 260px;
+  width: var(--sidebar-width);
   height: calc(100vh - 64px);
   padding: 22px;
   overflow-y: auto;
@@ -1050,15 +1053,17 @@ canvas {
 }
 
 .app-main {
-  width: min(1400px, calc(100% - 32px));
+  width: calc(100% - (var(--desktop-gutter) * 2));
+  max-width: none;
   margin: 0 auto;
   padding: 30px 0 64px;
 }
 
 .protected-page.auth-ready.sidebar-open .app-main {
-  margin-left: calc(260px + 24px);
-  width: calc(100% - 308px);
-  max-width: 1400px;
+  width: auto;
+  max-width: none;
+  margin-left: calc(var(--sidebar-width) + var(--desktop-gutter));
+  margin-right: var(--desktop-gutter);
 }
 
 .sidebar-overlay {
@@ -1244,7 +1249,8 @@ canvas {
 }
 
 .library-nav {
-  width: min(1280px, calc(100% - 32px));
+  width: calc(100% - 32px);
+  max-width: none;
   min-height: 72px;
   margin: 16px auto 0;
   padding: 12px 18px;
@@ -1303,7 +1309,8 @@ canvas {
 }
 
 .library-page {
-  max-width: 1280px;
+  width: 100%;
+  max-width: none;
   margin: 0 auto;
   padding: 28px;
 }
@@ -2184,7 +2191,8 @@ canvas {
 }
 
 .library-footer {
-  width: min(1280px, calc(100% - 32px));
+  width: calc(100% - 32px);
+  max-width: none;
   margin: 0 auto 24px;
   padding: 20px;
   display: grid;
