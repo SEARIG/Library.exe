@@ -2001,21 +2001,101 @@ canvas {
 }
 
 .book-card {
+  --book-primary: #2563EB;
+  --book-dark: #1D4ED8;
+  --book-light: #DBEAFE;
   min-width: 0;
   padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.55);
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--book-light);
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.88);
-  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.10);
+  box-shadow: inset 0 4px 0 var(--book-primary), 0 18px 45px rgba(15, 23, 42, 0.10);
   backdrop-filter: blur(12px);
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
-.book-card img {
+.book-cover {
+  position: relative;
   width: 100%;
   height: 220px;
-  object-fit: cover;
+  overflow: hidden;
   border-radius: 14px;
+  background: var(--book-light);
+}
+
+.catalog-cover-image,
+.catalog-cover-placeholder {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.catalog-cover-image {
+  display: block;
+  object-fit: cover;
   background: #f4f7f7;
+}
+
+.catalog-cover-placeholder {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(145deg, #ffffff 0%, var(--book-light) 100%);
+}
+
+.book-cover.has-real-cover .catalog-cover-placeholder {
+  display: none;
+}
+
+.book-cover.cover-failed .catalog-cover-image {
+  display: none;
+}
+
+.book-cover.cover-failed .catalog-cover-placeholder {
+  display: grid;
+}
+
+.placeholder-book {
+  position: relative;
+  width: 55%;
+  height: 70%;
+  display: block;
+  overflow: hidden;
+  border-radius: 9px;
+  background: var(--book-primary);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.18);
+}
+
+.placeholder-spine {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 9px;
+  background: var(--book-dark);
+}
+
+.placeholder-line {
+  position: absolute;
+  left: 22%;
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.placeholder-line-one {
+  top: 18%;
+  right: 14%;
+}
+
+.placeholder-line-two {
+  top: 31%;
+  right: 14%;
+}
+
+.placeholder-line-three {
+  left: 22%;
+  right: 32%;
+  bottom: 17%;
 }
 
 .book-card h2 {
@@ -2036,8 +2116,31 @@ canvas {
 
 .book-card summary {
   cursor: pointer;
-  color: var(--primary-dark);
+  color: var(--book-dark);
   font-weight: 900;
+}
+
+.book-card summary::marker {
+  color: var(--book-primary);
+}
+
+.book-accession {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.book-accession-icon {
+  width: 22px;
+  height: 22px;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--book-dark);
+  background: var(--book-light);
+  font-size: 0.78rem;
+  font-weight: 950;
 }
 
 .book-card .meta-row {
@@ -2101,6 +2204,12 @@ canvas {
     transform: translateY(-2px);
     border-color: rgba(15, 118, 110, 0.22);
     box-shadow: var(--shadow);
+  }
+
+  .book-card:hover {
+    transform: translateY(-3px);
+    border-color: var(--book-primary);
+    box-shadow: inset 0 4px 0 var(--book-primary), 0 22px 48px rgba(15, 23, 42, 0.14);
   }
 }
 

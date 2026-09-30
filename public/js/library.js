@@ -28,6 +28,7 @@ import {
   showToast
 } from "./app.js";
 import { renderNavbar } from "./navbar.js";
+import { bookCardThemeStyle, getBookCardTheme } from "./book-card-theme.mjs?v=1";
 
 const pageSize = 25;
 let allBooks = [];
@@ -104,12 +105,24 @@ function renderLibrary() {
     renderEmpty(booksTarget, "No books found.");
   } else {
     booksTarget.innerHTML = visibleRows.map(({ id, data }) => {
-      const cover = data.imageUrl || "assets/book-placeholder.svg";
+      const cover = String(data.imageUrl || "").trim();
       const status = String(data.status || "available").toLowerCase();
+      const theme = getBookCardTheme(data);
+      const themeStyle = bookCardThemeStyle(theme);
+      const coverMarkup = `
+        ${cover ? `<img class="catalog-cover-image" src="${escapeHtml(cover)}" alt="Cover of ${escapeHtml(bookTitle(data))}">` : ""}
+        <div class="catalog-cover-placeholder" role="img" aria-label="Color-themed placeholder cover for ${escapeHtml(bookTitle(data))}">
+          <span class="placeholder-book" aria-hidden="true">
+            <span class="placeholder-spine"></span>
+            <span class="placeholder-line placeholder-line-one"></span>
+            <span class="placeholder-line placeholder-line-two"></span>
+            <span class="placeholder-line placeholder-line-three"></span>
+          </span>
+        </div>`;
       return `
-        <article class="book-card">
-          <div class="book-cover">
-            <img class="catalog-cover-image" src="${escapeHtml(cover)}" alt="Cover of ${escapeHtml(bookTitle(data))}">
+        <article class="book-card" data-book-theme="${theme.name}" style="${themeStyle}">
+          <div class="book-cover ${cover ? "has-real-cover" : "uses-placeholder"}">
+            ${coverMarkup}
           </div>
           <div>
             <h2>${escapeHtml(bookTitle(data))}</h2>
@@ -118,7 +131,7 @@ function renderLibrary() {
           <div class="meta-row">
             <span class="availability-badge availability-${escapeHtml(status)}">${escapeHtml(availabilityLabel(status))}</span>
           </div>
-          <p><strong>Accession No.:</strong> ${escapeHtml(accessionNumberOf(data) || "-")}</p>
+          <p class="book-accession"><span class="book-accession-icon" aria-hidden="true">#</span><strong>Accession No.:</strong> ${escapeHtml(accessionNumberOf(data) || "-")}</p>
           <p><strong>Place &amp; Publisher:</strong> ${escapeHtml(data.placePublisher || data.publisher || "-")}</p>
           <p><strong>Year:</strong> ${escapeHtml(data.year || "-")}</p>
           <p><strong>Pages:</strong> ${escapeHtml(data.pages || "-")}</p>
@@ -219,7 +232,7 @@ booksTarget.addEventListener("click", (event) => {
 });
 booksTarget.addEventListener("error", (event) => {
   if (!event.target.matches(".catalog-cover-image")) return;
-  event.target.src = "assets/book-placeholder.svg";
+  event.target.closest(".book-cover")?.classList.add("cover-failed");
 }, true);
 
 document.querySelectorAll("dialog .dialog-close").forEach((button) => {
