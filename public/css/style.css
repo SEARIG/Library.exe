@@ -2953,6 +2953,41 @@ td strong {
   margin: 0;
 }
 
+.user-management-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.staff-account-form {
+  margin-bottom: 1.25rem;
+  padding: 1rem;
+  border: 1px solid rgba(15, 118, 110, 0.2);
+  border-radius: 16px;
+  background: rgba(240, 253, 250, 0.72);
+}
+
+.staff-account-form[hidden] {
+  display: none;
+}
+
+.staff-account-heading,
+.staff-account-message,
+.staff-account-submit {
+  grid-column: 1 / -1;
+}
+
+.staff-account-heading {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.staff-account-heading span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
 .modal-actions-grid,
 .dashboard-action-grid {
   display: grid;

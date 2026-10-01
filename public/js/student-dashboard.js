@@ -58,12 +58,6 @@ function daysRemaining(value) {
   return Math.ceil((dueDate - today) / 86400000);
 }
 
-function shortUid(uid = "") {
-  const value = String(uid || "");
-  if (value.length <= 18) return value;
-  return `${value.slice(0, 8)}...${value.slice(-6)}`;
-}
-
 function setMetric(id, value) {
   const target = $(id);
   if (target) target.textContent = String(value);
@@ -100,12 +94,14 @@ function logSectionError(section, error, targetId, message) {
 function renderProfile(student = {}) {
   const fallback = {
     uid: user?.uid || "",
-    name: userProfile.name || user?.displayName || user?.email || "Student",
+    fullName: userProfile.fullName || userProfile.name || user?.displayName || user?.email || "Student",
+    name: userProfile.fullName || userProfile.name || user?.displayName || user?.email || "Student",
     email: userProfile.email || user?.email || "",
     phone: userProfile.phone || "",
     rollNumber: userProfile.rollNumber || "",
-    department: userProfile.department || "",
-    year: userProfile.year || ""
+    enrollmentNumber: userProfile.enrollmentNumber || "",
+    branch: userProfile.branch || userProfile.department || "",
+    department: userProfile.department || userProfile.branch || ""
   };
   const profile = { ...fallback, ...student };
   latestStudent = profile;
@@ -113,26 +109,13 @@ function renderProfile(student = {}) {
   if (!target) return;
   target.innerHTML = `
     <div class="detail-grid">
-      <span>Name</span><strong>${escapeHtml(profile.name || "Student")}</strong>
+      <span>Full Name</span><strong>${escapeHtml(profile.fullName || profile.name || "Student")}</strong>
       <span>Email</span><strong>${escapeHtml(profile.email || user?.email || "")}</strong>
-      <span>Phone</span><strong>${escapeHtml(profile.phone || "")}</strong>
-      <span>Roll Number</span><strong>${escapeHtml(profile.rollNumber || "")}</strong>
-      <span>Department</span><strong>${escapeHtml(profile.department || "")}</strong>
-      <span>Year</span><strong>${escapeHtml(profile.year || "")}</strong>
-      <span>Student UID</span>
-      <strong class="uid-box">
-        <span>${escapeHtml(shortUid(profile.uid || user?.uid || ""))}</span>
-        <button class="btn btn-muted uid-copy" id="copyUidBtn" type="button">Copy UID</button>
-      </strong>
+      <span>Mobile Number</span><strong>${escapeHtml(profile.phone || "")}</strong>
+      <span>Branch</span><strong>${escapeHtml(profile.branch || profile.department || "")}</strong>
+      ${profile.rollNumber ? `<span>Roll Number</span><strong>${escapeHtml(profile.rollNumber)}</strong>` : ""}
+      ${profile.enrollmentNumber ? `<span>Enrollment Number</span><strong>${escapeHtml(profile.enrollmentNumber)}</strong>` : ""}
     </div>`;
-  $("#copyUidBtn")?.addEventListener("click", async () => {
-    try {
-      await navigator.clipboard.writeText(profile.uid || user?.uid || "");
-      showToast("Student UID copied.", "success");
-    } catch {
-      showToast("Copy is unavailable in this browser. Select the UID manually.", "error");
-    }
-  });
 }
 
 function listenToQuery(section, firestoreQuery, onData, targetId, emptyMessage) {

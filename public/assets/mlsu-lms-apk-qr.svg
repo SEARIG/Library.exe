@@ -3,8 +3,8 @@
   PUBLIC '-//W3C//DTD SVG 1.0//EN'
   'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
 <svg width="256" height="256" preserveAspectRatio="xMinYMin meet" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
-	<title>...</title>
-	<desc>...</desc>
+	<title>Download MLSU LMS Student App</title>
+	<desc>QR code encoding https://library-exe.vercel.app/downloads/MLSU-LMS.apk</desc>
 	<clipPath id="clip">
 		<rect x="0" y="0" width="256" height="256"/>
 	</clipPath>

@@ -26,8 +26,8 @@ test("Register Digitizer UI and source files are removed", () => {
 
 test("welcome page exposes library, app, login, and production APK QR paths", () => {
   const home = read("public/index.html");
-  assert.match(home, /href="library\.html"[^>]*>Browse Library</);
-  assert.match(home, /href="#get-app"[^>]*>Download Student App</);
+  assert.match(home, /href="library\.html"[^>]*>Browse Library Online</);
+  assert.match(home, /href="\/downloads\/MLSU-LMS\.apk" download[^>]*>Download Student App</);
   assert.match(home, /href="login\.html"[^>]*>Login</);
   assert.match(home, /id="get-app"/);
   assert.match(home, /href="\/downloads\/MLSU-LMS\.apk" download/);
@@ -43,7 +43,17 @@ test("download page has local QR, APK link, and installation steps", () => {
 
   const qr = read("public/assets/mlsu-lms-apk-qr.svg");
   assert.match(qr, /<svg[^>]+viewBox="0 0 256 256"/);
+  assert.match(qr, /https:\/\/library-exe\.vercel\.app\/downloads\/MLSU-LMS\.apk/);
   assert.ok(qr.length > 5000, "QR SVG should contain a real encoded matrix");
+});
+
+test("APK delivery uses attachment headers without redirecting to an HTML page", () => {
+  const config = JSON.parse(read("vercel.json"));
+  assert.equal(config.rewrites, undefined);
+  const apkHeaders = config.headers?.find((item) => item.source === "/downloads/MLSU-LMS.apk")?.headers || [];
+  assert.ok(apkHeaders.some((item) => item.key === "Content-Type" && item.value === "application/vnd.android.package-archive"));
+  assert.ok(apkHeaders.some((item) => item.key === "Content-Disposition" && /attachment/.test(item.value)));
+  assert.ok(apkHeaders.some((item) => item.key === "Cache-Control" && /no-store/.test(item.value)));
 });
 
 test("accession register Excel import remains the staff digitization entry", () => {

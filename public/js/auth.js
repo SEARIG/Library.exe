@@ -2,6 +2,7 @@ import { auth, db } from "./firebase-config.js";
 import { showToast } from "./toast.js";
 import {
   createUserWithEmailAndPassword,
+  deleteUser,
   onAuthStateChanged,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
@@ -13,6 +14,7 @@ import {
   serverTimestamp,
   setDoc
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import { validateStudentSignup } from "./auth-utils.mjs";
 
 const loginForm = document.querySelector("#loginForm");
 const signupForm = document.querySelector("#signupForm");
@@ -97,39 +99,50 @@ if (signupForm) {
     setLoading(signupForm, true);
 
     try {
-      const name = document.querySelector("#name").value.trim();
-      const email = document.querySelector("#email").value.trim();
-      const phone = document.querySelector("#phone").value.trim();
-      const password = document.querySelector("#password").value;
-      const rollNumber = document.querySelector("#rollNumber").value.trim();
-      const department = document.querySelector("#department").value.trim();
-      const year = document.querySelector("#year").value.trim();
+      const signup = validateStudentSignup({
+        fullName: document.querySelector("#fullName").value,
+        branch: document.querySelector("#branch").value,
+        email: document.querySelector("#email").value,
+        phone: document.querySelector("#phone").value,
+        password: document.querySelector("#password").value,
+        confirmPassword: document.querySelector("#confirmPassword").value
+      });
 
-      const credential = await createUserWithEmailAndPassword(auth, email, password);
+      const credential = await createUserWithEmailAndPassword(auth, signup.email, signup.password);
       const uid = credential.user.uid;
-
-      await setDoc(doc(db, "users", uid), {
-        uid,
-        role: "student",
-        name,
-        email,
-        phone,
-        createdAt: serverTimestamp(),
-        active: true
-      });
-
-      await setDoc(doc(db, "students", uid), {
-        uid,
-        rollNumber,
-        name,
-        email,
-        phone,
-        department,
-        year,
-        active: true,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
+      try {
+        const timestamps = {
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        };
+        await setDoc(doc(db, "users", uid), {
+          uid,
+          fullName: signup.fullName,
+          name: signup.fullName,
+          branch: signup.branch,
+          department: signup.branch,
+          email: signup.email,
+          phone: signup.phone,
+          role: "student",
+          active: true,
+          ...timestamps
+        });
+        await setDoc(doc(db, "students", uid), {
+          uid,
+          fullName: signup.fullName,
+          name: signup.fullName,
+          branch: signup.branch,
+          department: signup.branch,
+          email: signup.email,
+          phone: signup.phone,
+          role: "student",
+          active: true,
+          ...timestamps
+        });
+      } catch (profileError) {
+        await deleteUser(credential.user).catch(() => {});
+        throw profileError;
+      }
 
       showMessage("Signup successful. Redirecting...", "success");
       showToast("Signup successful. Redirecting...", "success");
@@ -210,7 +223,7 @@ if (logoutButton) {
 
 onAuthStateChanged(auth, (user) => {
   if (user) {
-    console.log("Auth state: signed in", user.uid);
+    console.log("Auth state: signed in");
   } else {
     console.log("Auth state: signed out");
   }

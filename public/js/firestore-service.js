@@ -210,26 +210,19 @@ export function calculatePenalty(issue, currentDate = new Date()) {
 export async function createStudentProfile(uid, profile) {
   const common = {
     uid,
-    name: profile.name,
+    fullName: profile.fullName || profile.name,
+    name: profile.fullName || profile.name,
     email: profile.email,
     phone: profile.phone,
-    createdAt: serverTimestamp()
-  };
-
-  await setDoc(doc(db, "users", uid), {
-    ...common,
+    branch: profile.branch || profile.department,
+    department: profile.branch || profile.department,
     role: "student",
-    active: true
-  });
-
-  await setDoc(doc(db, "students", uid), {
-    ...common,
-    rollNumber: profile.rollNumber,
-    department: profile.department,
-    year: profile.year,
     active: true,
+    createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
-  });
+  };
+  await setDoc(doc(db, "users", uid), common);
+  await setDoc(doc(db, "students", uid), common);
 }
 
 export async function getStudentProfile(uid) {
@@ -407,7 +400,6 @@ export async function findBookByBarcode(value) {
 
 export async function createIssueRequest({ student, book }) {
   if (!auth.currentUser) throw new Error("Login is required.");
-  console.log("Current user uid:", auth.currentUser.uid);
   if (auth.currentUser.uid !== student.uid) {
     throw new Error("You can create issue requests only for your own account.");
   }

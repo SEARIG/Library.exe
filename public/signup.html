@@ -25,16 +25,20 @@
         <h2>Create account</h2>
         <div id="authMessage" class="auth-message" aria-live="polite"></div>
         <form id="signupForm" class="form-grid two-col">
-          <label>Name<input id="name" required></label>
-          <label>Email<input id="email" type="email" autocomplete="email" required></label>
-          <label>Phone<input id="phone" type="tel" required></label>
-          <label>Department<input id="department" required></label>
-          <label>Year<input id="year" required></label>
-          <label>Roll Number<input id="rollNumber" required></label>
+          <label>Full Name<input id="fullName" autocomplete="name" required></label>
+          <label>Branch<input id="branch" autocomplete="organization-title" required></label>
+          <label>Email Address<input id="email" type="email" autocomplete="email" required></label>
+          <label>Mobile Number<input id="phone" type="tel" autocomplete="tel" inputmode="tel" placeholder="+91XXXXXXXXXX" required></label>
           <label>Password
             <div class="password-field">
               <input id="password" type="password" autocomplete="new-password" minlength="6" required>
               <button class="btn btn-muted password-toggle" type="button" data-target="password">Show</button>
+            </div>
+          </label>
+          <label>Confirm Password
+            <div class="password-field">
+              <input id="confirmPassword" type="password" autocomplete="new-password" minlength="6" required>
+              <button class="btn btn-muted password-toggle" type="button" data-target="confirmPassword">Show</button>
             </div>
           </label>
           <button class="btn btn-primary" type="submit">Create Student Account</button>
@@ -45,6 +49,6 @@
     <div id="toast" class="toast"></div>
     <script src="./js/pwa.js?v=7" defer></script>
     <script type="module" src="./js/push-notifications.js"></script>
-    <script type="module" src="./js/auth.js"></script>
+    <script type="module" src="./js/auth.js?v=6"></script>
   </body>
 </html>

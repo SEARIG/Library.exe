@@ -72,6 +72,42 @@
           <h2 id="userManagementTitle">User Management</h2>
           <button class="btn btn-muted" data-close-modal type="button">Close</button>
         </div>
+        <div class="user-management-actions">
+          <button class="btn btn-primary" data-create-staff-role="librarian" type="button">+ Create Librarian</button>
+          <button class="btn btn-muted" data-create-staff-role="admin" type="button">+ Create Admin</button>
+        </div>
+        <form id="staffAccountForm" class="staff-account-form form-grid two-col" hidden>
+          <div class="staff-account-heading">
+            <strong id="staffAccountTitle">Create Staff Account</strong>
+            <span>Firebase Authentication account and protected user profile</span>
+          </div>
+          <label>Full Name<input id="staffFullName" autocomplete="name" required></label>
+          <label>Email Address<input id="staffEmail" type="email" autocomplete="off" required></label>
+          <label>Mobile Number<input id="staffPhone" type="tel" inputmode="tel" placeholder="+91XXXXXXXXXX" autocomplete="off" required></label>
+          <label>Role
+            <select id="staffRole" required>
+              <option value="librarian">Librarian</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+          <label>Password
+            <div class="password-field">
+              <input id="staffPassword" type="password" minlength="6" autocomplete="new-password" required>
+              <button class="btn btn-muted password-toggle" type="button" data-target="staffPassword">Show</button>
+            </div>
+          </label>
+          <label>Confirm Password
+            <div class="password-field">
+              <input id="staffConfirmPassword" type="password" minlength="6" autocomplete="new-password" required>
+              <button class="btn btn-muted password-toggle" type="button" data-target="staffConfirmPassword">Show</button>
+            </div>
+          </label>
+          <div id="staffAccountMessage" class="auth-message staff-account-message" aria-live="polite"></div>
+          <div class="toolbar staff-account-submit">
+            <button class="btn btn-primary" type="submit">Create Account</button>
+            <button class="btn btn-muted" id="cancelStaffAccountBtn" type="button">Cancel</button>
+          </div>
+        </form>
         <div id="usersTable" class="table-wrap"></div>
       </section>
     </div>
@@ -114,6 +150,6 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
     <script type="module" src="./js/notifications.js"></script>
-    <script type="module" src="./js/admin-dashboard.js?v=2"></script>
+    <script type="module" src="./js/admin-dashboard.js?v=3"></script>
   </body>
 </html>

@@ -100,7 +100,6 @@ async function openIssueDialog(book) {
   const issueDate = new Date();
   const dueDate = addDays(issueDate, 45);
 
-  $("#requestStudentUid").value = shortUid(auth.currentUser.uid);
   $("#requestStudentName").value = currentStudent.name || "";
   $("#requestRollNumber").value = currentStudent.rollNumber || "";
   $("#requestBookId").value = book.b_id || "";
@@ -115,11 +114,6 @@ async function openIssueDialog(book) {
   $("#confirmOwnAccount").checked = false;
   $("#issueBookImage").src = book.imageUrl || "assets/book-placeholder.svg";
   issueDialog.showModal();
-}
-
-function shortUid(uid = "") {
-  if (uid.length <= 18) return uid;
-  return `${uid.slice(0, 8)}...${uid.slice(-6)}`;
 }
 
 function showPenaltyBlock(error) {

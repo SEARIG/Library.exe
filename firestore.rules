@@ -102,29 +102,105 @@ service cloud.firestore {
       ]);
     }
 
-    match /users/{uid} {
-      allow read: if superAdmin() || role() == "admin" || request.auth.uid == uid || (staffRole() && sameTenant(resource.data));
-      allow create: if request.auth.uid == uid
-        && request.resource.data.role == "student"
+    function validIndianMobile(value) {
+      return value is string && value.matches('^\\+91[6-9][0-9]{9}$');
+    }
+
+    function studentAccountCreate(uid) {
+      return signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasAll([
+          "uid", "fullName", "branch", "email", "phone", "role", "active", "createdAt", "updatedAt"
+        ])
+        && request.resource.data.keys().hasOnly([
+          "uid", "fullName", "name", "branch", "department", "email", "phone", "role", "active", "createdAt", "updatedAt"
+        ])
         && request.resource.data.uid == uid
-        && (protectedFieldsClean() || request.resource.data.active == true);
+        && request.resource.data.role == "student"
+        && request.resource.data.active == true
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.fullName is string
+        && request.resource.data.fullName.size() > 0
+        && request.resource.data.branch is string
+        && request.resource.data.branch.size() > 0
+        && validIndianMobile(request.resource.data.phone);
+    }
+
+    function studentProfileCreate(uid) {
+      return signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasAll([
+          "uid", "fullName", "branch", "email", "phone", "role", "active", "createdAt", "updatedAt"
+        ])
+        && request.resource.data.keys().hasOnly([
+          "uid", "fullName", "name", "branch", "department", "email", "phone", "role", "active", "createdAt", "updatedAt"
+        ])
+        && request.resource.data.uid == uid
+        && request.resource.data.role == "student"
+        && request.resource.data.active == true
+        && validIndianMobile(request.resource.data.phone)
+        && getAfter(/databases/$(database)/documents/users/$(uid)).data.role == "student";
+    }
+
+    function adminStaffCreate(uid) {
+      return isAdmin()
+        && request.auth.uid != uid
+        && request.resource.data.keys().hasAll([
+          "uid", "fullName", "email", "phone", "role", "active", "createdAt", "updatedAt"
+        ])
+        && request.resource.data.keys().hasOnly([
+          "uid", "fullName", "name", "email", "phone", "role", "active", "createdAt", "updatedAt"
+        ])
+        && request.resource.data.uid == uid
+        && request.resource.data.role in ["admin", "librarian"]
+        && request.resource.data.active == true
+        && validIndianMobile(request.resource.data.phone);
+    }
+
+    function ownUserProtectedFieldsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        "uid", "firebaseAuthUid", "role", "active", "status", "permissions", "claims",
+        "orgType", "universityId", "collegeId", "libraryId", "createdAt"
+      ]);
+    }
+
+    function adminUserUpdate(uid) {
+      return isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "fullName", "name", "email", "phone", "branch", "department", "role", "active", "updatedAt"
+        ])
+        && request.resource.data.role in ["student", "librarian", "admin"]
+        && (
+          request.auth.uid != uid
+          || !request.resource.data.diff(resource.data).affectedKeys().hasAny(["role", "active"])
+        );
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn()
+        && (superAdmin() || role() == "admin" || request.auth.uid == uid || (staffRole() && sameTenant(resource.data)));
+      allow create: if studentAccountCreate(uid) || adminStaffCreate(uid);
       allow update: if superAdmin()
-        || (request.auth.uid == uid
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["uid", "firebaseAuthUid", "role", "orgType", "universityId", "collegeId", "libraryId", "createdAt"]));
+        || adminUserUpdate(uid)
+        || (signedIn() && request.auth.uid == uid && ownUserProtectedFieldsUnchanged());
       allow delete: if superAdmin() || role() == "admin";
     }
 
     match /students/{uid} {
       allow read: if active() && (request.auth.uid == uid || staffRole() || role() == "admin");
-      allow create: if active()
-        && (
-          (request.auth.uid == uid && request.resource.data.uid == uid)
-          || staffRole()
-          || role() == "admin"
-        );
+      allow create: if studentProfileCreate(uid)
+        || (active() && (staffRole() || role() == "admin"));
       allow update: if active()
-        && (staffRole() || role() == "admin" || request.auth.uid == uid)
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["uid", "createdAt"]);
+        && (
+          staffRole()
+          || role() == "admin"
+          || (
+            request.auth.uid == uid
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+              "uid", "role", "active", "status", "permissions", "claims", "createdAt"
+            ])
+          )
+        );
       allow delete: if superAdmin() || role() == "admin";
     }
 

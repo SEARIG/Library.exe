@@ -2,7 +2,7 @@ import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebase
 import { getAuth } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: "AIzaSyDESyc7y76_pSHyqbzKlT8p5zS1h8tYm_0",
   authDomain: "mlsu-library-system.firebaseapp.com",
   projectId: "mlsu-library-system",

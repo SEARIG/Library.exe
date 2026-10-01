@@ -1,4 +1,4 @@
-import { db } from "./firebase-config.js";
+import { db, firebaseConfig } from "./firebase-config.js";
 import {
   $,
   escapeHtml,
@@ -19,9 +19,24 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   writeBatch
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import {
+  deleteApp,
+  initializeApp
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+import {
+  createUserWithEmailAndPassword,
+  deleteUser,
+  getAuth,
+  inMemoryPersistence,
+  setPersistence,
+  signOut,
+  updateProfile
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import { validateStaffAccount } from "./auth-utils.mjs";
 import {
   EMAILJS_SETUP_MESSAGE,
   isEmailNotificationsConfigured,
@@ -37,6 +52,16 @@ import {
 
 wireSignOut();
 const session = await requireAuth(["admin"]);
+
+document.querySelectorAll(".password-toggle").forEach((button) => {
+  button.addEventListener("click", () => {
+    const input = document.getElementById(button.dataset.target);
+    if (!input) return;
+    const shouldShow = input.type === "password";
+    input.type = shouldShow ? "text" : "password";
+    button.textContent = shouldShow ? "Hide" : "Show";
+  });
+});
 
 const metrics = {
   users: $("#metricUsers"),
@@ -76,6 +101,100 @@ function closeModal(modal) {
   modal?.classList.remove("open");
   document.body.classList.remove("modal-open");
 }
+
+function setStaffAccountMessage(message = "", type = "") {
+  const target = $("#staffAccountMessage");
+  if (!target) return;
+  target.textContent = message;
+  target.className = `auth-message staff-account-message ${type}`.trim();
+}
+
+function openStaffAccountForm(role) {
+  const form = $("#staffAccountForm");
+  if (!form) return;
+  form.hidden = false;
+  $("#staffRole").value = role;
+  $("#staffAccountTitle").textContent = role === "admin" ? "Create Admin Account" : "Create Librarian Account";
+  setStaffAccountMessage();
+  $("#staffFullName").focus();
+}
+
+function closeStaffAccountForm() {
+  const form = $("#staffAccountForm");
+  if (!form) return;
+  form.reset();
+  form.hidden = true;
+  setStaffAccountMessage();
+}
+
+async function createStaffAccount(input) {
+  const account = validateStaffAccount(input);
+  const secondaryApp = initializeApp(firebaseConfig, `staff-account-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const secondaryAuth = getAuth(secondaryApp);
+  let createdUser = null;
+  let profileSaved = false;
+
+  try {
+    await setPersistence(secondaryAuth, inMemoryPersistence);
+    const credential = await createUserWithEmailAndPassword(secondaryAuth, account.email, account.password);
+    createdUser = credential.user;
+    await updateProfile(createdUser, { displayName: account.fullName });
+    await setDoc(doc(db, "users", createdUser.uid), {
+      uid: createdUser.uid,
+      fullName: account.fullName,
+      name: account.fullName,
+      email: account.email,
+      phone: account.phone,
+      role: account.role,
+      active: true,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    profileSaved = true;
+    return { uid: createdUser.uid, ...account };
+  } catch (error) {
+    if (createdUser && !profileSaved) await deleteUser(createdUser).catch(() => {});
+    throw error;
+  } finally {
+    await signOut(secondaryAuth).catch(() => {});
+    await deleteApp(secondaryApp).catch(() => {});
+  }
+}
+
+document.querySelectorAll("[data-create-staff-role]").forEach((button) => {
+  button.addEventListener("click", () => openStaffAccountForm(button.dataset.createStaffRole));
+});
+
+$("#cancelStaffAccountBtn")?.addEventListener("click", closeStaffAccountForm);
+
+$("#staffAccountForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  form.querySelectorAll("button, input, select").forEach((field) => { field.disabled = true; });
+  setStaffAccountMessage("Creating account...", "info");
+  try {
+    const result = await createStaffAccount({
+      fullName: $("#staffFullName").value,
+      email: $("#staffEmail").value,
+      phone: $("#staffPhone").value,
+      role: $("#staffRole").value,
+      password: $("#staffPassword").value,
+      confirmPassword: $("#staffConfirmPassword").value
+    });
+    setStaffAccountMessage(`${result.role === "admin" ? "Admin" : "Librarian"} account created successfully.`, "success");
+    showToast("Staff account created without signing out the current Admin.", "success");
+    form.reset();
+  } catch (error) {
+    logDetailedError(error);
+    const message = error?.code === "auth/email-already-in-use"
+      ? "An account already exists for this email address."
+      : error?.message || "Could not create the staff account.";
+    setStaffAccountMessage(message, "error");
+    showToast(message, "error");
+  } finally {
+    form.querySelectorAll("button, input, select").forEach((field) => { field.disabled = false; });
+  }
+});
 
 document.addEventListener("click", (event) => {
   const openButton = event.target.closest("[data-open-modal]");
@@ -440,15 +559,14 @@ function normalizeStudentImportRows(rows) {
       name: valueFor(row, "Name"),
       email: valueFor(row, "Email").toLowerCase(),
       phone: valueFor(row, "Phone"),
-      year: valueFor(row, "Year"),
-      department: valueFor(row, "Department"),
+      branch: valueFor(row, "Branch", "Department"),
       rollNumber: valueFor(row, "RollNumber", "Roll Number")
     };
     const errors = [];
     if (!normalized.name) errors.push("Name is required");
     if (!normalized.email) errors.push("Email is required");
     if (normalized.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized.email)) errors.push("Email is invalid");
-    if (!normalized.department) errors.push("Department is required");
+    if (!normalized.branch) errors.push("Branch is required");
     return { ...normalized, errors };
   });
 }
@@ -474,8 +592,7 @@ function renderStudentImportPreview(rows) {
           <th>Name</th>
           <th>Email</th>
           <th>Phone</th>
-          <th>Year</th>
-          <th>Department</th>
+          <th>Branch</th>
           <th>Roll Number</th>
           <th>Status</th>
         </tr>
@@ -487,8 +604,7 @@ function renderStudentImportPreview(rows) {
             <td>${escapeHtml(row.name)}</td>
             <td>${escapeHtml(row.email)}</td>
             <td>${escapeHtml(row.phone)}</td>
-            <td>${escapeHtml(row.year)}</td>
-            <td>${escapeHtml(row.department)}</td>
+            <td>${escapeHtml(row.branch)}</td>
             <td>${escapeHtml(row.rollNumber)}</td>
             <td>${row.errors.length ? escapeHtml(row.errors.join("; ")) : "Ready"}</td>
           </tr>`).join("")}
@@ -510,11 +626,12 @@ async function importPreviewedStudents() {
       const ref = doc(collection(db, "students"));
       batch.set(ref, {
         uid: ref.id,
+        fullName: row.name,
         name: row.name,
         email: row.email,
         phone: row.phone,
-        year: row.year,
-        department: row.department,
+        branch: row.branch,
+        department: row.branch,
         rollNumber: row.rollNumber,
         role: "student",
         active: true,
@@ -591,11 +708,12 @@ onSnapshot(query(collection(db, "users"), orderBy("createdAt", "desc"), limit(50
       <tbody>
         ${snap.docs.map((item) => {
           const user = item.data();
+          const isCurrentAdmin = item.id === session.user.uid;
           return `
             <tr data-user-id="${item.id}">
-              <td><strong>${escapeHtml(user.name)}</strong><span>${escapeHtml(user.email)}</span></td>
+              <td><strong>${escapeHtml(user.fullName || user.name || "Unnamed user")}</strong><span>${escapeHtml(user.email || "")}${user.phone ? ` | ${escapeHtml(user.phone)}` : ""}</span></td>
               <td>
-                <select data-field="role">
+                <select data-field="role" ${isCurrentAdmin ? "disabled title=\"Your own Admin role is protected\"" : ""}>
                   ${["student", "librarian", "admin"].map((role) =>
                     `<option value="${role}" ${role === user.role ? "selected" : ""}>${role}</option>`
                   ).join("")}
@@ -603,8 +721,8 @@ onSnapshot(query(collection(db, "users"), orderBy("createdAt", "desc"), limit(50
               </td>
               <td>${statusBadge(user.active ? "active" : "inactive")}</td>
               <td>
-                <button class="btn btn-muted" data-action="toggle">${user.active ? "Deactivate" : "Activate"}</button>
-                <button class="btn btn-primary" data-action="save">Save</button>
+                <button class="btn btn-muted" data-action="toggle" data-active="${user.active !== false}" ${isCurrentAdmin ? "disabled title=\"Your own Admin account is protected\"" : ""}>${user.active !== false ? "Deactivate" : "Activate"}</button>
+                <button class="btn btn-primary" data-action="save" ${isCurrentAdmin ? "disabled title=\"Your own Admin role is protected\"" : ""}>Save</button>
               </td>
             </tr>`;
         }).join("")}
@@ -620,12 +738,13 @@ $("#usersTable").addEventListener("click", async (event) => {
   try {
     if (button.dataset.action === "save") {
       await updateDoc(doc(db, "users", uid), {
-        role: row.querySelector("[data-field='role']").value
+        role: row.querySelector("[data-field='role']").value,
+        updatedAt: serverTimestamp()
       });
       showToast("Role updated.", "success");
     } else {
-      const isActive = !row.textContent.includes("Deactivate");
-      await updateDoc(doc(db, "users", uid), { active: isActive });
+      const isActive = button.dataset.active !== "true";
+      await updateDoc(doc(db, "users", uid), { active: isActive, updatedAt: serverTimestamp() });
       showToast("Account status updated.", "success");
     }
   } catch (error) {
@@ -640,8 +759,7 @@ $("#downloadStudentsTemplateBtn").addEventListener("click", () => {
       Name: "Student Name",
       Email: "student@example.com",
       Phone: "9876543210",
-      Year: "1",
-      Department: "Computer Science",
+      Branch: "Computer Science",
       RollNumber: "MLSU-2026-001"
     }]);
   } catch (error) {
