@@ -30,7 +30,7 @@ import {
 import { renderNavbar } from "./navbar.js";
 import { bookCardThemeStyle, getBookCardTheme } from "./book-card-theme.mjs?v=1";
 
-const pageSize = 32;
+const pageSize = 24;
 let allBooks = [];
 let currentPage = 1;
 let currentUser = null;
@@ -124,9 +124,9 @@ function renderLibrary() {
           <div class="book-cover ${cover ? "has-real-cover" : "uses-placeholder"}">
             ${coverMarkup}
           </div>
-          <div>
-            <h2>${escapeHtml(bookTitle(data))}</h2>
-            <p>${escapeHtml(data.author || "Author not listed")}</p>
+          <div class="book-card-heading">
+            <h2 title="${escapeHtml(bookTitle(data))}">${escapeHtml(bookTitle(data))}</h2>
+            <p title="${escapeHtml(data.author || "Author not listed")}">${escapeHtml(data.author || "Author not listed")}</p>
           </div>
           <div class="meta-row">
             <span class="availability-badge availability-${escapeHtml(status)}">${escapeHtml(availabilityLabel(status))}</span>
