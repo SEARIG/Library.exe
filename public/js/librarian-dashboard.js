@@ -530,12 +530,27 @@ async function saveBookMetadataForFuture(source = "manual") {
 }
 
 function localBookForRequest(request = {}) {
-  const bookDocId = request.b_id || request.bookId;
+  const bookDocId = request.bookId || request.b_id;
   return latestBooks.find((item) => item.id === bookDocId || item.data.b_id === bookDocId)?.data || null;
 }
 
+function bookHasIssueConflict(book = {}) {
+  return String(book.status || "").toLowerCase() !== "available"
+    || Boolean(book.currentIssueId || book.issuedStudentUid || book.issuedTo);
+}
+
+async function activeIssueConflictForBook(bookDocumentId, legacyBookId = "") {
+  const identifiers = [...new Set([bookDocumentId, legacyBookId].filter(Boolean))];
+  if (!identifiers.length) return false;
+  const snapshots = await Promise.all(identifiers.flatMap((value) => [
+    getDocs(query(collection(db, "bookIssues"), where("bookId", "==", value))),
+    getDocs(query(collection(db, "bookIssues"), where("b_id", "==", value)))
+  ]));
+  return snapshots.some((snap) => snap.docs.some((item) => item.data().status === "issued"));
+}
+
 function localBookForIssue(issue = {}) {
-  const bookDocId = issue.b_id || issue.bookId;
+  const bookDocId = issue.bookId || issue.b_id;
   return latestBooks.find((item) => item.id === bookDocId || item.data.b_id === bookDocId)?.data || null;
 }
 
@@ -593,6 +608,9 @@ async function approveForPickup(requestId, pickup = {}) {
   if (precheckData.status !== "pending") {
     throw new Error("This request was already processed.");
   }
+  if (await activeIssueConflictForBook(precheckData.bookId, precheckData.b_id)) {
+    throw new Error("This book has a conflicting active issue and is not available.");
+  }
   const eligibility = await canStudentIssueBook({
     uid: precheckData.studentUid,
     studentUid: precheckData.studentUid,
@@ -625,7 +643,7 @@ async function approveForPickup(requestId, pickup = {}) {
       throw new Error("This request was already processed.");
     }
 
-    const bookDocId = requestData.b_id || requestData.bookId;
+    const bookDocId = requestData.bookId || requestData.b_id;
     if (!bookDocId) {
       throw new Error("Missing book id in issue request.");
     }
@@ -641,7 +659,7 @@ async function approveForPickup(requestId, pickup = {}) {
     }
 
     const bookData = bookSnap.data();
-    if (bookData.status !== "available") {
+    if (bookHasIssueConflict(bookData)) {
       const requestUpdate = {
         status: "rejected",
         reviewedBy: auth.currentUser.uid,
@@ -714,6 +732,9 @@ async function markIssuedRequest(requestId) {
   if (precheckData.status !== "approved_for_pickup") {
     throw new Error("Only pickup-approved requests can be marked issued.");
   }
+  if (await activeIssueConflictForBook(precheckData.bookId, precheckData.b_id)) {
+    throw new Error("This book has a conflicting active issue and is not available.");
+  }
   if (pickupExpired(precheckData)) {
     await updateDoc(requestRef, {
       status: "expired",
@@ -758,7 +779,7 @@ async function markIssuedRequest(requestId) {
 
     const issueRef = doc(collection(db, "bookIssues"));
     const issueId = issueRef.id;
-    const bookDocId = requestData.b_id || requestData.bookId;
+    const bookDocId = requestData.bookId || requestData.b_id;
     if (!bookDocId) {
       throw new Error("Missing book id in issue request.");
     }
@@ -772,7 +793,7 @@ async function markIssuedRequest(requestId) {
       throw new Error(`Book ${bookDocId} not found.`);
     }
     const bookData = bookSnap.data();
-    if (bookData.status !== "available") {
+    if (bookHasIssueConflict(bookData)) {
       transaction.update(requestRef, {
         status: "rejected",
         reviewedBy: auth.currentUser.uid,
@@ -795,7 +816,7 @@ async function markIssuedRequest(requestId) {
       studentName,
       studentEmail,
       studentPhone,
-      b_id: bookDocId,
+      b_id: requestData.b_id || bookData.b_id || bookDocId,
       bookId: bookDocId,
       accessionNumber: requestData.accessionNumber || accessionNumberOf(bookData),
       author: requestData.author || bookData.author || "",
@@ -2959,7 +2980,7 @@ function renderPendingRequests() {
   target.innerHTML = latestPendingRequests.sort((a, b) => timeOf(a.data.createdAt) - timeOf(b.data.createdAt)).map((item) => {
     const request = item.data;
     const book = localBookForRequest(request);
-    const unavailable = book && book.status !== "available";
+    const unavailable = book && bookHasIssueConflict(book);
     const status = request.status || "pending";
     const expired = status === "approved_for_pickup" && pickupExpired(request);
     const noDuesText = request.noDuesStatus || request.eligibilityStatus || "";

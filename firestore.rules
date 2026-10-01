@@ -65,6 +65,74 @@ service cloud.firestore {
         && data.studentUid == request.auth.uid;
     }
 
+    function validStudentIssueRequestCreate(requestId) {
+      let data = request.resource.data;
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && profile().role == "student"
+        && profile().active == true
+        && data.keys().hasAll([
+          "type",
+          "requestId",
+          "studentUid",
+          "bookId",
+          "status",
+          "confirmationChecked",
+          "source",
+          "requestedAt",
+          "createdAt",
+          "updatedAt"
+        ])
+        && data.keys().hasOnly([
+          "type",
+          "requestId",
+          "studentUid",
+          "studentName",
+          "studentEmail",
+          "studentPhone",
+          "studentBranch",
+          "rollNo",
+          "rollNumber",
+          "enrollmentNumber",
+          "bookId",
+          "b_id",
+          "accessionNumber",
+          "author",
+          "title",
+          "bookTitle",
+          "placePublisher",
+          "year",
+          "pages",
+          "volume",
+          "imageUrl",
+          "bookImage",
+          "barcodeValue",
+          "bookBarcodeValue",
+          "subject",
+          "category",
+          "preferredSlot",
+          "status",
+          "confirmationChecked",
+          "source",
+          "requestedAt",
+          "createdAt",
+          "updatedAt"
+        ])
+        && data.requestId == requestId
+        && data.studentUid == request.auth.uid
+        && data.type == "issue"
+        && data.status == "pending"
+        && data.source == "android_student_app"
+        && data.confirmationChecked == true
+        && data.bookId is string
+        && data.bookId.size() > 0
+        && exists(/databases/$(database)/documents/books/$(data.bookId))
+        && get(/databases/$(database)/documents/books/$(data.bookId)).data.status == "available"
+        && data.requestedAt == request.time
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
     function protectedFieldsClean() {
       return request.resource.data.keys().hasAll(["orgType", "createdAt", "updatedAt", "status"]);
     }
@@ -333,22 +401,12 @@ service cloud.firestore {
       allow read: if signedIn()
         && (resource.data.studentUid == request.auth.uid || isLibrarian());
 
-      // Issue requests must be created by Cloud Functions so the shared
-      // dues/no-dues eligibility check cannot be bypassed by a client write.
-      allow create: if false;
+      // Spark-compatible request creation: students can only submit their own
+      // strictly-shaped pending request for an existing available book.
+      allow create: if validStudentIssueRequestCreate(requestId);
 
-      allow update: if isLibrarian()
-        || (signedIn()
-          && resource.data.studentUid == request.auth.uid
-          && resource.data.status == "pending"
-          && request.resource.data.status == "cancelled"
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-            "studentUid",
-            "bookId",
-            "b_id",
-            "issueDate",
-            "dueDate"
-          ]));
+      // Review, pickup approval, rejection and issuance remain staff-only.
+      allow update: if isLibrarian();
 
       allow delete: if isAdmin();
     }
