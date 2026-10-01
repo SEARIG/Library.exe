@@ -58,7 +58,7 @@ http://127.0.0.1:4173/
 
 ## Deployment Notes
 
-Place the signed release APK at `public/downloads/MLSU-LMS.apk` before deployment.
+The Android app download is deployed from `public/downloads/MLSU-LMS.apk`. Replace that file with the approved app build when publishing an update.
 
 Install/update function dependencies before deployment:
 

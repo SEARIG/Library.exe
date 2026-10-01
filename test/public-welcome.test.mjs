@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -62,6 +62,12 @@ test("APK delivery uses attachment headers without redirecting to an HTML page",
   assert.ok(apkHeaders.some((item) => item.key === "Content-Type" && item.value === "application/vnd.android.package-archive"));
   assert.ok(apkHeaders.some((item) => item.key === "Content-Disposition" && /attachment/.test(item.value)));
   assert.ok(apkHeaders.some((item) => item.key === "Cache-Control" && /no-store/.test(item.value)));
+});
+
+test("the configured MLSU LMS APK exists and is non-empty", () => {
+  const apkPath = join(root, "public/downloads/MLSU-LMS.apk");
+  assert.equal(existsSync(apkPath), true);
+  assert.ok(statSync(apkPath).size > 1_000_000, "APK should be a real application artifact");
 });
 
 test("accession register Excel import remains the staff digitization entry", () => {
