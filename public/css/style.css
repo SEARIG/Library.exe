@@ -1733,14 +1733,6 @@ canvas {
   min-height: 52px;
 }
 
-.install-note {
-  padding: 12px 14px;
-  border-left: 4px solid var(--gold);
-  border-radius: 12px;
-  background: rgba(212, 160, 23, 0.10);
-  font-weight: 750;
-}
-
 .install-steps {
   margin: 0;
   padding-left: 22px;

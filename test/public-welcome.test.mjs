@@ -32,19 +32,27 @@ test("welcome page exposes library, app, login, and production APK QR paths", ()
   assert.match(home, /id="get-app"/);
   assert.match(home, /href="\/downloads\/MLSU-LMS\.apk" download/);
   assert.match(home, /src="\.\/assets\/mlsu-lms-apk-qr\.svg"/);
+  assert.doesNotMatch(home, /signed release APK|official download path before deployment/i);
 });
 
 test("download page has local QR, APK link, and installation steps", () => {
   const page = read("public/download.html");
-  assert.match(page, /Download Android App/);
+  assert.match(page, /Download Student App/);
   assert.match(page, /href="\/downloads\/MLSU-LMS\.apk" download/);
   assert.match(page, /Scan the QR code or tap Download Android App/);
   assert.match(page, /Allow installation from browser if asked/);
+  assert.doesNotMatch(page, /signed release APK|before deployment|public\/downloads/i);
 
   const qr = read("public/assets/mlsu-lms-apk-qr.svg");
   assert.match(qr, /<svg[^>]+viewBox="0 0 256 256"/);
   assert.match(qr, /https:\/\/library-exe\.vercel\.app\/downloads\/MLSU-LMS\.apk/);
   assert.ok(qr.length > 5000, "QR SVG should contain a real encoded matrix");
+});
+
+test("download warning container and warning-only style are removed", () => {
+  assert.doesNotMatch(read("public/index.html"), /class="install-note"/);
+  assert.doesNotMatch(read("public/download.html"), /class="install-note"/);
+  assert.doesNotMatch(read("public/css/style.css"), /\.install-note\s*\{/);
 });
 
 test("APK delivery uses attachment headers without redirecting to an HTML page", () => {
