@@ -12,7 +12,7 @@
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" type="image/png" href="/assets/mlsu-logo.png?v=4">
     <link rel="apple-touch-icon" href="/assets/mlsu-logo-192.png">
-    <link rel="stylesheet" href="css/style.css?v=6">
+    <link rel="stylesheet" href="css/style.css?v=7">
   </head>
   <body class="protected-page">
     <header class="app-header">
@@ -51,8 +51,8 @@
             <button class="btn btn-primary" data-open-modal="addBookModal" type="button">Add Book</button>
             <a class="btn btn-muted" href="library.html">Library</a>
             <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Book Database</button>
-            <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Import Accession Register Excel</button>
-            <button class="btn btn-muted" data-open-modal="bookDatabaseModal" type="button">Export Books</button>
+            <button class="btn btn-muted" data-open-modal="bookImportModal" type="button">Import Accession Register Excel</button>
+            <button class="btn btn-muted" data-open-modal="bookExportModal" type="button">Export Books</button>
             <button class="btn btn-muted" data-open-modal="barcodeManagerModal" type="button">Barcode Manager</button>
             <button class="btn btn-muted" data-open-modal="timeSlotModal" type="button">Set Issue / Return Time</button>
             <button class="btn btn-muted" data-open-modal="returnHistoryModal" type="button">Return History</button>
@@ -182,80 +182,277 @@
     </div>
 
     <div class="modal-backdrop" id="bookDatabaseModal" role="dialog" aria-modal="true" aria-labelledby="bookDatabaseTitle">
-      <section class="app-modal">
-        <div class="modal-head">
-          <h2 id="bookDatabaseTitle">Book Database</h2>
+      <section class="app-modal management-modal management-modal-xl">
+        <div class="modal-head management-modal-head">
+          <div>
+            <span class="eyebrow">Library collection</span>
+            <h2 id="bookDatabaseTitle">Book Database</h2>
+            <p>Search, review and maintain accession-register book records.</p>
+          </div>
+          <button class="btn btn-muted" data-close-modal type="button" aria-label="Close Book Database">Close</button>
+        </div>
+        <div class="management-modal-body">
+          <section class="management-card database-toolbar-card">
+            <div class="management-section-heading">
+              <div>
+                <h3>Find book records</h3>
+                <p>Filter the staff accession database without changing public catalog data.</p>
+              </div>
+              <div class="toolbar compact-toolbar">
+                <button class="btn btn-muted" data-open-modal="bookImportModal" type="button">Import Records</button>
+                <button class="btn btn-muted" data-open-modal="bookExportModal" type="button">Export Records</button>
+              </div>
+            </div>
+            <div class="library-controls database-controls">
+              <label class="database-search-field">Search Books<input id="bookSearch" placeholder="Accession no., title, author, publisher, ISBN, category..."></label>
+              <label>Category
+                <select id="bookCategoryFilter">
+                  <option value="">All Categories</option>
+                  <option value="pyq">PYQ</option>
+                  <option value="textbook">Textbook</option>
+                  <option value="qna">Q&amp;A</option>
+                  <option value="reference">Reference</option>
+                  <option value="notes">Notes</option>
+                  <option value="journal">Journal</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label>Status
+                <select id="bookAvailabilityFilter">
+                  <option value="">All Statuses</option>
+                  <option value="available">Available</option>
+                  <option value="issued">Issued</option>
+                  <option value="requested">Requested</option>
+                  <option value="reserved">Reserved</option>
+                  <option value="lost">Lost</option>
+                  <option value="damaged">Damaged</option>
+                  <option value="missing">Missing</option>
+                </select>
+              </label>
+              <label>Sort By
+                <select id="bookSort">
+                  <option value="accessionAsc">Accession number (ascending)</option>
+                  <option value="accessionDesc">Accession number (descending)</option>
+                  <option value="titleAsc">Title (A–Z)</option>
+                  <option value="authorAsc">Author (A–Z)</option>
+                </select>
+              </label>
+            </div>
+            <div id="bookDatabaseSummary" class="management-summary-strip" aria-live="polite"></div>
+          </section>
+          <section class="management-card database-table-card">
+            <div class="management-section-heading">
+              <div>
+                <h3>Accession Register</h3>
+                <p>Staff-only acquisition fields and issue ownership are shown here.</p>
+              </div>
+            </div>
+            <div id="booksTable" class="table-scroll management-data-table"></div>
+          </section>
+        </div>
+        <div class="modal-action-bar database-action-bar">
+          <div id="bookDatabasePagination" class="management-pagination" aria-label="Book database pagination"></div>
           <button class="btn btn-muted" data-close-modal type="button">Close</button>
         </div>
-        <div class="toolbar">
-          <button class="btn btn-primary" id="importBooksBtn" type="button">Import Accession Register Excel</button>
-          <button class="btn btn-muted" id="downloadBooksTemplateBtn" type="button">Download Accession Register Template</button>
-          <button class="btn btn-muted" id="confirmBookImportBtn" type="button" disabled>Confirm Import</button>
-          <button class="btn btn-muted" id="exportBooksExcelBtn" type="button">Export Accession Register</button>
-          <input id="bookImportFile" type="file" accept=".xlsx,.csv" hidden>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="bookImportModal" role="dialog" aria-modal="true" aria-labelledby="bookImportTitle">
+      <section class="app-modal management-modal management-modal-wide">
+        <div class="modal-head management-modal-head">
+          <div>
+            <span class="eyebrow">Bulk book creation</span>
+            <h2 id="bookImportTitle">Import Accession Register</h2>
+            <p>Upload verified Excel/CSV records for bulk book creation or update.</p>
+          </div>
+          <button class="btn btn-muted" data-close-modal type="button" aria-label="Close Import Accession Register">Close</button>
         </div>
-        <label class="checkbox-line">
-          <input id="updateExistingBooks" type="checkbox">
-          <span>Update Existing (match by accession number; issue status and history remain unchanged)</span>
-        </label>
-        <div id="bookImportResult" class="empty">Upload a verified Excel file containing accession register records. Accepted formats: .xlsx and .csv.</div>
-        <div id="bookImportPreview" class="table-scroll"></div>
-        <div class="library-controls">
-          <label>Search Books<input id="bookSearch" placeholder="Search by accession number, title, author, publisher, year, ISBN, category, or subject"></label>
-          <label>Category
-            <select id="bookCategoryFilter">
-              <option value="">All Categories</option>
-              <option value="pyq">pyq</option>
-              <option value="textbook">textbook</option>
-              <option value="qna">qna</option>
-              <option value="reference">reference</option>
-              <option value="notes">notes</option>
-              <option value="journal">journal</option>
-              <option value="other">other</option>
-            </select>
-          </label>
-          <label>Availability
-            <select id="bookAvailabilityFilter">
-              <option value="">All</option>
-              <option value="available">Available</option>
-              <option value="issued">Not Available</option>
-              <option value="lost">Lost</option>
-              <option value="damaged">Damaged</option>
-            </select>
-          </label>
+        <div class="management-modal-body import-modal-body">
+          <section class="management-card">
+            <div class="management-section-heading">
+              <div><span class="section-step">1</span><h3>Upload File</h3></div>
+              <button class="btn btn-muted" id="downloadBooksTemplateBtn" type="button">Download Sample Template</button>
+            </div>
+            <div class="upload-drop-zone" id="bookImportDropZone" tabindex="0" role="button" aria-label="Choose or drop an Excel or CSV file">
+              <div class="upload-zone-icon" aria-hidden="true">⇧</div>
+              <strong>Drop your accession register here</strong>
+              <span>or choose a verified file from your computer</span>
+              <button class="btn btn-primary" id="importBooksBtn" type="button">Choose Excel File</button>
+              <small>Supported formats: .xlsx, .csv</small>
+              <small>Upload a verified Excel file containing accession register records.</small>
+              <span id="bookImportFileName" class="selected-file-name">No file selected</span>
+            </div>
+            <input id="bookImportFile" type="file" accept=".xlsx,.csv" hidden>
+            <div id="bookImportResult" class="import-file-result">Select a file to begin validation.</div>
+            <div class="import-summary-strip" aria-live="polite">
+              <span><strong id="importTotalRows">0</strong>Total rows</span>
+              <span class="summary-ready"><strong id="importReadyRows">0</strong>Ready</span>
+              <span class="summary-warning"><strong id="importDuplicateRows">0</strong>Duplicates</span>
+              <span class="summary-invalid"><strong id="importInvalidRows">0</strong>Invalid</span>
+            </div>
+          </section>
+
+          <section class="management-card">
+            <div class="management-section-heading"><div><span class="section-step">2</span><h3>Import Options</h3></div></div>
+            <div class="import-options-grid">
+              <label class="option-card">
+                <input id="updateExistingBooks" type="checkbox">
+                <span><strong>Update existing books</strong><small>Match by accession number and update public metadata.</small></span>
+              </label>
+              <label class="option-card">
+                <input id="skipDuplicateBooks" type="checkbox" checked>
+                <span><strong>Skip duplicate accessions</strong><small>Duplicate rows stay out of the confirmed import.</small></span>
+              </label>
+              <label class="option-card option-card-locked">
+                <input id="preserveIssueHistory" type="checkbox" checked disabled>
+                <span><strong>Preserve issue status/history</strong><small>Circulation fields are never overwritten by imports.</small></span>
+              </label>
+            </div>
+          </section>
+
+          <section class="management-card import-preview-card">
+            <div class="management-section-heading"><div><span class="section-step">3</span><h3>Preview &amp; Validate</h3><p>Invalid cells and duplicate rows are highlighted for review.</p></div></div>
+            <div id="bookImportPreview" class="table-scroll import-preview-table">
+              <div class="empty">A validated preview will appear after file selection.</div>
+            </div>
+          </section>
         </div>
-        <div id="booksTable" class="table-scroll"></div>
+        <div class="modal-action-bar">
+          <div><strong>Confirm Import</strong><span>Only validated rows will be written to Firestore.</span></div>
+          <div class="toolbar compact-toolbar">
+            <button class="btn btn-muted" data-close-modal type="button">Cancel</button>
+            <button class="btn btn-primary" id="confirmBookImportBtn" type="button" disabled>Confirm Import</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="bookExportModal" role="dialog" aria-modal="true" aria-labelledby="bookExportTitle">
+      <section class="app-modal management-modal management-modal-wide">
+        <div class="modal-head management-modal-head">
+          <div>
+            <span class="eyebrow">Download records</span>
+            <h2 id="bookExportTitle">Export Book Records</h2>
+            <p>Choose exactly which accession records to include in the export.</p>
+          </div>
+          <button class="btn btn-muted" data-close-modal type="button" aria-label="Close Export Book Records">Close</button>
+        </div>
+        <div class="management-modal-body export-modal-body">
+          <section class="management-card">
+            <div class="management-section-heading"><div><h3>Export Filters</h3><p>Leave a filter blank to include every matching value.</p></div></div>
+            <div class="export-filter-grid">
+              <label>Category
+                <select id="exportCategoryFilter">
+                  <option value="">All Categories</option>
+                  <option value="pyq">PYQ</option>
+                  <option value="textbook">Textbook</option>
+                  <option value="qna">Q&amp;A</option>
+                  <option value="reference">Reference</option>
+                  <option value="notes">Notes</option>
+                  <option value="journal">Journal</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label>Status
+                <select id="exportStatusFilter">
+                  <option value="">All Statuses</option>
+                  <option value="available">Available</option>
+                  <option value="issued">Issued</option>
+                  <option value="requested">Requested</option>
+                  <option value="reserved">Reserved</option>
+                  <option value="lost">Lost</option>
+                  <option value="damaged">Damaged</option>
+                </select>
+              </label>
+              <label>Accession From<input id="exportAccessionFrom" placeholder="e.g. 1 or ACC-001"></label>
+              <label>Accession To<input id="exportAccessionTo" placeholder="e.g. 500 or ACC-500"></label>
+              <label>Date From<input id="exportDateFrom" type="date"></label>
+              <label>Date To<input id="exportDateTo" type="date"></label>
+            </div>
+          </section>
+          <section class="management-card export-options-card">
+            <div class="management-section-heading"><div><h3>Format &amp; Scope</h3><p>Export the entire database, filtered results, or the visible database page.</p></div></div>
+            <div class="export-filter-grid export-format-grid">
+              <label>Export Format
+                <select id="exportFormat">
+                  <option value="xlsx">Excel (.xlsx)</option>
+                  <option value="csv">CSV (.csv)</option>
+                </select>
+              </label>
+              <label>Export Scope
+                <select id="exportScope">
+                  <option value="all">All books</option>
+                  <option value="filtered">Filtered books only</option>
+                  <option value="currentPage">Current database page only</option>
+                </select>
+              </label>
+            </div>
+            <div id="bookExportSummary" class="export-summary-card" aria-live="polite">
+              <span>Matching book records</span><strong>0</strong><small>Ready to export</small>
+            </div>
+          </section>
+        </div>
+        <div class="modal-action-bar">
+          <div><strong>Export accession register</strong><span>Staff-only fields remain included in this administrative export.</span></div>
+          <div class="toolbar compact-toolbar">
+            <button class="btn btn-muted" data-close-modal type="button">Close</button>
+            <button class="btn btn-primary" id="exportBooksExcelBtn" type="button">Export Now</button>
+          </div>
+        </div>
       </section>
     </div>
 
     <div class="modal-backdrop" id="timeSlotModal" role="dialog" aria-modal="true" aria-labelledby="timeSlotTitle">
-      <section class="app-modal">
-        <div class="modal-head">
-          <h2 id="timeSlotTitle">Library Time Slots</h2>
-          <button class="btn btn-muted" data-close-modal type="button">Close</button>
+      <section class="app-modal management-modal management-modal-wide time-slot-modal">
+        <div class="modal-head management-modal-head">
+          <div>
+            <span class="eyebrow">Student request windows</span>
+            <h2 id="timeSlotTitle">Library Time Slots</h2>
+            <p>Configure issue/return request collection windows for students.</p>
+          </div>
+          <button class="btn btn-muted" data-close-modal type="button" aria-label="Close Library Time Slots">Close</button>
         </div>
-        <form id="timeSlotForm" class="form-grid">
-          <label>Start Date<input id="slotStartDate" type="date" required></label>
-          <label>End Date<input id="slotEndDate" type="date" required></label>
-          <label>Start Time<input id="slotStartTime" type="time" required></label>
-          <label>End Time<input id="slotEndTime" type="time" required></label>
-          <label>Applies To
-            <select id="slotAppliesTo">
-              <option value="issue">Issue</option>
-              <option value="return">Return</option>
-              <option value="both" selected>Both</option>
-            </select>
-          </label>
-          <label>Repeat
-            <select id="slotRepeatMode">
-              <option value="tomorrow">Tomorrow only</option>
-              <option value="week">Whole week</option>
-              <option value="untilChanged" selected>Until changed</option>
-            </select>
-          </label>
-          <label>Max Students Per Slot<input id="slotMaxStudents" type="number" min="1" value="20"></label>
-          <label>Notes<input id="slotNotes" placeholder="Come during lunch break"></label>
-          <button class="btn btn-primary" type="submit">Save Time Slot</button>
+        <form id="timeSlotForm" class="management-form">
+          <div class="management-modal-body time-slot-body">
+            <section class="management-card">
+              <div class="management-section-heading"><div><h3>Schedule Window</h3><p>Choose the date range and daily collection hours.</p></div></div>
+              <div class="time-slot-grid">
+                <label>Start Date<span>First active date</span><input id="slotStartDate" type="date" required></label>
+                <label>End Date<span>Final active date when applicable</span><input id="slotEndDate" type="date" required></label>
+                <label>Start Time<span>Collection window opens</span><input id="slotStartTime" type="time" required></label>
+                <label>End Time<span>Collection window closes</span><input id="slotEndTime" type="time" required></label>
+                <label>Applies To<span>Allowed request workflow</span>
+                  <select id="slotAppliesTo">
+                    <option value="issue">Issue</option>
+                    <option value="return">Return</option>
+                    <option value="both" selected>Both</option>
+                  </select>
+                </label>
+                <label>Repeat<span>How long this slot remains active</span>
+                  <select id="slotRepeatMode">
+                    <option value="tomorrow">Tomorrow only</option>
+                    <option value="week">Whole week</option>
+                    <option value="untilChanged" selected>Until changed</option>
+                  </select>
+                </label>
+                <label>Max Students Per Slot<span>Capacity for this collection window</span><input id="slotMaxStudents" type="number" min="1" value="20"></label>
+                <label>Notes<span>Optional instructions for students</span><input id="slotNotes" placeholder="Come during lunch break"></label>
+              </div>
+            </section>
+            <aside class="slot-preview-card" id="slotPreviewCard" aria-live="polite">
+              <span>Schedule Preview</span>
+              <strong>Complete the fields to preview this slot.</strong>
+              <small>Saved changes appear immediately for eligible student requests.</small>
+            </aside>
+          </div>
+          <div class="modal-action-bar">
+            <div><strong>Library request availability</strong><span>Saving updates the existing schedule setting only.</span></div>
+            <div class="toolbar compact-toolbar">
+              <button class="btn btn-muted" id="resetTimeSlotBtn" type="button">Reset</button>
+              <button class="btn btn-muted" data-close-modal type="button">Close</button>
+              <button class="btn btn-primary" type="submit">Save Time Slot</button>
+            </div>
+          </div>
         </form>
       </section>
     </div>
@@ -410,6 +607,6 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
     <script type="module" src="./js/notifications.js"></script>
-    <script type="module" src="./js/librarian-dashboard.js?v=2"></script>
+    <script type="module" src="./js/librarian-dashboard.js?v=3"></script>
   </body>
 </html>

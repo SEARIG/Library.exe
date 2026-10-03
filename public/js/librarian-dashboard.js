@@ -41,6 +41,7 @@ import {
 } from "./accession-register.mjs";
 import {
   collection,
+  deleteDoc,
   doc,
   addDoc,
   arrayUnion,
@@ -80,10 +81,13 @@ const addBookForm = $("#addBookForm");
 const bookSearch = $("#bookSearch");
 const bookCategoryFilter = $("#bookCategoryFilter");
 const bookAvailabilityFilter = $("#bookAvailabilityFilter");
+const bookSort = $("#bookSort");
+const BOOK_DATABASE_PAGE_SIZE = 25;
 let nextBookId = "1";
 let editingBookId = null;
 let editingExistingBook = null;
 let latestBooks = [];
+let bookDatabasePage = 1;
 let latestPendingRequests = [];
 let latestReturnRequests = [];
 let latestPenalties = [];
@@ -99,6 +103,7 @@ let publisherScanTimer = null;
 let quickReturnStream = null;
 let quickReturnScanTimer = null;
 let selectedQuickReturn = null;
+let latestIssueReturnSchedule = null;
 const showBookDebug = new URLSearchParams(window.location.search).get("debug") === "true"
   || localStorage.debugBooks === "true";
 const testEmailButton = $("#sendTestEmailBtn");
@@ -277,23 +282,24 @@ function normalizeBookImportRows(matrix) {
 function renderBookImportPreview(rows, sheetName = "", headerRow = 0) {
   pendingBookImportRows = rows;
   const readyCount = rows.filter((row) => !row.errors.length).length;
-  const errorCount = rows.filter((row) => row.errors.length).length;
   const duplicateCount = rows.filter((row) => row.duplicateType).length;
+  const errorCount = rows.filter((row) => row.errors.length && !row.duplicateType).length;
+  const skipDuplicates = $("#skipDuplicateBooks")?.checked !== false;
   $("#confirmBookImportBtn").disabled = readyCount === 0;
+  $("#importTotalRows").textContent = String(rows.length);
+  $("#importReadyRows").textContent = String(readyCount);
+  $("#importDuplicateRows").textContent = String(duplicateCount);
+  $("#importInvalidRows").textContent = String(errorCount);
   $("#bookImportResult").innerHTML = `
-    <div class="${errorCount ? "empty" : "success-box"}">
-      <strong>${rows.length} row(s) parsed</strong>
-      <span>Sheet: ${escapeHtml(sheetName || "Register Data")} | Header row: ${headerRow || "-"}</span>
-      <span>Ready to import/update: ${readyCount}</span>
-      <span>Validation errors: ${errorCount}</span>
-      <span>Duplicates: ${duplicateCount}</span>
-    </div>`;
+    <strong>${rows.length} row${rows.length === 1 ? "" : "s"} parsed</strong>
+    <span>Sheet: ${escapeHtml(sheetName || "Register Data")} · Header row: ${headerRow || "-"}</span>
+    <span>${readyCount} ready · ${duplicateCount} duplicate${duplicateCount === 1 ? "" : "s"} · ${errorCount} invalid</span>`;
   if (!rows.length) {
     renderEmpty($("#bookImportPreview"), "No rows found.");
     return;
   }
   $("#bookImportPreview").innerHTML = `
-    <table>
+    <table class="import-validation-table">
       <thead>
         <tr>
           <th>Row</th>
@@ -310,19 +316,23 @@ function renderBookImportPreview(rows, sheetName = "", headerRow = 0) {
       </thead>
       <tbody>
         ${rows.map((row) => `
-          <tr>
+          <tr class="${row.errors.length ? "validation-row-invalid" : "validation-row-ready"}">
             <td>${row.rowNumber}</td>
-            <td>${escapeHtml(row.accessionNumber)}</td>
+            <td class="${!row.accessionNumber ? "validation-cell-invalid" : ""}">${escapeHtml(row.accessionNumber)}</td>
             <td>${escapeHtml(row.author)}</td>
-            <td>${escapeHtml(row.title)}</td>
+            <td class="${!row.title ? "validation-cell-invalid" : ""}">${escapeHtml(row.title)}</td>
             <td>${escapeHtml(row.placePublisher)}</td>
             <td>${escapeHtml(row.year)}</td>
             <td>${escapeHtml(row.pages)}</td>
             <td>${escapeHtml(row.cost)}</td>
             <td>${escapeHtml(row.imageUrl)}</td>
-            <td>${row.errors.length
-              ? escapeHtml(row.errors.join("; "))
-              : row.action === "update" ? "Ready: update existing" : "Ready: import"}</td>
+            <td>${row.duplicateType && skipDuplicates
+              ? `<span class="badge badge-pending">Skipped duplicate</span>`
+              : row.errors.length
+                ? `<span class="validation-message">${escapeHtml(row.errors.join("; "))}</span>`
+                : row.action === "update"
+                  ? `<span class="badge badge-approved">Ready to update</span>`
+                  : `<span class="badge badge-available">Ready to import</span>`}</td>
           </tr>`).join("")}
       </tbody>
     </table>`;
@@ -406,6 +416,8 @@ async function importPreviewedBooks() {
     </div>`;
   $("#confirmBookImportBtn").disabled = true;
   pendingBookImportRows = [];
+  pendingBookImportMatrix = [];
+  pendingBookImportSheetName = "";
   return { imported, updated, skipped, duplicateCount, importBatchId };
 }
 
@@ -1816,13 +1828,33 @@ async function saveBook(event) {
   }
 }
 
-function renderBooksTable() {
+function requestStateForBook(item) {
+  const accession = String(accessionNumberOf(item.data) || "").toLowerCase();
+  const legacyId = String(item.data.b_id || "");
+  const request = latestPendingRequests.find(({ data }) => {
+    const requestBookId = String(data.bookId || data.b_id || "");
+    const requestAccession = String(data.accessionNumber || "").toLowerCase();
+    return requestBookId === item.id
+      || (legacyId && requestBookId === legacyId)
+      || (accession && requestAccession === accession);
+  });
+  if (request?.data?.status === "approved_for_pickup") return "reserved";
+  if (request?.data?.status === "pending") return "requested";
+  return "";
+}
+
+function displayBookStatus(item) {
+  const persisted = String(item.data.status || "available").toLowerCase();
+  return persisted === "available" ? (requestStateForBook(item) || persisted) : persisted;
+}
+
+function filteredBookRows() {
   const search = bookSearch.value.trim().toLowerCase();
   const categoryFilter = String(bookCategoryFilter?.value || "").toLowerCase();
   const availabilityFilter = String(bookAvailabilityFilter?.value || "").toLowerCase();
-  const rows = latestBooks
+  const sortMode = bookSort?.value || "accessionAsc";
+  return latestBooks
     .filter(({ data }) => {
-      const status = String(data.status || "available").toLowerCase();
       const category = String(data.category || "").toLowerCase();
       const haystack = [
         accessionNumberOf(data),
@@ -1840,23 +1872,78 @@ function renderBooksTable() {
       ].join(" ").toLowerCase();
       if (search && !haystack.includes(search)) return false;
       if (categoryFilter && category !== categoryFilter) return false;
-      if (availabilityFilter && status !== availabilityFilter) return false;
       return true;
     })
-    .sort((left, right) =>
-      compareAccessionNumbers(accessionNumberOf(left.data), accessionNumberOf(right.data))
-    );
+    .filter((item) => !availabilityFilter || displayBookStatus(item) === availabilityFilter)
+    .sort((left, right) => {
+      if (sortMode === "accessionDesc") {
+        return compareAccessionNumbers(accessionNumberOf(right.data), accessionNumberOf(left.data));
+      }
+      if (sortMode === "titleAsc") {
+        return bookTitle(left.data).localeCompare(bookTitle(right.data), undefined, { sensitivity: "base" });
+      }
+      if (sortMode === "authorAsc") {
+        return String(left.data.author || "").localeCompare(String(right.data.author || ""), undefined, { sensitivity: "base" });
+      }
+      return compareAccessionNumbers(accessionNumberOf(left.data), accessionNumberOf(right.data));
+    });
+}
+
+function currentBookDatabaseRows() {
+  const rows = filteredBookRows();
+  const totalPages = Math.max(1, Math.ceil(rows.length / BOOK_DATABASE_PAGE_SIZE));
+  bookDatabasePage = Math.min(Math.max(1, bookDatabasePage), totalPages);
+  const start = (bookDatabasePage - 1) * BOOK_DATABASE_PAGE_SIZE;
+  return rows.slice(start, start + BOOK_DATABASE_PAGE_SIZE);
+}
+
+function renderBookDatabasePagination(totalPages) {
+  const target = $("#bookDatabasePagination");
+  if (!target) return;
+  if (totalPages <= 1) {
+    target.innerHTML = "";
+    return;
+  }
+  const pages = [...new Set([
+    1,
+    Math.max(1, bookDatabasePage - 1),
+    bookDatabasePage,
+    Math.min(totalPages, bookDatabasePage + 1),
+    totalPages
+  ])].sort((a, b) => a - b);
+  let previousPage = 0;
+  const pageButtons = pages.map((page) => {
+    const gap = previousPage && page - previousPage > 1 ? `<span class="pagination-gap">…</span>` : "";
+    previousPage = page;
+    return `${gap}<button type="button" class="btn ${page === bookDatabasePage ? "btn-primary" : "btn-muted"}" data-book-page="${page}" ${page === bookDatabasePage ? 'aria-current="page"' : ""}>${page}</button>`;
+  }).join("");
+  target.innerHTML = `
+    <button type="button" class="btn btn-muted" data-book-page="${bookDatabasePage - 1}" ${bookDatabasePage === 1 ? "disabled" : ""}>Previous</button>
+    ${pageButtons}
+    <button type="button" class="btn btn-muted" data-book-page="${bookDatabasePage + 1}" ${bookDatabasePage === totalPages ? "disabled" : ""}>Next</button>`;
+}
+
+function renderBooksTable() {
+  const allRows = filteredBookRows();
+  const totalPages = Math.max(1, Math.ceil(allRows.length / BOOK_DATABASE_PAGE_SIZE));
+  bookDatabasePage = Math.min(Math.max(1, bookDatabasePage), totalPages);
+  const rows = currentBookDatabaseRows();
   const target = $("#booksTable");
+  const firstVisible = allRows.length ? ((bookDatabasePage - 1) * BOOK_DATABASE_PAGE_SIZE) + 1 : 0;
+  const lastVisible = Math.min(bookDatabasePage * BOOK_DATABASE_PAGE_SIZE, allRows.length);
+  $("#bookDatabaseSummary").innerHTML = `<strong>${allRows.length} matching record${allRows.length === 1 ? "" : "s"}</strong><span>Showing ${firstVisible}–${lastVisible} of ${allRows.length} · Page ${bookDatabasePage} of ${totalPages}</span>`;
+  renderBookDatabasePagination(totalPages);
+  renderBookExportSummary();
   if (!rows.length) {
     renderEmpty(target, "No matching books found.");
     return;
   }
 
   target.innerHTML = `
-    <table>
+    <table class="book-database-table">
       <thead>
         <tr>
-          <th>Accession Number</th>
+          <th>Accession No.</th>
           <th>Date</th>
           <th>Author</th>
           <th>Title</th>
@@ -1867,45 +1954,49 @@ function renderBooksTable() {
           <th>Source</th>
           <th>Bill No &amp; Date</th>
           <th>Cost</th>
-          <th>Withdrawal No., Date &amp; Remarks</th>
-          <th>Image URL</th>
-          <th>Notes</th>
           <th>Status</th>
           <th>Issued Student UID</th>
           <th>Actions</th>
         </tr>
       </thead>
       <tbody>
-        ${rows.map(({ id, data }) => `
+        ${rows.map((item) => {
+          const { id, data } = item;
+          const status = displayBookStatus(item);
+          return `
           <tr data-book-id="${escapeHtml(id)}">
             <td>${escapeHtml(accessionNumberOf(data) || "-")}</td>
             <td>${escapeHtml(data.accessionDate || "-")}</td>
-            <td>${escapeHtml(data.author || "-")}</td>
-            <td><strong>${escapeHtml(bookTitle(data) || "-")}</strong></td>
-            <td>${escapeHtml(data.placePublisher || data.publisher || "-")}</td>
+            <td><span class="table-text-clip" title="${escapeHtml(data.author || "-")}">${escapeHtml(data.author || "-")}</span></td>
+            <td><strong class="table-text-clip" title="${escapeHtml(bookTitle(data) || "-")}">${escapeHtml(bookTitle(data) || "-")}</strong></td>
+            <td><span class="table-text-clip" title="${escapeHtml(data.placePublisher || data.publisher || "-")}">${escapeHtml(data.placePublisher || data.publisher || "-")}</span></td>
             <td>${escapeHtml(data.year || "-")}</td>
             <td>${escapeHtml(data.pages || "-")}</td>
             <td>${escapeHtml(data.volume || "-")}</td>
             <td>${escapeHtml(data.source || "-")}</td>
             <td>${escapeHtml(data.billNoDate || "-")}</td>
             <td>${escapeHtml(data.cost || "-")}</td>
-            <td>${escapeHtml(data.withdrawalRemarks || "-")}</td>
-            <td class="book-url-cell">${escapeHtml(data.imageUrl || "-")}</td>
-            <td>${escapeHtml(data.notes || "-")}</td>
-            <td>${statusBadge(data.status)}</td>
+            <td>${statusBadge(status)}</td>
             <td>${escapeHtml(data.status === "issued" ? (data.issuedStudentUid || data.issuedTo || "-") : "-")}</td>
-            <td>
-              <div class="row-actions">
-                <button class="btn btn-muted" data-book-action="view">View</button>
-                <button class="btn btn-muted" data-book-action="edit">Edit</button>
-                <button class="btn btn-muted" data-book-action="print">Print Barcode</button>
+            <td class="database-action-cell">
+              <div class="row-actions database-primary-actions">
+                <button type="button" class="btn btn-muted" data-book-action="view">View</button>
+                <button type="button" class="btn btn-muted" data-book-action="edit">Edit</button>
+                ${session.profile.role === "admin" ? `<button type="button" class="btn btn-danger-soft" data-book-action="delete">Delete</button>` : ""}
+                <details class="row-action-menu">
+                  <summary aria-label="More book actions">More</summary>
+                  <div>
+                    <button type="button" class="btn btn-muted" data-book-action="print">Print Barcode</button>
                 ${data.status === "lost"
-                  ? `<button class="btn btn-primary" data-book-action="found">Mark Found</button>`
-                  : `<button class="btn btn-muted" data-book-action="lost">Mark Lost</button>`}
-                <button class="btn btn-muted" data-book-action="damaged">Mark Damaged</button>
+                  ? `<button type="button" class="btn btn-primary" data-book-action="found">Mark Found</button>`
+                  : `<button type="button" class="btn btn-muted" data-book-action="lost">Mark Lost</button>`}
+                    <button type="button" class="btn btn-muted" data-book-action="damaged">Mark Damaged</button>
+                  </div>
+                </details>
               </div>
             </td>
-          </tr>`).join("")}
+          </tr>`;
+        }).join("")}
       </tbody>
     </table>`;
 }
@@ -2191,39 +2282,80 @@ function exportBarcodeExcel() {
   console.log("Excel download triggered:", "barcode_export.xlsx");
 }
 
-function exportBooksExcel() {
+function parseRegisterDate(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const isoMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) return new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+  const localMatch = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+  if (!localMatch) return null;
+  let year = Number(localMatch[3]);
+  if (year < 100) year += year >= 70 ? 1900 : 2000;
+  return new Date(year, Number(localMatch[2]) - 1, Number(localMatch[1]));
+}
+
+function applyExportFilters(items) {
+  const category = String($("#exportCategoryFilter")?.value || "").toLowerCase();
+  const status = String($("#exportStatusFilter")?.value || "").toLowerCase();
+  const accessionFrom = String($("#exportAccessionFrom")?.value || "").trim();
+  const accessionTo = String($("#exportAccessionTo")?.value || "").trim();
+  const dateFrom = parseRegisterDate($("#exportDateFrom")?.value);
+  const dateTo = parseRegisterDate($("#exportDateTo")?.value);
+  return items.filter((item) => {
+    const data = item.data;
+    const accession = accessionNumberOf(data);
+    const accessionDate = parseRegisterDate(data.accessionDate);
+    if (category && String(data.category || "").toLowerCase() !== category) return false;
+    if (status && displayBookStatus(item) !== status) return false;
+    if (accessionFrom && compareAccessionNumbers(accession, accessionFrom) < 0) return false;
+    if (accessionTo && compareAccessionNumbers(accession, accessionTo) > 0) return false;
+    if (dateFrom && (!accessionDate || accessionDate < dateFrom)) return false;
+    if (dateTo && (!accessionDate || accessionDate > dateTo)) return false;
+    return true;
+  });
+}
+
+function bookRowsForExport() {
+  const scope = $("#exportScope")?.value || "all";
+  const sourceRows = scope === "filtered"
+    ? filteredBookRows()
+    : scope === "currentPage"
+      ? currentBookDatabaseRows()
+      : latestBooks;
+  return applyExportFilters(sourceRows);
+}
+
+function renderBookExportSummary() {
+  const target = $("#bookExportSummary");
+  if (!target) return;
+  const rows = bookRowsForExport();
+  const format = $("#exportFormat")?.value === "csv" ? "CSV" : "Excel";
+  target.innerHTML = `<span>Matching book records</span><strong>${rows.length}</strong><small>Ready for ${format} export</small>`;
+}
+
+function exportBooksExcel(items = bookRowsForExport(), format = $("#exportFormat")?.value || "xlsx") {
   if (!window.XLSX) throw new Error("XLSX export library is not loaded.");
-  const search = bookSearch.value.trim().toLowerCase();
-  const categoryFilter = String(bookCategoryFilter?.value || "").toLowerCase();
-  const availabilityFilter = String(bookAvailabilityFilter?.value || "").toLowerCase();
-  const rows = latestBooks
-    .filter(({ data }) => {
-      const status = String(data.status || "available").toLowerCase();
-      const category = String(data.category || "").toLowerCase();
-      const haystack = [
-        accessionNumberOf(data),
-        bookTitle(data),
-        data.author,
-        data.placePublisher,
-        data.publisher,
-        data.year,
-        data.subject,
-        data.category,
-        data.isbn,
-        data.publisherBarcode
-      ].join(" ").toLowerCase();
-      if (search && !haystack.includes(search)) return false;
-      if (categoryFilter && category !== categoryFilter) return false;
-      if (availabilityFilter && status !== availabilityFilter) return false;
-      return true;
-    })
-    .map(({ id, data }) => accessionExportRow({
+  if (!items.length) throw new Error("No book records match the selected export filters.");
+  const rows = items.map(({ id, data }) => accessionExportRow({
       ...data,
       accessionNumber: accessionNumberOf(data),
       title: bookTitle(data),
       barcodeValue: data.barcodeValue || barcodeValueFor(accessionNumberOf(data), data.b_id || id)
     }, formatDate));
   const sheet = window.XLSX.utils.json_to_sheet(rows);
+  if (format === "csv") {
+    const csv = window.XLSX.utils.sheet_to_csv(sheet);
+    const downloadUrl = URL.createObjectURL(new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.download = "accession_register_export.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(downloadUrl);
+    console.log("CSV download triggered:", "accession_register_export.csv");
+    return;
+  }
   const workbook = window.XLSX.utils.book_new();
   window.XLSX.utils.book_append_sheet(workbook, sheet, "Register Data");
   console.log("Books Excel export diagnostics:", {
@@ -2399,22 +2531,86 @@ $("#downloadBooksTemplateBtn").addEventListener("click", () => {
     showToast(error.message, "error");
   }
 });
+async function processBookImportFile(file) {
+  if (!file) return;
+  pendingBookImportRows = [];
+  pendingBookImportMatrix = [];
+  pendingBookImportSheetName = "";
+  $("#confirmBookImportBtn").disabled = true;
+  ["importTotalRows", "importReadyRows", "importDuplicateRows", "importInvalidRows"]
+    .forEach((id) => { document.getElementById(id).textContent = "0"; });
+  if (!/\.(xlsx|csv)$/i.test(file.name || "")) {
+    throw new Error("Choose an .xlsx or .csv accession register file.");
+  }
+  $("#bookImportFileName").textContent = file.name;
+  $("#bookImportResult").textContent = "Reading and validating file...";
+  const workbookData = await readWorkbookRows(file);
+  pendingBookImportMatrix = workbookData.matrix;
+  pendingBookImportSheetName = workbookData.sheetName;
+  const parsed = normalizeBookImportRows(pendingBookImportMatrix);
+  renderBookImportPreview(parsed.rows, workbookData.sheetName, parsed.sheetHeaderRow);
+}
+
+function resetBookDatabasePage() {
+  bookDatabasePage = 1;
+  renderBooksTable();
+}
+
+function switchManagementModal(fromId, toId) {
+  document.getElementById(fromId)?.classList.remove("open");
+  document.getElementById(toId)?.classList.add("open");
+  document.body.classList.add("modal-open");
+}
+
+document.addEventListener("click", (event) => {
+  const opener = event.target.closest(".management-modal [data-open-modal]");
+  const current = opener?.closest(".modal-backdrop");
+  if (opener && current && current.id !== opener.dataset.openModal) {
+    current.classList.remove("open");
+  }
+});
+
 $("#importBooksBtn").addEventListener("click", () => $("#bookImportFile").click());
 $("#bookImportFile").addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
   try {
-    const workbookData = await readWorkbookRows(file);
-    pendingBookImportMatrix = workbookData.matrix;
-    pendingBookImportSheetName = workbookData.sheetName;
-    const parsed = normalizeBookImportRows(pendingBookImportMatrix);
-    renderBookImportPreview(parsed.rows, workbookData.sheetName, parsed.sheetHeaderRow);
+    await processBookImportFile(file);
     showToast("Book import preview ready.", "success");
   } catch (error) {
     logDetailedError(error);
-    showToast("Could not parse book import file.", "error");
+    showToast(error.message || "Could not parse book import file.", "error");
   } finally {
     event.target.value = "";
+  }
+});
+const bookImportDropZone = $("#bookImportDropZone");
+bookImportDropZone?.addEventListener("click", (event) => {
+  if (!event.target.closest("button")) $("#bookImportFile").click();
+});
+bookImportDropZone?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    $("#bookImportFile").click();
+  }
+});
+["dragenter", "dragover"].forEach((type) => bookImportDropZone?.addEventListener(type, (event) => {
+  event.preventDefault();
+  bookImportDropZone.classList.add("is-dragover");
+}));
+["dragleave", "drop"].forEach((type) => bookImportDropZone?.addEventListener(type, (event) => {
+  event.preventDefault();
+  bookImportDropZone.classList.remove("is-dragover");
+}));
+bookImportDropZone?.addEventListener("drop", async (event) => {
+  const file = event.dataTransfer?.files?.[0];
+  if (!file) return;
+  try {
+    await processBookImportFile(file);
+    showToast("Book import preview ready.", "success");
+  } catch (error) {
+    logDetailedError(error);
+    showToast(error.message || "Could not parse book import file.", "error");
   }
 });
 $("#updateExistingBooks")?.addEventListener("change", () => {
@@ -2427,22 +2623,46 @@ $("#updateExistingBooks")?.addEventListener("change", () => {
     showToast(error.message, "error");
   }
 });
+$("#skipDuplicateBooks")?.addEventListener("change", () => {
+  if (pendingBookImportRows.length) {
+    renderBookImportPreview(pendingBookImportRows, pendingBookImportSheetName);
+  }
+});
 $("#confirmBookImportBtn").addEventListener("click", async () => {
   try {
     const result = await importPreviewedBooks();
+    $("#bookImportFileName").textContent = "No file selected";
+    $("#importTotalRows").textContent = "0";
+    $("#importReadyRows").textContent = "0";
+    $("#importDuplicateRows").textContent = "0";
+    $("#importInvalidRows").textContent = "0";
     showToast(`Imported ${result.imported} book copy/copies.`, "success");
   } catch (error) {
     logDetailedError(error);
     showToast(error.message, "error");
   }
 });
-bookSearch.addEventListener("input", renderBooksTable);
-if (bookCategoryFilter) bookCategoryFilter.addEventListener("change", renderBooksTable);
-if (bookAvailabilityFilter) bookAvailabilityFilter.addEventListener("change", renderBooksTable);
+bookSearch.addEventListener("input", resetBookDatabasePage);
+if (bookCategoryFilter) bookCategoryFilter.addEventListener("change", resetBookDatabasePage);
+if (bookAvailabilityFilter) bookAvailabilityFilter.addEventListener("change", resetBookDatabasePage);
+if (bookSort) bookSort.addEventListener("change", resetBookDatabasePage);
+$("#bookDatabasePagination")?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-book-page]");
+  if (!button || button.disabled) return;
+  bookDatabasePage = Number(button.dataset.bookPage || 1);
+  renderBooksTable();
+});
+["exportCategoryFilter", "exportStatusFilter", "exportAccessionFrom", "exportAccessionTo", "exportDateFrom", "exportDateTo", "exportFormat", "exportScope"]
+  .forEach((id) => {
+    const input = document.getElementById(id);
+    input?.addEventListener(input.matches("input") ? "input" : "change", renderBookExportSummary);
+  });
 $("#exportBooksExcelBtn").addEventListener("click", () => {
   try {
-    exportBooksExcel();
-    showToast("Books Excel exported.", "success");
+    const rows = bookRowsForExport();
+    const format = $("#exportFormat").value;
+    exportBooksExcel(rows, format);
+    showToast(`Book records exported as ${format.toUpperCase()}.`, "success");
   } catch (error) {
     logDetailedError(error);
     showToast(error.message, "error");
@@ -2462,6 +2682,19 @@ $("#booksTable").addEventListener("click", async (event) => {
       showBookDetails(data);
     } else if (button.dataset.bookAction === "edit") {
       loadBookIntoForm(id, data);
+      switchManagementModal("bookDatabaseModal", "addBookModal");
+    } else if (button.dataset.bookAction === "delete") {
+      if (session.profile.role !== "admin") throw new Error("Only an administrator can delete book records.");
+      if (bookHasIssueConflict(data) || await activeIssueConflictForBook(id, data.b_id)) {
+        throw new Error("This book has an active issue and cannot be deleted.");
+      }
+      if (requestStateForBook(found)) {
+        throw new Error("Resolve the active issue request before deleting this book.");
+      }
+      const confirmed = await confirmAction("Are you sure you want to delete this book record?");
+      if (!confirmed) return;
+      await deleteDoc(doc(db, "books", id));
+      showToast("Book record deleted successfully.", "success");
     } else if (button.dataset.bookAction === "print") {
       await printStickerFor(data);
     } else if (button.dataset.bookAction === "found") {
@@ -2585,11 +2818,59 @@ function setDefaultSlotDates() {
   tomorrow.setDate(tomorrow.getDate() + 1);
   const weekEnd = new Date(tomorrow);
   weekEnd.setDate(weekEnd.getDate() + 6);
-  const toInputDate = (date) => date.toISOString().slice(0, 10);
+  const toInputDate = (date) => [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0")
+  ].join("-");
   if (!$("#slotStartDate").value) $("#slotStartDate").value = toInputDate(tomorrow);
   if (!$("#slotEndDate").value) $("#slotEndDate").value = toInputDate(weekEnd);
   if (!$("#slotStartTime").value) $("#slotStartTime").value = "12:30";
   if (!$("#slotEndTime").value) $("#slotEndTime").value = "14:00";
+}
+
+function formatSlotDate(value) {
+  if (!value) return "Until changed";
+  const [year, month, day] = String(value).split("-");
+  return year && month && day ? `${day}-${month}-${year}` : value;
+}
+
+function renderSlotPreview() {
+  const target = $("#slotPreviewCard");
+  if (!target) return;
+  const startDate = $("#slotStartDate").value;
+  const repeatMode = $("#slotRepeatMode").value;
+  const endDate = repeatMode === "untilChanged" ? "" : $("#slotEndDate").value;
+  const startTime = $("#slotStartTime").value;
+  const endTime = $("#slotEndTime").value;
+  const appliesTo = $("#slotAppliesTo").value;
+  const maxStudents = Number($("#slotMaxStudents").value || 20);
+  if (!startDate || !startTime || !endTime) {
+    target.innerHTML = `<span>Schedule Preview</span><strong>Complete the fields to preview this slot.</strong><small>Saved changes appear immediately for eligible student requests.</small>`;
+    return;
+  }
+  const dateLabel = endDate && endDate !== startDate
+    ? `${formatSlotDate(startDate)} to ${formatSlotDate(endDate)}`
+    : `${formatSlotDate(startDate)}${repeatMode === "untilChanged" ? " onward" : ""}`;
+  target.innerHTML = `
+    <span>Schedule Preview</span>
+    <strong>Active slot: ${escapeHtml(dateLabel)}</strong>
+    <b>${escapeHtml(startTime)}–${escapeHtml(endTime)}</b>
+    <small>Applies to ${escapeHtml(appliesTo)} · Maximum ${maxStudents} students</small>`;
+}
+
+function applyScheduleToSlotForm(schedule) {
+  if (!schedule) return;
+  $("#slotStartDate").value = schedule.startDate || $("#slotStartDate").value;
+  $("#slotEndDate").value = schedule.endDate || "";
+  $("#slotStartTime").value = schedule.startTime || $("#slotStartTime").value;
+  $("#slotEndTime").value = schedule.endTime || $("#slotEndTime").value;
+  $("#slotAppliesTo").value = schedule.appliesTo || "both";
+  $("#slotRepeatMode").value = schedule.repeatMode || "untilChanged";
+  $("#slotMaxStudents").value = schedule.maxStudentsPerSlot || 20;
+  $("#slotNotes").value = schedule.notes || "";
+  $("#slotEndDate").required = $("#slotRepeatMode").value !== "untilChanged";
+  renderSlotPreview();
 }
 
 function renderActiveSchedule(schedule) {
@@ -2624,6 +2905,28 @@ $("#slotRepeatMode")?.addEventListener("change", () => {
     $("#slotEndDate").value = "";
     $("#slotEndDate").required = false;
   }
+  renderSlotPreview();
+});
+
+["slotStartDate", "slotEndDate", "slotStartTime", "slotEndTime", "slotAppliesTo", "slotMaxStudents", "slotNotes"]
+  .forEach((id) => {
+    const input = document.getElementById(id);
+    input?.addEventListener(input.matches("select") ? "change" : "input", renderSlotPreview);
+  });
+
+$("#resetTimeSlotBtn")?.addEventListener("click", () => {
+  if (latestIssueReturnSchedule) {
+    applyScheduleToSlotForm(latestIssueReturnSchedule);
+  } else {
+    $("#timeSlotForm").reset();
+    $("#slotStartDate").value = "";
+    $("#slotEndDate").value = "";
+    $("#slotStartTime").value = "";
+    $("#slotEndTime").value = "";
+    setDefaultSlotDates();
+    renderSlotPreview();
+  }
+  showToast("Time slot form reset.", "info");
 });
 
 $("#timeSlotForm")?.addEventListener("submit", async (event) => {
@@ -2655,21 +2958,16 @@ $("#timeSlotForm")?.addEventListener("submit", async (event) => {
 });
 
 setDefaultSlotDates();
+renderSlotPreview();
 
 onSnapshot(
   doc(db, "librarySettings", "issueReturnSchedule"),
   (snap) => {
     const schedule = snap.exists() ? snap.data() : null;
+    latestIssueReturnSchedule = schedule;
     renderActiveSchedule(schedule);
     if (!schedule) return;
-    $("#slotStartDate").value = schedule.startDate || $("#slotStartDate").value;
-    $("#slotEndDate").value = schedule.endDate || "";
-    $("#slotStartTime").value = schedule.startTime || $("#slotStartTime").value;
-    $("#slotEndTime").value = schedule.endTime || $("#slotEndTime").value;
-    $("#slotAppliesTo").value = schedule.appliesTo || "both";
-    $("#slotRepeatMode").value = schedule.repeatMode || "untilChanged";
-    $("#slotMaxStudents").value = schedule.maxStudentsPerSlot || 20;
-    $("#slotNotes").value = schedule.notes || "";
+    applyScheduleToSlotForm(schedule);
   },
   (error) => {
     console.error("Issue/return schedule load failed:", error);
@@ -2934,6 +3232,7 @@ onSnapshot(
     if (pendingMetric) pendingMetric.textContent = String(latestPendingRequests.length);
     if (newRequestMetric) newRequestMetric.textContent = String(pendingCount);
     renderPendingRequests();
+    renderBooksTable();
     renderRecentActivity();
   }
 );
