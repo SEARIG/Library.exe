@@ -11,3 +11,4 @@ ui-debug.log
 .vercel/
 dist/
 build/
+backups/
