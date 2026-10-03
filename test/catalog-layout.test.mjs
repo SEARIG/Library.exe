@@ -8,7 +8,8 @@ const styles = fs.readFileSync("public/css/style.css", "utf8");
 
 test("catalog pages contain four complete rows of six books", () => {
   assert.match(libraryScript, /const pageSize = 24;/);
-  assert.match(libraryPage, /library\.js\?v=12/);
+  assert.match(libraryPage, /library\.js\?v=13/);
+  assert.match(libraryScript, /No books have been added yet\./);
 });
 
 test("catalog grid uses stable desktop and responsive column counts", () => {

@@ -102,7 +102,10 @@ function renderLibrary() {
   `;
 
   if (!visibleRows.length) {
-    renderEmpty(booksTarget, "No books found.");
+    renderEmpty(
+      booksTarget,
+      allBooks.length === 0 ? "No books have been added yet." : "No books match the selected search and filters."
+    );
   } else {
     booksTarget.innerHTML = visibleRows.map(({ id, data }) => {
       const cover = String(data.imageUrl || "").trim();
