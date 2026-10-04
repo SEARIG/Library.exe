@@ -24,8 +24,9 @@ test("catalog and Book Database use bounded cursor pages", () => {
 });
 
 test("accession lookup tries normalized legacy representations", () => {
-  assert.match(service, /numericAccession\.padStart\(2, "0"\)/);
-  assert.match(service, /numericAccession\.padStart\(3, "0"\)/);
+  assert.match(service, /normalizeAccessionNumber\(scannedValue\)/);
+  assert.match(service, /zeroPaddedCandidates/);
+  assert.match(service, /numericAccession\.padStart\(index \+ 2, "0"\)/);
   assert.match(service, /`ACC-\$\{numericAccession\}`/);
   assert.match(service, /"accessionNumber", "blegal_num", "blegalNumber", "BLegalNumber"/);
 });

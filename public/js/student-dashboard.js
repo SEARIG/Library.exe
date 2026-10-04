@@ -8,7 +8,7 @@ import {
   isUnpaidPenaltyRecord,
   scheduleApplies,
   scheduleLabel
-} from "./firestore-service.js?v=2";
+} from "./firestore-service.js?v=4";
 import {
   getStudentPenaltyLiability
 } from "./penalty-utils.mjs?v=2";

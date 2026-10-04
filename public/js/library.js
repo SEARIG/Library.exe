@@ -9,7 +9,7 @@ import {
   scheduleApplies,
   scheduleLabel,
   titleOf
-} from "./firestore-service.js?v=3";
+} from "./firestore-service.js?v=4";
 import { sendEmailNotification } from "./notifications.js";
 import {
   collection,
@@ -34,6 +34,7 @@ import {
 } from "./app.js";
 import { renderNavbar } from "./navbar.js";
 import { bookCardThemeStyle, getBookCardTheme } from "./book-card-theme.mjs?v=1";
+import { accessionNumberValue, normalizeAccessionNumber } from "./accession-utils.mjs";
 
 const pageSize = 24;
 const scanPageSize = 100;
@@ -258,9 +259,7 @@ async function refreshCatalog() {
     if (search && !availability) {
       try {
         const direct = await findBookByLibraryCode(search);
-        const directAccession = String(accessionNumberOf(direct)).replace(/^0+/, "") || "0";
-        const searchedAccession = String(search).replace(/^ACC-/i, "").replace(/^0+/, "") || "0";
-        if (directAccession.toUpperCase() === searchedAccession.toUpperCase()) {
+        if (normalizeAccessionNumber(accessionNumberValue(direct)) === normalizeAccessionNumber(search)) {
           searchMode = true;
           currentPage = 1;
           allBooks = [{ id: direct.id, data: direct }];

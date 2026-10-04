@@ -1,3 +1,5 @@
+import { accessionNumberValue, normalizeAccessionNumber } from "./accession-utils.mjs";
+
 export const DUPLICATE_SAFE_METADATA_FIELDS = [
   "author",
   "title",
@@ -23,22 +25,6 @@ const ACTIVE_REFERENCE_STATUSES = {
 
 function text(value) {
   return String(value ?? "").trim();
-}
-
-export function normalizeLogicalAccession(value) {
-  let normalized = text(value).toUpperCase().replace(/\s+/g, "");
-  normalized = normalized.replace(/^ACC[-_:]*/, "");
-  if (/^\d+$/.test(normalized)) return normalized.replace(/^0+(?=\d)/, "");
-  return normalized;
-}
-
-function accessionOf(book = {}) {
-  return book.accessionNumber
-    ?? book.blegal_num
-    ?? book.blegalNumber
-    ?? book.BLegalNumber
-    ?? book.b_id
-    ?? "";
 }
 
 function metadataScore(data = {}) {
@@ -69,7 +55,7 @@ function referenceIdentifiers(data = {}) {
 }
 
 function referenceAccession(data = {}) {
-  return normalizeLogicalAccession(data.accessionNumber || data.blegal_num || data.barcodeValue);
+  return normalizeAccessionNumber(data.accessionNumber || data.blegal_num || data.barcodeValue);
 }
 
 function referenceIsActive(reference = {}) {
@@ -102,9 +88,13 @@ function canonicalSort(left, right) {
 
 export function buildDuplicateCleanupPlan(books = [], references = []) {
   const grouped = new Map();
+  const missingAccessions = [];
   (Array.isArray(books) ? books : []).forEach((book) => {
-    const key = normalizeLogicalAccession(accessionOf(book.data || {}));
-    if (!key) return;
+    const key = normalizeAccessionNumber(accessionNumberValue(book.data || {}));
+    if (!key) {
+      missingAccessions.push({ id: text(book.id), data: book.data || {} });
+      return;
+    }
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push({ id: text(book.id), data: book.data || {} });
   });
@@ -162,7 +152,7 @@ export function buildDuplicateCleanupPlan(books = [], references = []) {
 
       groups.push({
         accessionKey,
-        displayAccession: text(canonical.data.accessionNumber || canonical.data.blegal_num || canonical.data.b_id || accessionKey),
+        displayAccession: text(canonical.data.accessionNumber || canonical.data.blegal_num || canonical.data.blegalNumber || canonical.data.BLegalNumber || accessionKey),
         canonical,
         candidates: sorted,
         deletions: manualReview ? [] : extraCandidates,
@@ -182,6 +172,8 @@ export function buildDuplicateCleanupPlan(books = [], references = []) {
     metadataMergeCount: groups.reduce((total, group) => total + Object.keys(group.metadataPatch).length, 0),
     skippedGroupCount: groups.filter((group) => group.manualReview).length,
     uniqueAccessionCount: grouped.size,
+    missingAccessionCount: missingAccessions.length,
+    missingAccessions,
     totalBookCount: (Array.isArray(books) ? books : []).length
   };
 }

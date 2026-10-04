@@ -10,6 +10,7 @@ import {
   selectAccessionRegisterSheet,
   parseAccessionRegister
 } from "../public/js/accession-register.mjs";
+import { normalizeAccessionNumber } from "../public/js/accession-utils.mjs";
 
 const matrix = [
   ["Mohanlal Sukhadia University"],
@@ -46,6 +47,17 @@ test("prevents future imports from creating equivalent accession formats", () =>
   const blocked = parseAccessionRegister(importMatrix, existing, false).rows[0];
   assert.equal(blocked.duplicateType, "database");
   assert.match(blocked.errors.join(" "), /already exists/);
+});
+
+test("import duplicate prevention uses the shared accession normalization", () => {
+  assert.equal(normalizeAccessionNumber("  ACC-0301 "), "301");
+  const existing = new Map([[normalizeAccessionNumber("301"), { id: "book-301" }]]);
+  const parsed = parseAccessionRegister([
+    ["Accession No.", "Title"],
+    ["ACC-0301", "Duplicate"]
+  ], existing, false);
+  assert.equal(parsed.rows[0].duplicateType, "database");
+  assert.match(parsed.rows[0].errors.join(" "), /already exists/i);
 });
 
 test("creates the required barcode and accession export headers", () => {

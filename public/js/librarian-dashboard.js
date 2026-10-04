@@ -26,7 +26,7 @@ import {
   returnBook,
   scheduleLabel,
   titleOf
-} from "./firestore-service.js?v=3";
+} from "./firestore-service.js?v=4";
 import {
   EMAILJS_SETUP_MESSAGE,
   isEmailNotificationsConfigured,
@@ -40,12 +40,12 @@ import {
   accessionExportRow,
   parseAccessionWorkbook,
   parseAccessionRegister,
-} from "./accession-register.mjs?v=5";
+} from "./accession-register.mjs?v=6";
 import {
   buildDuplicateCleanupPlan,
-  duplicateCleanupSignature,
-  normalizeLogicalAccession
-} from "./book-duplicates.mjs?v=1";
+  duplicateCleanupSignature
+} from "./book-duplicates.mjs?v=2";
+import { accessionNumberValue, normalizeAccessionNumber } from "./accession-utils.mjs";
 import {
   collection,
   deleteDoc,
@@ -257,7 +257,7 @@ function downloadWorkbookTemplate(filename, rows, sheetName = "Template") {
 
 function existingAccessionMap() {
   return new Map(latestBooks
-    .map((item) => [normalizeLogicalAccession(accessionNumberOf(item.data)), item])
+    .map((item) => [normalizeAccessionNumber(accessionNumberValue(item.data)), item])
     .filter(([accession]) => accession));
 }
 
@@ -2046,7 +2046,7 @@ async function refreshBookDatabase() {
       try {
         const direct = await findBookByLibraryCode(search);
         const directItem = { id: direct.id, data: direct };
-        if (normalizeLogicalAccession(accessionNumberOf(direct)) === normalizeLogicalAccession(search)) {
+        if (normalizeAccessionNumber(accessionNumberValue(direct)) === normalizeAccessionNumber(search)) {
           bookDatabaseSearchMode = true;
           bookDatabasePage = 1;
           bookDatabaseRows = [directItem];
@@ -2124,13 +2124,13 @@ function renderDuplicateCleanupPreview(plan) {
     <span><strong>${plan.duplicateGroupCount}</strong>Duplicate groups</span>
     <span><strong>${plan.extraDuplicateCount}</strong>Extra records</span>
     <span class="summary-ready"><strong>${plan.deletableCount}</strong>Safe to delete</span>
-    <span class="summary-warning"><strong>${plan.metadataMergeCount}</strong>Metadata fields to merge</span>
+    <span class="summary-warning"><strong>${plan.missingAccessionCount}</strong>Missing accession number</span>
     <span class="summary-invalid"><strong>${plan.skippedGroupCount}</strong>Manual review</span>`;
   confirmButton.toggleAttribute("disabled", plan.deletableCount === 0);
 
   if (!plan.groups.length) {
     renderEmpty(preview, "No duplicate accession numbers were found.");
-    $("#duplicateCleanupResult").innerHTML = `<strong>No duplicates found</strong><span>${plan.totalBookCount} books · ${plan.uniqueAccessionCount} unique accession numbers</span>`;
+    $("#duplicateCleanupResult").innerHTML = `<strong>No duplicates found</strong><span>${plan.totalBookCount} books · ${plan.uniqueAccessionCount} unique accession numbers · ${plan.missingAccessionCount} missing accession number</span>`;
     return;
   }
 
@@ -2148,7 +2148,7 @@ function renderDuplicateCleanupPreview(plan) {
             : `<strong>${group.deletions.length} record${group.deletions.length === 1 ? "" : "s"} will be deleted</strong><span>${Object.keys(group.metadataPatch).length} metadata field${Object.keys(group.metadataPatch).length === 1 ? "" : "s"} will be merged</span>`}</td>
         </tr>`).join("")}</tbody>
     </table>`;
-  $("#duplicateCleanupResult").innerHTML = `<strong>Preview only</strong><span>Review the document IDs and decisions before confirming.</span>`;
+  $("#duplicateCleanupResult").innerHTML = `<strong>Preview only</strong><span>Review the document IDs and decisions before confirming. ${plan.missingAccessionCount} record${plan.missingAccessionCount === 1 ? " has" : "s have"} no accession number and ${plan.missingAccessionCount === 1 ? "is" : "are"} excluded from duplicate deletion.</span>`;
 }
 
 async function scanDuplicateBooks() {

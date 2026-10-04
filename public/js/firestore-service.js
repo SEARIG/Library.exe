@@ -27,6 +27,7 @@ import {
   issueBelongsToStudent,
   studentUidOfStudent
 } from "./penalty-utils.mjs?v=2";
+import { normalizeAccessionNumber } from "./accession-utils.mjs";
 
 const ISSUE_DAYS = ISSUE_PERIOD_DAYS;
 const PENALTY_PER_DAY = PENALTY_RATE_PER_DAY;
@@ -81,17 +82,20 @@ export async function findBookByLibraryCode(value) {
   let book = await tryField("barcodeValue", scannedValue);
   if (book) return book;
 
-  const accessionCandidate = scannedValue.toUpperCase().startsWith("ACC-")
-    ? scannedValue.slice(4)
-    : scannedValue;
+  const accessionCandidate = normalizeAccessionNumber(scannedValue);
+  const rawAccessionCandidate = scannedValue.toUpperCase().replace(/^ACC[-_:]*/, "");
   const numericAccession = /^\d+$/.test(accessionCandidate)
     ? String(Number(accessionCandidate))
     : "";
+  const zeroPaddedCandidates = numericAccession
+    ? Array.from({ length: 11 }, (_, index) => numericAccession.padStart(index + 2, "0"))
+    : [];
   const accessionCandidates = [...new Set([
+    rawAccessionCandidate,
     accessionCandidate,
     numericAccession,
-    numericAccession ? numericAccession.padStart(2, "0") : "",
-    numericAccession ? numericAccession.padStart(3, "0") : "",
+    ...zeroPaddedCandidates,
+    numericAccession ? Number(numericAccession) : "",
     numericAccession ? `ACC-${numericAccession}` : ""
   ].filter(Boolean))];
   for (const candidate of accessionCandidates) {

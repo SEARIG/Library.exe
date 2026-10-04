@@ -2,9 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
-  buildDuplicateCleanupPlan,
-  normalizeLogicalAccession
+  buildDuplicateCleanupPlan
 } from "../public/js/book-duplicates.mjs";
+import { accessionNumberValue, normalizeAccessionNumber } from "../public/js/accession-utils.mjs";
 
 function book(id, accessionNumber, data = {}) {
   return { id, data: { accessionNumber, status: "available", ...data } };
@@ -16,9 +16,10 @@ function reference(collection, id, data = {}) {
 
 test("normalizes equivalent logical accession values", () => {
   for (const value of [1, "1", "01", "001", " 1 ", "ACC-1"]) {
-    assert.equal(normalizeLogicalAccession(value), "1");
+    assert.equal(normalizeAccessionNumber(value), "1");
   }
-  assert.equal(normalizeLogicalAccession("A-01"), "A-01");
+  assert.equal(normalizeAccessionNumber("A-01"), "A-01");
+  assert.equal(accessionNumberValue({ b_id: "301" }), "");
 });
 
 test("no duplicate accession numbers produces an empty cleanup plan", () => {
@@ -90,12 +91,54 @@ test("different logical accession numbers are never deletion candidates", () => 
   assert.equal(plan.extraDuplicateCount, 0);
 });
 
+test("same accession remains a duplicate when title and author differ", () => {
+  const plan = buildDuplicateCleanupPlan([
+    book("a", "301", { title: "Book A", author: "Author X" }),
+    book("b", "0301", { title: "Completely Different", author: "Author Y" })
+  ]);
+  assert.equal(plan.duplicateGroupCount, 1);
+  assert.equal(plan.extraDuplicateCount, 1);
+});
+
+test("same title author ISBN and year never group different accessions", () => {
+  const metadata = { title: "Shared Book", author: "Author X", isbn: "9780000000001", year: "2020" };
+  const plan = buildDuplicateCleanupPlan([
+    book("a", "301", metadata),
+    book("b", "302", metadata)
+  ]);
+  assert.equal(plan.duplicateGroupCount, 0);
+  assert.equal(plan.extraDuplicateCount, 0);
+});
+
+test("blank accessions are reported but never grouped or deleted", () => {
+  const plan = buildDuplicateCleanupPlan([
+    book("blank-a", "", { title: "Book A" }),
+    book("blank-b", "   ", { title: "Book A" }),
+    book("valid", "301", { title: "Book A" })
+  ]);
+  assert.equal(plan.missingAccessionCount, 2);
+  assert.deepEqual(plan.missingAccessions.map((item) => item.id), ["blank-a", "blank-b"]);
+  assert.equal(plan.duplicateGroupCount, 0);
+  assert.equal(plan.deletableCount, 0);
+});
+
+test("document and legacy book ids never substitute for a missing accession", () => {
+  const plan = buildDuplicateCleanupPlan([
+    { id: "301", data: { b_id: "301", title: "Book A", status: "available" } },
+    { id: "0301", data: { b_id: "0301", title: "Book A", status: "available" } }
+  ]);
+  assert.equal(plan.missingAccessionCount, 2);
+  assert.equal(plan.duplicateGroupCount, 0);
+  assert.equal(plan.deletableCount, 0);
+});
+
 test("duplicate cleanup UI and execution remain Admin-only", () => {
   const page = fs.readFileSync("public/librarian-dashboard.html", "utf8");
   const script = fs.readFileSync("public/js/librarian-dashboard.js", "utf8");
   const rules = fs.readFileSync("firestore.rules", "utf8");
   assert.match(page, /id="deleteDuplicateBooksBtn"[^>]*hidden/);
   assert.match(page, /id="duplicateCleanupModal"/);
+  assert.match(page, /detected only when multiple book documents have the same accession number/);
   assert.match(script, /session\.profile\.role !== "admin"/);
   assert.match(script, /duplicateCleanupSignature\(refreshedPlan\)/);
   assert.match(script, /writeBatch\(db\)/);

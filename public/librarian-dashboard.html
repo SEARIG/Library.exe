@@ -264,7 +264,7 @@
           <div>
             <span class="eyebrow">Admin safety tool</span>
             <h2 id="duplicateCleanupTitle">Delete Duplicate Book Records</h2>
-            <p>Scan logical accession numbers, keep one canonical record, and protect circulation history.</p>
+            <p>Duplicate records are detected only when multiple book documents have the same accession number.</p>
           </div>
           <button class="btn btn-muted" data-close-modal type="button" aria-label="Close Delete Duplicates">Close</button>
         </div>
@@ -276,6 +276,8 @@
           <div id="duplicateCleanupSummary" class="import-summary-strip" aria-live="polite">
             <span><strong>0</strong>Duplicate groups</span>
             <span><strong>0</strong>Extra records</span>
+            <span><strong>0</strong>Safe to delete</span>
+            <span><strong>0</strong>Missing accession number</span>
             <span><strong>0</strong>Manual review</span>
           </div>
           <div id="duplicateCleanupPreview" class="table-scroll duplicate-cleanup-preview">
@@ -641,6 +643,6 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
     <script type="module" src="./js/notifications.js"></script>
-    <script type="module" src="./js/librarian-dashboard.js?v=9"></script>
+    <script type="module" src="./js/librarian-dashboard.js?v=10"></script>
   </body>
 </html>
