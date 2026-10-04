@@ -4,7 +4,7 @@ import {
   accessionBookData,
   accessionExportRow,
   findAccessionHeaderRow,
-  normalizeHeader,
+  normalizeImportHeader,
   selectAccessionRegisterSheet,
   parseAccessionRegister
 } from "../public/js/accession-register.mjs";
@@ -50,12 +50,29 @@ test("creates the required barcode and accession export headers", () => {
 });
 
 test("normalizes accession headers without requiring case or punctuation", () => {
-  assert.equal(normalizeHeader("  ACCESSION   NO. "), "accession no");
-  assert.equal(normalizeHeader("accession number"), "accession number");
+  const aliases = [
+    "Accession No.",
+    " Accession No. ",
+    "ACCESSION NO.",
+    "Accession No",
+    "Accession Number",
+    "Accession\nNo.",
+    "Accession\u00a0No.",
+    "accession no."
+  ];
+  aliases.forEach((value) => {
+    assert.equal(normalizeImportHeader(value), value.toLowerCase().includes("number") ? "accession number" : "accession no");
+    assert.equal(findAccessionHeaderRow([["Date", value, "Title"]]), 0);
+  });
+  assert.equal(findAccessionHeaderRow([["Date", "Accession", "Title"]]), 0);
+  assert.equal(findAccessionHeaderRow([["Date", "AccessionNo", "Title"]]), 0);
+  assert.equal(findAccessionHeaderRow([["Date", "AccessionNum", "Title"]]), 0);
   assert.equal(findAccessionHeaderRow([
     ["Instructions"],
     ["ACCESSION NO.", "TITLE"]
   ]), 1);
+  assert.equal(normalizeImportHeader({ richText: [{ text: "Accession" }, { text: " No." }] }), "accession no");
+  assert.equal(normalizeImportHeader({ v: "Accession\nNumber" }), "accession number");
 });
 
 test("prefers Books Import, scans later header rows, and skips helper sheets", () => {
@@ -97,7 +114,7 @@ test("falls back to another data worksheet and supports a CSV-style single sheet
 test("uses specific workbook selection errors", () => {
   assert.throws(
     () => selectAccessionRegisterSheet([{ name: "Books Import", matrix: [["Title"]] }]),
-    /'Books Import' sheet found, but the accession header is missing\./
+    /Books Import sheet found, but no accession-number column could be recognized\./
   );
   assert.throws(
     () => selectAccessionRegisterSheet([{ name: "Read Me", matrix: [["Instructions"]] }]),

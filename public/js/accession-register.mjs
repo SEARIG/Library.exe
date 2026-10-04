@@ -18,7 +18,15 @@ export const ACCESSION_TEMPLATE_HEADERS = [
 ];
 
 const FIELD_ALIASES = {
-  accessionNumber: ["Accession No.", "Accession Number", "Accession No"],
+  accessionNumber: [
+    "Accession No.",
+    "Accession Number",
+    "Accession No",
+    "Accession",
+    "Accession Num",
+    "AccessionNum",
+    "AccessionNo"
+  ],
   accessionDate: ["Date"],
   author: ["Author"],
   title: ["Title"],
@@ -45,11 +53,27 @@ export const ACCESSION_HEADER_SCAN_LIMIT = 20;
 
 const NON_DATA_SHEETS = new Set(["read me", "needs review"]);
 
-export function normalizeHeader(value) {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
+function importHeaderText(value) {
+  if (value == null) return "";
+  if (typeof value !== "object") return String(value);
+  if (typeof value.v === "string" || typeof value.v === "number") return String(value.v);
+  if (typeof value.w === "string") return value.w;
+  if (typeof value.text === "string") return value.text;
+  if (Array.isArray(value.richText)) {
+    return value.richText.map((part) => part?.text || part?.t || "").join("");
+  }
+  if (Array.isArray(value.r)) {
+    return value.r.map((part) => part?.text || part?.t || "").join("");
+  }
+  return String(value);
+}
+
+export function normalizeImportHeader(value) {
+  return importHeaderText(value)
+    .replace(/\u00a0/g, " ")
+    .replace(/[\r\n\t]+/g, " ")
     .replace(/&/g, " and ")
+    .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -70,21 +94,21 @@ function accessionDateText(value) {
   return `${day}/${month}/${date.getUTCFullYear()}`;
 }
 
-const ACCESSION_HEADERS = new Set(FIELD_ALIASES.accessionNumber.map(normalizeHeader));
+const ACCESSION_HEADERS = new Set(FIELD_ALIASES.accessionNumber.map(normalizeImportHeader));
 
 export function findAccessionHeaderRow(matrix = [], maxRows = ACCESSION_HEADER_SCAN_LIMIT) {
   return matrix.slice(0, Math.max(0, maxRows)).findIndex((row) =>
-    (Array.isArray(row) ? row : []).some((cell) => ACCESSION_HEADERS.has(normalizeHeader(cell)))
+    (Array.isArray(row) ? row : []).some((cell) => ACCESSION_HEADERS.has(normalizeImportHeader(cell)))
   );
 }
 
 export function selectAccessionRegisterSheet(worksheets = [], maxRows = ACCESSION_HEADER_SCAN_LIMIT) {
   const sheets = (Array.isArray(worksheets) ? worksheets : [])
     .filter((sheet) => sheet && typeof sheet.name === "string" && Array.isArray(sheet.matrix));
-  const booksImport = sheets.filter((sheet) => normalizeHeader(sheet.name) === "books import");
+  const booksImport = sheets.filter((sheet) => normalizeImportHeader(sheet.name) === "books import");
   const fallbackSheets = sheets.filter((sheet) =>
-    normalizeHeader(sheet.name) !== "books import"
-    && !NON_DATA_SHEETS.has(normalizeHeader(sheet.name))
+    normalizeImportHeader(sheet.name) !== "books import"
+    && !NON_DATA_SHEETS.has(normalizeImportHeader(sheet.name))
   );
 
   for (const sheet of [...booksImport, ...fallbackSheets]) {
@@ -101,7 +125,7 @@ export function selectAccessionRegisterSheet(worksheets = [], maxRows = ACCESSIO
   }
 
   if (booksImport.length) {
-    throw new Error("'Books Import' sheet found, but the accession header is missing.");
+    throw new Error("Books Import sheet found, but no accession-number column could be recognized.");
   }
   throw new Error("No valid accession-register sheet was found. Expected a column named 'Accession No.' or 'Accession Number'.");
 }
@@ -112,10 +136,10 @@ export function parseAccessionRegister(matrix = [], existingBooks = new Map(), u
     throw new Error("No valid accession-register sheet was found. Expected a column named 'Accession No.' or 'Accession Number'.");
   }
 
-  const header = matrix[headerRowIndex].map(normalizeHeader);
+  const header = matrix[headerRowIndex].map(normalizeImportHeader);
   const indexes = {};
   Object.entries(FIELD_ALIASES).forEach(([field, aliases]) => {
-    indexes[field] = header.findIndex((value) => aliases.map(normalizeHeader).includes(value));
+    indexes[field] = header.findIndex((value) => aliases.map(normalizeImportHeader).includes(value));
   });
 
   const seen = new Set();

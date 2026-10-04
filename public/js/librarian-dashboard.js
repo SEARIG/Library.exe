@@ -37,9 +37,10 @@ import {
   ACCESSION_TEMPLATE_HEADERS,
   accessionBookData,
   accessionExportRow,
+  normalizeImportHeader,
   parseAccessionRegister,
   selectAccessionRegisterSheet
-} from "./accession-register.mjs?v=2";
+} from "./accession-register.mjs?v=3";
 import {
   collection,
   deleteDoc,
@@ -233,9 +234,17 @@ function readWorkbookRows(file) {
             blankrows: true
           })
         }));
+        if (showBookDebug) {
+          const booksImportSheet = worksheets.find((sheet) => normalizeImportHeader(sheet.name) === "books import");
+          const firstCell = booksImportSheet?.matrix?.[0]?.[0];
+          console.log("[BOOK IMPORT] Workbook sheets:", workbook.SheetNames);
+          console.log("[BOOK IMPORT] Books Import first 5 raw rows:", booksImportSheet?.matrix?.slice(0, 5) || []);
+          console.log("[BOOK IMPORT] First cell raw value:", firstCell);
+          console.log("[BOOK IMPORT] First cell typeof:", typeof firstCell);
+          console.log("[BOOK IMPORT] First cell JSON:", JSON.stringify(firstCell));
+        }
         const selected = selectAccessionRegisterSheet(worksheets);
         if (showBookDebug) {
-          console.log("[BOOK IMPORT] Workbook sheets:", workbook.SheetNames);
           console.log("[BOOK IMPORT] Selected sheet:", selected.sheetName);
           console.log("[BOOK IMPORT] Header row:", selected.sheetHeaderRow);
           console.log("[BOOK IMPORT] Detected columns:", selected.detectedColumns);
