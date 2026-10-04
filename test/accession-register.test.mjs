@@ -4,6 +4,8 @@ import {
   accessionBookData,
   accessionExportRow,
   findAccessionHeaderRow,
+  normalizeHeader,
+  selectAccessionRegisterSheet,
   parseAccessionRegister
 } from "../public/js/accession-register.mjs";
 
@@ -45,4 +47,72 @@ test("creates the required barcode and accession export headers", () => {
   assert.equal(exported["Accession No."], "005");
   assert.equal(exported["Barcode Value"], "ACC-005");
   assert.ok(Object.hasOwn(exported, "Withdrawal No., Date & Remarks"));
+});
+
+test("normalizes accession headers without requiring case or punctuation", () => {
+  assert.equal(normalizeHeader("  ACCESSION   NO. "), "accession no");
+  assert.equal(normalizeHeader("accession number"), "accession number");
+  assert.equal(findAccessionHeaderRow([
+    ["Instructions"],
+    ["ACCESSION NO.", "TITLE"]
+  ]), 1);
+});
+
+test("prefers Books Import, scans later header rows, and skips helper sheets", () => {
+  const selected = selectAccessionRegisterSheet([
+    { name: "Read Me", matrix: [["Accession No.", "Not actual data"]] },
+    { name: "Needs Review", matrix: [["Accession Number", "Review note"]] },
+    {
+      name: "Books Import",
+      matrix: [
+        ["Mohanlal Sukhadia University"],
+        ["Digitized accession register"],
+        [" accession number ", "Author", "Title", "Publisher", "Volume", "Cost"],
+        ["001", "Author One", "Book One", "MLSU Press", "I", "150"]
+      ]
+    }
+  ]);
+  assert.equal(selected.sheetName, "Books Import");
+  assert.equal(selected.sheetHeaderRow, 3);
+  const parsed = parseAccessionRegister(selected.matrix);
+  assert.equal(parsed.rows[0].accessionNumber, "001");
+  assert.equal(parsed.rows[0].placePublisher, "MLSU Press");
+  assert.equal(parsed.rows[0].volume, "I");
+  assert.equal(parsed.rows[0].cost, "150");
+});
+
+test("falls back to another data worksheet and supports a CSV-style single sheet", () => {
+  const fallback = selectAccessionRegisterSheet([
+    { name: "Read Me", matrix: [["Instructions only"]] },
+    { name: "Register Data", matrix: [["accession no", "title"], ["01", "Book"]] }
+  ]);
+  assert.equal(fallback.sheetName, "Register Data");
+
+  const csv = selectAccessionRegisterSheet([
+    { name: "Sheet1", matrix: [["Accession Number", "Title"], ["300", "CSV Book"]] }
+  ]);
+  assert.equal(parseAccessionRegister(csv.matrix).rows[0].accessionNumber, "300");
+});
+
+test("uses specific workbook selection errors", () => {
+  assert.throws(
+    () => selectAccessionRegisterSheet([{ name: "Books Import", matrix: [["Title"]] }]),
+    /'Books Import' sheet found, but the accession header is missing\./
+  );
+  assert.throws(
+    () => selectAccessionRegisterSheet([{ name: "Read Me", matrix: [["Instructions"]] }]),
+    /No valid accession-register sheet was found/
+  );
+});
+
+test("allows optional metadata to remain blank and scans the first 20 rows", () => {
+  const padded = Array.from({ length: 19 }, () => [""]);
+  padded.push(["Accession No.", "Title", "Date", "Year", "Pages"]);
+  padded.push(["151", "Minimal Book", "", "", ""]);
+  assert.equal(findAccessionHeaderRow(padded), 19);
+  const row = parseAccessionRegister(padded).rows[0];
+  assert.deepEqual(row.errors, []);
+  assert.equal(row.accessionDate, "");
+  assert.equal(row.year, "");
+  assert.equal(row.pages, "");
 });

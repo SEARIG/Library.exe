@@ -37,8 +37,9 @@ import {
   ACCESSION_TEMPLATE_HEADERS,
   accessionBookData,
   accessionExportRow,
-  parseAccessionRegister
-} from "./accession-register.mjs";
+  parseAccessionRegister,
+  selectAccessionRegisterSheet
+} from "./accession-register.mjs?v=2";
 import {
   collection,
   deleteDoc,
@@ -222,18 +223,28 @@ function readWorkbookRows(file) {
           type: "array",
           cellDates: false
         });
-        const sheetName = workbook.SheetNames.find((name) => name.trim().toLowerCase() === "register data")
-          || workbook.SheetNames[0];
-        if (!sheetName) throw new Error("The workbook does not contain a worksheet.");
-        const sheet = workbook.Sheets[sheetName];
-        resolve({
-          sheetName,
-          matrix: window.XLSX.utils.sheet_to_json(sheet, {
+        if (!workbook.SheetNames.length) throw new Error("The workbook does not contain a worksheet.");
+        const worksheets = workbook.SheetNames.map((name) => ({
+          name,
+          matrix: window.XLSX.utils.sheet_to_json(workbook.Sheets[name], {
             header: 1,
             defval: "",
             raw: false,
-            blankrows: false
+            blankrows: true
           })
+        }));
+        const selected = selectAccessionRegisterSheet(worksheets);
+        if (showBookDebug) {
+          console.log("[BOOK IMPORT] Workbook sheets:", workbook.SheetNames);
+          console.log("[BOOK IMPORT] Selected sheet:", selected.sheetName);
+          console.log("[BOOK IMPORT] Header row:", selected.sheetHeaderRow);
+          console.log("[BOOK IMPORT] Detected columns:", selected.detectedColumns);
+        }
+        resolve({
+          sheetName: selected.sheetName,
+          matrix: selected.matrix,
+          sheetHeaderRow: selected.sheetHeaderRow,
+          detectedColumns: selected.detectedColumns
         });
       } catch (error) {
         reject(error);

@@ -22,7 +22,7 @@ const FIELD_ALIASES = {
   accessionDate: ["Date"],
   author: ["Author"],
   title: ["Title"],
-  placePublisher: ["Place & Publisher"],
+  placePublisher: ["Place & Publisher", "Publisher"],
   year: ["Year"],
   pages: ["Pages"],
   volume: ["Vol.", "Vol", "Volume"],
@@ -41,13 +41,18 @@ const FIELD_ALIASES = {
   subject: ["Subject"]
 };
 
-function normalizedHeader(value) {
+export const ACCESSION_HEADER_SCAN_LIMIT = 20;
+
+const NON_DATA_SHEETS = new Set(["read me", "needs review"]);
+
+export function normalizeHeader(value) {
   return String(value ?? "")
     .trim()
     .toLowerCase()
-    .replace(/&/g, "and")
-    .replace(/[.,()]/g, "")
-    .replace(/\s+/g, " ");
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function cellText(value) {
@@ -65,24 +70,52 @@ function accessionDateText(value) {
   return `${day}/${month}/${date.getUTCFullYear()}`;
 }
 
-const ACCESSION_HEADERS = new Set(FIELD_ALIASES.accessionNumber.map(normalizedHeader));
+const ACCESSION_HEADERS = new Set(FIELD_ALIASES.accessionNumber.map(normalizeHeader));
 
-export function findAccessionHeaderRow(matrix = []) {
-  return matrix.findIndex((row) =>
-    (Array.isArray(row) ? row : []).some((cell) => ACCESSION_HEADERS.has(normalizedHeader(cell)))
+export function findAccessionHeaderRow(matrix = [], maxRows = ACCESSION_HEADER_SCAN_LIMIT) {
+  return matrix.slice(0, Math.max(0, maxRows)).findIndex((row) =>
+    (Array.isArray(row) ? row : []).some((cell) => ACCESSION_HEADERS.has(normalizeHeader(cell)))
   );
+}
+
+export function selectAccessionRegisterSheet(worksheets = [], maxRows = ACCESSION_HEADER_SCAN_LIMIT) {
+  const sheets = (Array.isArray(worksheets) ? worksheets : [])
+    .filter((sheet) => sheet && typeof sheet.name === "string" && Array.isArray(sheet.matrix));
+  const booksImport = sheets.filter((sheet) => normalizeHeader(sheet.name) === "books import");
+  const fallbackSheets = sheets.filter((sheet) =>
+    normalizeHeader(sheet.name) !== "books import"
+    && !NON_DATA_SHEETS.has(normalizeHeader(sheet.name))
+  );
+
+  for (const sheet of [...booksImport, ...fallbackSheets]) {
+    const headerRowIndex = findAccessionHeaderRow(sheet.matrix, maxRows);
+    if (headerRowIndex >= 0) {
+      return {
+        sheetName: sheet.name,
+        matrix: sheet.matrix,
+        headerRowIndex,
+        sheetHeaderRow: headerRowIndex + 1,
+        detectedColumns: (sheet.matrix[headerRowIndex] || []).map(cellText).filter(Boolean)
+      };
+    }
+  }
+
+  if (booksImport.length) {
+    throw new Error("'Books Import' sheet found, but the accession header is missing.");
+  }
+  throw new Error("No valid accession-register sheet was found. Expected a column named 'Accession No.' or 'Accession Number'.");
 }
 
 export function parseAccessionRegister(matrix = [], existingBooks = new Map(), updateExisting = false) {
   const headerRowIndex = findAccessionHeaderRow(matrix);
   if (headerRowIndex < 0) {
-    throw new Error('Header row not found. The workbook must contain "Accession No." or "Accession Number".');
+    throw new Error("No valid accession-register sheet was found. Expected a column named 'Accession No.' or 'Accession Number'.");
   }
 
-  const header = matrix[headerRowIndex].map(normalizedHeader);
+  const header = matrix[headerRowIndex].map(normalizeHeader);
   const indexes = {};
   Object.entries(FIELD_ALIASES).forEach(([field, aliases]) => {
-    indexes[field] = header.findIndex((value) => aliases.map(normalizedHeader).includes(value));
+    indexes[field] = header.findIndex((value) => aliases.map(normalizeHeader).includes(value));
   });
 
   const seen = new Set();
