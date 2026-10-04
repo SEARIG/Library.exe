@@ -1,3 +1,5 @@
+import { normalizeLogicalAccession } from "./book-duplicates.mjs";
+
 export const ACCESSION_TEMPLATE_HEADERS = [
   "Accession No.",
   "Date",
@@ -267,6 +269,9 @@ export function parseAccessionRegister(matrix = [], existingBooks = new Map(), u
   });
 
   const seen = new Set();
+  const normalizedExistingBooks = new Map(
+    [...existingBooks.entries()].map(([key, value]) => [normalizeLogicalAccession(key), value])
+  );
   const rows = [];
   matrix.slice(headerRowIndex + 1).forEach((sourceRow, offset) => {
     const row = Array.isArray(sourceRow) ? sourceRow : [];
@@ -282,7 +287,7 @@ export function parseAccessionRegister(matrix = [], existingBooks = new Map(), u
     parsed.isbn ||= "";
     parsed.publisherBarcode ||= parsed.isbn;
 
-    const key = parsed.accessionNumber.toLowerCase();
+    const key = normalizeLogicalAccession(parsed.accessionNumber);
     const errors = [];
     let duplicateType = "";
     if (!parsed.accessionNumber) errors.push("Accession Number is required");
@@ -293,7 +298,7 @@ export function parseAccessionRegister(matrix = [], existingBooks = new Map(), u
     }
     if (key) seen.add(key);
 
-    const existing = key ? existingBooks.get(key) : null;
+    const existing = key ? normalizedExistingBooks.get(key) : null;
     if (existing && !updateExisting) {
       errors.push("Accession number already exists");
       duplicateType = duplicateType || "database";

@@ -40,6 +40,14 @@ test("blocks existing accessions unless update mode is enabled", () => {
   assert.deepEqual(update.errors, []);
 });
 
+test("prevents future imports from creating equivalent accession formats", () => {
+  const importMatrix = [["Accession No.", "Title"], ["ACC-1", "Duplicate copy"]];
+  const existing = new Map([["1", { id: "book-1" }]]);
+  const blocked = parseAccessionRegister(importMatrix, existing, false).rows[0];
+  assert.equal(blocked.duplicateType, "database");
+  assert.match(blocked.errors.join(" "), /already exists/);
+});
+
 test("creates the required barcode and accession export headers", () => {
   const data = accessionBookData({ accessionNumber: "005", accessionDate: 44351, title: "Book", classNo: "100", bookNo: "AUT" });
   assert.equal(data.barcodeValue, "ACC-005");

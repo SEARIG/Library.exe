@@ -12,7 +12,7 @@
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" type="image/png" href="/assets/mlsu-logo.png?v=4">
     <link rel="apple-touch-icon" href="/assets/mlsu-logo-192.png">
-    <link rel="stylesheet" href="css/style.css?v=7">
+    <link rel="stylesheet" href="css/style.css?v=8">
   </head>
   <body class="protected-page">
     <header class="app-header">
@@ -201,6 +201,7 @@
               <div class="toolbar compact-toolbar">
                 <button class="btn btn-muted" data-open-modal="bookImportModal" type="button">Import Records</button>
                 <button class="btn btn-muted" data-open-modal="bookExportModal" type="button">Export Records</button>
+                <button class="btn btn-danger-soft" id="deleteDuplicateBooksBtn" data-open-modal="duplicateCleanupModal" type="button" hidden>Delete Duplicates</button>
               </div>
             </div>
             <div class="library-controls database-controls">
@@ -253,6 +254,39 @@
         <div class="modal-action-bar database-action-bar">
           <div id="bookDatabasePagination" class="management-pagination" aria-label="Book database pagination"></div>
           <button class="btn btn-muted" data-close-modal type="button">Close</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="duplicateCleanupModal" role="dialog" aria-modal="true" aria-labelledby="duplicateCleanupTitle">
+      <section class="app-modal management-modal management-modal-wide">
+        <div class="modal-head management-modal-head">
+          <div>
+            <span class="eyebrow">Admin safety tool</span>
+            <h2 id="duplicateCleanupTitle">Delete Duplicate Book Records</h2>
+            <p>Scan logical accession numbers, keep one canonical record, and protect circulation history.</p>
+          </div>
+          <button class="btn btn-muted" data-close-modal type="button" aria-label="Close Delete Duplicates">Close</button>
+        </div>
+        <div class="management-modal-body duplicate-cleanup-body">
+          <div class="warning-box">
+            <strong>Review required before deletion</strong>
+            <span>Duplicate book records were found by accession number. One canonical record will be kept for each accession number and extra duplicates will be deleted. Records with conflicting active circulation references will be skipped.</span>
+          </div>
+          <div id="duplicateCleanupSummary" class="import-summary-strip" aria-live="polite">
+            <span><strong>0</strong>Duplicate groups</span>
+            <span><strong>0</strong>Extra records</span>
+            <span><strong>0</strong>Manual review</span>
+          </div>
+          <div id="duplicateCleanupPreview" class="table-scroll duplicate-cleanup-preview">
+            <div class="empty">Scanning duplicate accession numbers…</div>
+          </div>
+          <div id="duplicateCleanupResult" class="import-file-result" aria-live="polite"></div>
+        </div>
+        <div class="modal-action-bar">
+          <span class="modal-action-note">No records are changed until an Admin confirms.</span>
+          <button class="btn btn-muted" data-close-modal type="button">Cancel</button>
+          <button class="btn btn-danger-soft" id="confirmDuplicateCleanupBtn" type="button" disabled>Delete Duplicates</button>
         </div>
       </section>
     </div>
@@ -607,6 +641,6 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
     <script type="module" src="./js/notifications.js"></script>
-    <script type="module" src="./js/librarian-dashboard.js?v=6"></script>
+    <script type="module" src="./js/librarian-dashboard.js?v=7"></script>
   </body>
 </html>

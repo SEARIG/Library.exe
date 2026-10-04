@@ -40,7 +40,12 @@ import {
   accessionExportRow,
   parseAccessionWorkbook,
   parseAccessionRegister,
-} from "./accession-register.mjs?v=4";
+} from "./accession-register.mjs?v=5";
+import {
+  buildDuplicateCleanupPlan,
+  duplicateCleanupSignature,
+  normalizeLogicalAccession
+} from "./book-duplicates.mjs?v=1";
 import {
   collection,
   deleteDoc,
@@ -58,6 +63,7 @@ import {
   setDoc,
   Timestamp,
   updateDoc,
+  writeBatch,
   where
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 import {
@@ -79,6 +85,7 @@ import {
 
 wireSignOut();
 const session = await requireAuth(["librarian", "admin"]);
+$("#deleteDuplicateBooksBtn")?.toggleAttribute("hidden", session.profile.role !== "admin");
 const addBookForm = $("#addBookForm");
 const bookSearch = $("#bookSearch");
 const bookCategoryFilter = $("#bookCategoryFilter");
@@ -94,6 +101,7 @@ let latestPendingRequests = [];
 let latestReturnRequests = [];
 let latestPenalties = [];
 let latestActiveIssues = [];
+let pendingDuplicateCleanupPlan = null;
 let latestBarcodeDataUrl = "";
 let selectedReturnRequest = null;
 let selectedPickupRequest = null;
@@ -240,7 +248,7 @@ function downloadWorkbookTemplate(filename, rows, sheetName = "Template") {
 
 function existingAccessionMap() {
   return new Map(latestBooks
-    .map((item) => [accessionNumberOf(item.data).toLowerCase(), item])
+    .map((item) => [normalizeLogicalAccession(accessionNumberOf(item.data)), item])
     .filter(([accession]) => accession));
 }
 
@@ -1974,6 +1982,133 @@ function renderBooksTable() {
     </table>`;
 }
 
+async function loadDuplicateCleanupPlan() {
+  if (session.profile.role !== "admin") {
+    throw new Error("Only an administrator can scan and delete duplicate book records.");
+  }
+  const [booksSnap, issuesSnap, issueRequestsSnap, returnRequestsSnap] = await Promise.all([
+    getDocs(collection(db, "books")),
+    getDocs(collection(db, "bookIssues")),
+    getDocs(collection(db, "issueRequests")),
+    getDocs(collection(db, "returnRequests"))
+  ]);
+  const books = booksSnap.docs.map((item) => ({ id: item.id, data: item.data() }));
+  const references = [
+    ...issuesSnap.docs.map((item) => ({ collection: "bookIssues", id: item.id, data: item.data() })),
+    ...issueRequestsSnap.docs.map((item) => ({ collection: "issueRequests", id: item.id, data: item.data() })),
+    ...returnRequestsSnap.docs.map((item) => ({ collection: "returnRequests", id: item.id, data: item.data() }))
+  ];
+  return buildDuplicateCleanupPlan(books, references);
+}
+
+function duplicateCandidateLabel(candidate, group) {
+  if (candidate.id === group.canonical.id) return "Keep canonical";
+  if (group.manualReview) return "Manual review";
+  return "Delete duplicate";
+}
+
+function renderDuplicateCleanupPreview(plan) {
+  pendingDuplicateCleanupPlan = plan;
+  const summary = $("#duplicateCleanupSummary");
+  const preview = $("#duplicateCleanupPreview");
+  const confirmButton = $("#confirmDuplicateCleanupBtn");
+  summary.innerHTML = `
+    <span><strong>${plan.duplicateGroupCount}</strong>Duplicate groups</span>
+    <span><strong>${plan.extraDuplicateCount}</strong>Extra records</span>
+    <span class="summary-ready"><strong>${plan.deletableCount}</strong>Safe to delete</span>
+    <span class="summary-warning"><strong>${plan.metadataMergeCount}</strong>Metadata fields to merge</span>
+    <span class="summary-invalid"><strong>${plan.skippedGroupCount}</strong>Manual review</span>`;
+  confirmButton.disabled = plan.deletableCount === 0;
+
+  if (!plan.groups.length) {
+    renderEmpty(preview, "No duplicate accession numbers were found.");
+    $("#duplicateCleanupResult").innerHTML = `<strong>No duplicates found</strong><span>${plan.totalBookCount} books · ${plan.uniqueAccessionCount} unique accession numbers</span>`;
+    return;
+  }
+
+  preview.innerHTML = `
+    <table class="duplicate-cleanup-table">
+      <thead><tr><th>Accession Number</th><th>Title / Author</th><th>Document IDs</th><th>Status</th><th>Decision</th></tr></thead>
+      <tbody>${plan.groups.map((group) => `
+        <tr class="${group.manualReview ? "duplicate-review-row" : ""}">
+          <td><strong>${escapeHtml(group.displayAccession)}</strong><span>${group.candidates.length} records</span></td>
+          <td><strong>${escapeHtml(bookTitle(group.canonical.data) || "Untitled book")}</strong><span>${escapeHtml(group.canonical.data.author || "Unknown author")}</span></td>
+          <td>${group.candidates.map((candidate) => `<span class="duplicate-doc-id"><code>${escapeHtml(candidate.id)}</code> · ${escapeHtml(duplicateCandidateLabel(candidate, group))}</span>`).join("")}</td>
+          <td>${group.candidates.map((candidate) => statusBadge(candidate.data.status || "available")).join(" ")}</td>
+          <td>${group.manualReview
+            ? `<strong class="danger-text">Manual Review Required</strong><span>${escapeHtml(group.manualReviewReason)}</span>`
+            : `<strong>${group.deletions.length} record${group.deletions.length === 1 ? "" : "s"} will be deleted</strong><span>${Object.keys(group.metadataPatch).length} metadata field${Object.keys(group.metadataPatch).length === 1 ? "" : "s"} will be merged</span>`}</td>
+        </tr>`).join("")}</tbody>
+    </table>`;
+  $("#duplicateCleanupResult").innerHTML = `<strong>Preview only</strong><span>Review the document IDs and decisions before confirming.</span>`;
+}
+
+async function scanDuplicateBooks() {
+  const preview = $("#duplicateCleanupPreview");
+  const confirmButton = $("#confirmDuplicateCleanupBtn");
+  confirmButton.disabled = true;
+  renderEmpty(preview, "Scanning books and circulation references…");
+  $("#duplicateCleanupResult").textContent = "No records have been changed.";
+  const plan = await loadDuplicateCleanupPlan();
+  renderDuplicateCleanupPreview(plan);
+  return plan;
+}
+
+async function commitDuplicateCleanup(plan) {
+  const operations = [];
+  plan.groups.filter((group) => !group.manualReview && group.deletions.length).forEach((group) => {
+    operations.push({
+      type: "update",
+      ref: doc(db, "books", group.canonical.id),
+      data: {
+        ...group.metadataPatch,
+        duplicateCleanupAt: serverTimestamp(),
+        duplicateCleanupBy: auth.currentUser.uid,
+        duplicateCleanupDeletedIds: group.deletions.map((item) => item.id),
+        updatedAt: serverTimestamp()
+      }
+    });
+    group.deletions.forEach((candidate) => operations.push({
+      type: "delete",
+      ref: doc(db, "books", candidate.id)
+    }));
+  });
+
+  for (let start = 0; start < operations.length; start += 400) {
+    const batch = writeBatch(db);
+    operations.slice(start, start + 400).forEach((operation) => {
+      if (operation.type === "delete") batch.delete(operation.ref);
+      else batch.update(operation.ref, operation.data);
+    });
+    await batch.commit();
+  }
+}
+
+async function executeDuplicateCleanup() {
+  if (session.profile.role !== "admin") throw new Error("Only an administrator can delete duplicate book records.");
+  if (!pendingDuplicateCleanupPlan?.deletableCount) throw new Error("No safe duplicate records are ready for deletion.");
+
+  const refreshedPlan = await loadDuplicateCleanupPlan();
+  if (duplicateCleanupSignature(refreshedPlan) !== duplicateCleanupSignature(pendingDuplicateCleanupPlan)) {
+    renderDuplicateCleanupPreview(refreshedPlan);
+    throw new Error("Duplicate records changed after the preview. Review the refreshed scan and confirm again.");
+  }
+
+  await commitDuplicateCleanup(refreshedPlan);
+  const finalBookCount = refreshedPlan.totalBookCount - refreshedPlan.deletableCount;
+  $("#duplicateCleanupResult").innerHTML = `
+    <strong>Duplicate cleanup complete</strong>
+    <span>Duplicate groups found: ${refreshedPlan.duplicateGroupCount}</span>
+    <span>Duplicates deleted: ${refreshedPlan.deletableCount}</span>
+    <span>Canonical records kept: ${refreshedPlan.canonicalCount}</span>
+    <span>Metadata merged: ${refreshedPlan.metadataMergeCount}</span>
+    <span>Groups skipped for manual review: ${refreshedPlan.skippedGroupCount}</span>
+    <span>Final books: ${finalBookCount} · Unique accessions: ${refreshedPlan.uniqueAccessionCount}</span>`;
+  $("#confirmDuplicateCleanupBtn").disabled = true;
+  pendingDuplicateCleanupPlan = null;
+  return { ...refreshedPlan, finalBookCount };
+}
+
 function availabilityLabel(status = "") {
   const value = String(status || "available").toLowerCase();
   if (value === "available") return "Available";
@@ -2639,6 +2774,30 @@ $("#exportBooksExcelBtn").addEventListener("click", () => {
   } catch (error) {
     logDetailedError(error);
     showToast(error.message, "error");
+  }
+});
+$("#deleteDuplicateBooksBtn")?.addEventListener("click", async () => {
+  try {
+    await scanDuplicateBooks();
+  } catch (error) {
+    logDetailedError(error);
+    renderEmpty($("#duplicateCleanupPreview"), error.message || "Could not scan duplicate book records.");
+    showToast(error.message || "Could not scan duplicate book records.", "error");
+  }
+});
+$("#confirmDuplicateCleanupBtn")?.addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = "Deleting…";
+  try {
+    const result = await executeDuplicateCleanup();
+    showToast(`Deleted ${result.deletableCount} duplicate book record${result.deletableCount === 1 ? "" : "s"}.`, "success");
+  } catch (error) {
+    logDetailedError(error);
+    showToast(error.message || "Duplicate cleanup failed.", "error");
+    if (pendingDuplicateCleanupPlan?.deletableCount) button.disabled = false;
+  } finally {
+    button.textContent = "Delete Duplicates";
   }
 });
 

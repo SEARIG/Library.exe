@@ -30,6 +30,18 @@ test("book deletion is Admin-only and blocks active circulation", () => {
   assert.match(rules, /match \/books\/\{bookId\}[\s\S]*?allow delete:\s*if isAdmin\(\);/);
 });
 
+test("duplicate cleanup is preview-first and protects referenced records", () => {
+  for (const id of ["deleteDuplicateBooksBtn", "duplicateCleanupModal", "duplicateCleanupSummary", "duplicateCleanupPreview", "confirmDuplicateCleanupBtn"]) {
+    assert.match(page, new RegExp(`id="${id}"`));
+  }
+  assert.match(page, /No records are changed until an Admin confirms/);
+  assert.match(script, /function scanDuplicateBooks\(\)/);
+  assert.match(script, /function executeDuplicateCleanup\(\)/);
+  assert.match(script, /collection\(db, "bookIssues"\)/);
+  assert.match(script, /collection\(db, "issueRequests"\)/);
+  assert.match(script, /collection\(db, "returnRequests"\)/);
+});
+
 test("import flow has drop zone, options, validation summary and safe confirmation", () => {
   for (const id of [
     "bookImportDropZone",

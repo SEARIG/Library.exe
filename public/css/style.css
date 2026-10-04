@@ -3214,6 +3214,53 @@ td strong {
   color: var(--danger);
 }
 
+.duplicate-cleanup-body {
+  gap: 16px;
+}
+
+.warning-box {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid rgba(180, 35, 24, 0.2);
+  border-left: 4px solid var(--danger);
+  border-radius: 12px;
+  background: #fff8f7;
+  color: var(--ink);
+}
+
+.warning-box span {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.duplicate-cleanup-preview {
+  max-height: min(52vh, 520px);
+}
+
+.duplicate-cleanup-table {
+  min-width: 980px;
+}
+
+.duplicate-cleanup-table td {
+  vertical-align: top;
+}
+
+.duplicate-cleanup-table td > span,
+.duplicate-cleanup-table td > strong + span,
+.duplicate-doc-id {
+  display: block;
+  margin-top: 5px;
+}
+
+.duplicate-doc-id code {
+  overflow-wrap: anywhere;
+}
+
+.duplicate-review-row {
+  background: rgba(180, 35, 24, 0.04);
+}
+
 .row-action-menu {
   position: relative;
 }
