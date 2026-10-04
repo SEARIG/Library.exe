@@ -26,7 +26,7 @@ import {
   returnBook,
   scheduleLabel,
   titleOf
-} from "./firestore-service.js?v=2";
+} from "./firestore-service.js?v=3";
 import {
   EMAILJS_SETUP_MESSAGE,
   isEmailNotificationsConfigured,
@@ -50,8 +50,10 @@ import {
   collection,
   deleteDoc,
   doc,
+  documentId,
   addDoc,
   arrayUnion,
+  getCountFromServer,
   getDoc,
   getDocs,
   limit,
@@ -61,6 +63,7 @@ import {
   runTransaction,
   serverTimestamp,
   setDoc,
+  startAfter,
   Timestamp,
   updateDoc,
   writeBatch,
@@ -92,10 +95,16 @@ const bookCategoryFilter = $("#bookCategoryFilter");
 const bookAvailabilityFilter = $("#bookAvailabilityFilter");
 const bookSort = $("#bookSort");
 const BOOK_DATABASE_PAGE_SIZE = 25;
+const BOOK_DATABASE_SCAN_SIZE = 100;
 let nextBookId = "1";
 let editingBookId = null;
 let editingExistingBook = null;
 let latestBooks = [];
+let bookDatabaseRows = [];
+let bookDatabaseTotal = 0;
+let bookDatabasePageCursors = [null];
+let bookDatabaseSearchMode = false;
+let bookDatabaseLoadSequence = 0;
 let bookDatabasePage = 1;
 let latestPendingRequests = [];
 let latestReturnRequests = [];
@@ -1834,7 +1843,7 @@ function filteredBookRows() {
   const categoryFilter = String(bookCategoryFilter?.value || "").toLowerCase();
   const availabilityFilter = String(bookAvailabilityFilter?.value || "").toLowerCase();
   const sortMode = bookSort?.value || "accessionAsc";
-  return latestBooks
+  return bookDatabaseRows
     .filter(({ data }) => {
       const category = String(data.category || "").toLowerCase();
       const haystack = [
@@ -1872,6 +1881,7 @@ function filteredBookRows() {
 
 function currentBookDatabaseRows() {
   const rows = filteredBookRows();
+  if (!bookDatabaseSearchMode) return rows;
   const totalPages = Math.max(1, Math.ceil(rows.length / BOOK_DATABASE_PAGE_SIZE));
   bookDatabasePage = Math.min(Math.max(1, bookDatabasePage), totalPages);
   const start = (bookDatabasePage - 1) * BOOK_DATABASE_PAGE_SIZE;
@@ -1885,34 +1895,22 @@ function renderBookDatabasePagination(totalPages) {
     target.innerHTML = "";
     return;
   }
-  const pages = [...new Set([
-    1,
-    Math.max(1, bookDatabasePage - 1),
-    bookDatabasePage,
-    Math.min(totalPages, bookDatabasePage + 1),
-    totalPages
-  ])].sort((a, b) => a - b);
-  let previousPage = 0;
-  const pageButtons = pages.map((page) => {
-    const gap = previousPage && page - previousPage > 1 ? `<span class="pagination-gap">…</span>` : "";
-    previousPage = page;
-    return `${gap}<button type="button" class="btn ${page === bookDatabasePage ? "btn-primary" : "btn-muted"}" data-book-page="${page}" ${page === bookDatabasePage ? 'aria-current="page"' : ""}>${page}</button>`;
-  }).join("");
   target.innerHTML = `
     <button type="button" class="btn btn-muted" data-book-page="${bookDatabasePage - 1}" ${bookDatabasePage === 1 ? "disabled" : ""}>Previous</button>
-    ${pageButtons}
+    <span class="pagination-status">Page ${bookDatabasePage} of ${totalPages}</span>
     <button type="button" class="btn btn-muted" data-book-page="${bookDatabasePage + 1}" ${bookDatabasePage === totalPages ? "disabled" : ""}>Next</button>`;
 }
 
 function renderBooksTable() {
   const allRows = filteredBookRows();
-  const totalPages = Math.max(1, Math.ceil(allRows.length / BOOK_DATABASE_PAGE_SIZE));
+  const matchingTotal = bookDatabaseSearchMode ? allRows.length : bookDatabaseTotal;
+  const totalPages = Math.max(1, Math.ceil(matchingTotal / BOOK_DATABASE_PAGE_SIZE));
   bookDatabasePage = Math.min(Math.max(1, bookDatabasePage), totalPages);
   const rows = currentBookDatabaseRows();
   const target = $("#booksTable");
-  const firstVisible = allRows.length ? ((bookDatabasePage - 1) * BOOK_DATABASE_PAGE_SIZE) + 1 : 0;
-  const lastVisible = Math.min(bookDatabasePage * BOOK_DATABASE_PAGE_SIZE, allRows.length);
-  $("#bookDatabaseSummary").innerHTML = `<strong>${allRows.length} matching record${allRows.length === 1 ? "" : "s"}</strong><span>Showing ${firstVisible}–${lastVisible} of ${allRows.length} · Page ${bookDatabasePage} of ${totalPages}</span>`;
+  const firstVisible = matchingTotal && rows.length ? ((bookDatabasePage - 1) * BOOK_DATABASE_PAGE_SIZE) + 1 : 0;
+  const lastVisible = Math.min(firstVisible + rows.length - 1, matchingTotal);
+  $("#bookDatabaseSummary").innerHTML = `<strong>${matchingTotal} matching record${matchingTotal === 1 ? "" : "s"}</strong><span>Showing ${firstVisible}–${Math.max(firstVisible, lastVisible)} of ${matchingTotal} · Page ${bookDatabasePage} of ${totalPages}${bookDatabaseSearchMode ? " · complete-library search" : ""}</span>`;
   renderBookDatabasePagination(totalPages);
   renderBookExportSummary();
   if (!rows.length) {
@@ -1980,6 +1978,116 @@ function renderBooksTable() {
         }).join("")}
       </tbody>
     </table>`;
+}
+
+function cacheLoadedBooks(rows = []) {
+  const byId = new Map(latestBooks.map((item) => [item.id, item]));
+  rows.forEach((item) => byId.set(item.id, item));
+  latestBooks = [...byId.values()];
+}
+
+async function loadAllBooksIncrementally(sequence = null) {
+  const rows = [];
+  let cursor = null;
+  while (true) {
+    const constraints = [orderBy(documentId()), limit(BOOK_DATABASE_SCAN_SIZE)];
+    if (cursor) constraints.splice(1, 0, startAfter(cursor));
+    const snap = await getDocs(query(collection(db, "books"), ...constraints));
+    rows.push(...snap.docs.map((item) => ({ id: item.id, data: item.data() })));
+    if (sequence !== null && sequence !== bookDatabaseLoadSequence) return null;
+    if (snap.size < BOOK_DATABASE_SCAN_SIZE) return rows;
+    cursor = snap.docs[snap.docs.length - 1];
+  }
+}
+
+function hasBookDatabaseCriteria() {
+  return Boolean(
+    bookSearch.value.trim()
+    || bookCategoryFilter?.value
+    || bookAvailabilityFilter?.value
+    || (bookSort?.value && bookSort.value !== "accessionAsc")
+  );
+}
+
+async function loadBookDatabasePage(page = 1) {
+  const sequence = ++bookDatabaseLoadSequence;
+  bookDatabaseSearchMode = false;
+  const requestedPage = Math.max(1, Number(page || 1));
+  const cursor = bookDatabasePageCursors[requestedPage - 1];
+  if (requestedPage > 1 && !cursor) return;
+  const constraints = [orderBy(documentId()), limit(BOOK_DATABASE_PAGE_SIZE)];
+  if (cursor) constraints.splice(1, 0, startAfter(cursor));
+  const snap = await getDocs(query(collection(db, "books"), ...constraints));
+  if (sequence !== bookDatabaseLoadSequence) return;
+  bookDatabaseRows = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
+  cacheLoadedBooks(bookDatabaseRows);
+  bookDatabasePage = requestedPage;
+  if (snap.docs.length) bookDatabasePageCursors[requestedPage] = snap.docs[snap.docs.length - 1];
+  renderBooksTable();
+  renderRecentActivity();
+}
+
+async function scanBookDatabase() {
+  const sequence = ++bookDatabaseLoadSequence;
+  bookDatabaseSearchMode = true;
+  bookDatabasePage = 1;
+  renderEmpty($("#booksTable"), "Searching the complete book collection…");
+  const allRows = await loadAllBooksIncrementally(sequence);
+  if (!allRows) return;
+  bookDatabaseRows = allRows;
+  cacheLoadedBooks(allRows);
+  renderBooksTable();
+}
+
+async function refreshBookDatabase() {
+  if (hasBookDatabaseCriteria()) {
+    const search = bookSearch.value.trim();
+    if (search && !bookCategoryFilter?.value && !bookAvailabilityFilter?.value && (!bookSort?.value || bookSort.value === "accessionAsc")) {
+      try {
+        const direct = await findBookByLibraryCode(search);
+        const directItem = { id: direct.id, data: direct };
+        if (normalizeLogicalAccession(accessionNumberOf(direct)) === normalizeLogicalAccession(search)) {
+          bookDatabaseSearchMode = true;
+          bookDatabasePage = 1;
+          bookDatabaseRows = [directItem];
+          cacheLoadedBooks(bookDatabaseRows);
+          renderBooksTable();
+          return;
+        }
+      } catch {
+        // Fall through to the complete-library text scan.
+      }
+    }
+    await scanBookDatabase();
+    return;
+  }
+  bookDatabasePageCursors = [null];
+  await loadBookDatabasePage(1);
+}
+
+async function refreshBookMetrics() {
+  const booksRef = collection(db, "books");
+  const statuses = ["available", "issued", "lost", "damaged", "requested", "reserved", "missing"];
+  const [totalSnap, ...statusSnaps] = await Promise.all([
+    getCountFromServer(booksRef),
+    ...statuses.map((status) => getCountFromServer(query(booksRef, where("status", "==", status))))
+  ]);
+  const total = totalSnap.data().count;
+  const counts = Object.fromEntries(statuses.map((status, index) => [status, statusSnaps[index].data().count]));
+  const booksWithoutKnownStatus = Math.max(0, total - statuses.reduce((sum, status) => sum + counts[status], 0));
+  counts.available += booksWithoutKnownStatus;
+  bookDatabaseTotal = total;
+  const metricMap = {
+    metricTotalBooks: total,
+    metricIssuedBooks: counts.issued,
+    metricAvailableBooks: counts.available,
+    metricLostBooks: counts.lost,
+    metricDamagedBooks: counts.damaged
+  };
+  Object.entries(metricMap).forEach(([id, value]) => {
+    const target = document.getElementById(id);
+    if (target) target.textContent = String(value || 0);
+  });
 }
 
 async function loadDuplicateCleanupPlan() {
@@ -2652,6 +2760,7 @@ async function processBookImportFile(file) {
   }
   $("#bookImportFileName").textContent = file.name;
   $("#bookImportResult").textContent = "Reading and validating file...";
+  latestBooks = await loadAllBooksIncrementally();
   const workbookData = await parseAccessionWorkbook(file, window.XLSX);
   pendingBookImportMatrix = workbookData.matrix;
   pendingBookImportSheetName = workbookData.sheetName;
@@ -2659,9 +2768,16 @@ async function processBookImportFile(file) {
   renderBookImportPreview(parsed.rows, workbookData.sheetName, parsed.sheetHeaderRow);
 }
 
+let bookDatabaseRefreshTimer = null;
 function resetBookDatabasePage() {
   bookDatabasePage = 1;
-  renderBooksTable();
+  window.clearTimeout(bookDatabaseRefreshTimer);
+  bookDatabaseRefreshTimer = window.setTimeout(() => {
+    refreshBookDatabase().catch((error) => {
+      logDetailedError(error);
+      renderEmpty($("#booksTable"), error.message || "Could not load book records.");
+    });
+  }, 250);
 }
 
 function switchManagementModal(fromId, toId) {
@@ -2757,16 +2873,25 @@ if (bookSort) bookSort.addEventListener("change", resetBookDatabasePage);
 $("#bookDatabasePagination")?.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-book-page]");
   if (!button || button.disabled) return;
-  bookDatabasePage = Number(button.dataset.bookPage || 1);
-  renderBooksTable();
+  const page = Number(button.dataset.bookPage || 1);
+  if (bookDatabaseSearchMode) {
+    bookDatabasePage = page;
+    renderBooksTable();
+    return;
+  }
+  loadBookDatabasePage(page).catch((error) => {
+    logDetailedError(error);
+    showToast(error.message || "Could not load this book page.", "error");
+  });
 });
 ["exportCategoryFilter", "exportStatusFilter", "exportAccessionFrom", "exportAccessionTo", "exportDateFrom", "exportDateTo", "exportFormat", "exportScope"]
   .forEach((id) => {
     const input = document.getElementById(id);
     input?.addEventListener(input.matches("input") ? "input" : "change", renderBookExportSummary);
   });
-$("#exportBooksExcelBtn").addEventListener("click", () => {
+$("#exportBooksExcelBtn").addEventListener("click", async () => {
   try {
+    latestBooks = await loadAllBooksIncrementally();
     const rows = bookRowsForExport();
     const format = $("#exportFormat").value;
     exportBooksExcel(rows, format);
@@ -3863,27 +3988,16 @@ onSnapshot(
 );
 
 onSnapshot(
-  query(collection(db, "books"), orderBy("updatedAt", "desc"), limit(500)),
+  query(collection(db, "books"), orderBy("updatedAt", "desc"), limit(50)),
   (snap) => {
-    latestBooks = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
-    const counts = latestBooks.reduce((acc, item) => {
-      const status = String(item.data.status || "available").toLowerCase();
-      acc.total += 1;
-      acc[status] = (acc[status] || 0) + 1;
-      return acc;
-    }, { total: 0, available: 0, issued: 0, lost: 0, damaged: 0 });
-    const metricMap = {
-      metricTotalBooks: counts.total,
-      metricIssuedBooks: counts.issued,
-      metricAvailableBooks: counts.available,
-      metricLostBooks: counts.lost,
-      metricDamagedBooks: counts.damaged
-    };
-    Object.entries(metricMap).forEach(([id, value]) => {
-      const target = document.getElementById(id);
-      if (target) target.textContent = String(value || 0);
+    cacheLoadedBooks(snap.docs.map((item) => ({ id: item.id, data: item.data() })));
+    refreshBookMetrics().then(() => {
+      if (!bookDatabaseRows.length) return refreshBookDatabase();
+      renderBooksTable();
+      return null;
+    }).catch((error) => {
+      console.error("Book aggregate refresh failed:", error);
     });
-    renderBooksTable();
     renderBarcodePrintManager();
     renderPendingRequests();
     renderRecentActivity();

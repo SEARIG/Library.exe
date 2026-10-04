@@ -84,12 +84,21 @@ export async function findBookByLibraryCode(value) {
   const accessionCandidate = scannedValue.toUpperCase().startsWith("ACC-")
     ? scannedValue.slice(4)
     : scannedValue;
-  book = await tryField("accessionNumber", accessionCandidate);
-  if (book) return book;
-
-  for (const legacyField of ["blegal_num", "blegalNumber", "BLegalNumber"]) {
-    book = await tryField(legacyField, accessionCandidate);
-    if (book) return book;
+  const numericAccession = /^\d+$/.test(accessionCandidate)
+    ? String(Number(accessionCandidate))
+    : "";
+  const accessionCandidates = [...new Set([
+    accessionCandidate,
+    numericAccession,
+    numericAccession ? numericAccession.padStart(2, "0") : "",
+    numericAccession ? numericAccession.padStart(3, "0") : "",
+    numericAccession ? `ACC-${numericAccession}` : ""
+  ].filter(Boolean))];
+  for (const candidate of accessionCandidates) {
+    for (const field of ["accessionNumber", "blegal_num", "blegalNumber", "BLegalNumber"]) {
+      book = await tryField(field, candidate);
+      if (book) return book;
+    }
   }
 
   const oldIdCandidate = scannedValue.toUpperCase().startsWith("BOOK-")

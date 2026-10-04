@@ -3,18 +3,23 @@ import {
   accessionNumberOf,
   compareAccessionNumbers,
   createCatalogIssueRequest,
+  findBookByLibraryCode,
   getIssueReturnSchedule,
   getStudentProfile,
   scheduleApplies,
   scheduleLabel,
   titleOf
-} from "./firestore-service.js?v=2";
+} from "./firestore-service.js?v=3";
 import { sendEmailNotification } from "./notifications.js";
 import {
   collection,
-  onSnapshot,
+  documentId,
+  getCountFromServer,
+  getDocs,
+  limit,
   orderBy,
-  query
+  query,
+  startAfter
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 import {
   onAuthStateChanged
@@ -31,8 +36,13 @@ import { renderNavbar } from "./navbar.js";
 import { bookCardThemeStyle, getBookCardTheme } from "./book-card-theme.mjs?v=1";
 
 const pageSize = 24;
+const scanPageSize = 100;
 let allBooks = [];
 let currentPage = 1;
+let totalBooks = 0;
+let pageCursors = [null];
+let searchMode = false;
+let loadSequence = 0;
 let currentUser = null;
 let selectedBook = null;
 let selectedStudent = null;
@@ -91,20 +101,21 @@ function filteredBooks() {
 
 function renderLibrary() {
   const rows = filteredBooks();
-  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const matchingTotal = searchMode ? rows.length : totalBooks;
+  const totalPages = Math.max(1, Math.ceil(matchingTotal / pageSize));
   currentPage = Math.min(currentPage, totalPages);
   const start = (currentPage - 1) * pageSize;
-  const visibleRows = rows.slice(start, start + pageSize);
+  const visibleRows = searchMode ? rows.slice(start, start + pageSize) : rows;
 
   summaryTarget.innerHTML = `
-    <strong>${rows.length} book(s) found</strong>
-    <span>Showing ${visibleRows.length ? start + 1 : 0}-${Math.min(start + pageSize, rows.length)} of ${rows.length}</span>
+    <strong>${matchingTotal} book(s) found</strong>
+    <span>Showing ${visibleRows.length ? start + 1 : 0}-${Math.min(start + visibleRows.length, matchingTotal)} of ${matchingTotal}${searchMode ? " · complete-library search" : ""}</span>
   `;
 
   if (!visibleRows.length) {
     renderEmpty(
       booksTarget,
-      allBooks.length === 0 ? "No books have been added yet." : "No books match the selected search and filters."
+      totalBooks === 0 ? "No books have been added yet." : "No books match the selected search and filters."
     );
   } else {
     booksTarget.innerHTML = visibleRows.map(({ id, data }) => {
@@ -197,31 +208,102 @@ function renderPagination(totalPages) {
     paginationTarget.innerHTML = "";
     return;
   }
-  const pages = Array.from({ length: totalPages }, (_, index) => index + 1)
-    .filter((page) => page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1);
   paginationTarget.innerHTML = `
     <button class="btn btn-muted" type="button" data-page="${currentPage - 1}" ${currentPage === 1 ? "disabled" : ""}>Previous</button>
-    ${pages.map((page, index) => {
-      const previous = pages[index - 1];
-      const spacer = previous && page - previous > 1 ? `<span class="badge">...</span>` : "";
-      return `${spacer}<button class="btn ${page === currentPage ? "btn-primary" : "btn-muted"}" type="button" data-page="${page}">${page}</button>`;
-    }).join("")}
+    <span class="badge">Page ${currentPage} of ${totalPages}</span>
     <button class="btn btn-muted" type="button" data-page="${currentPage + 1}" ${currentPage === totalPages ? "disabled" : ""}>Next</button>
   `;
 }
 
-function resetAndRender() {
-  currentPage = 1;
+async function loadCatalogPage(page = 1) {
+  const sequence = ++loadSequence;
+  searchMode = false;
+  const requestedPage = Math.max(1, Number(page || 1));
+  const cursor = pageCursors[requestedPage - 1];
+  if (requestedPage > 1 && !cursor) return;
+  const constraints = [orderBy(documentId()), limit(pageSize)];
+  if (cursor) constraints.splice(1, 0, startAfter(cursor));
+  const snap = await getDocs(query(collection(db, "books"), ...constraints));
+  if (sequence !== loadSequence) return;
+  allBooks = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
+  currentPage = requestedPage;
+  if (snap.docs.length) pageCursors[requestedPage] = snap.docs[snap.docs.length - 1];
   renderLibrary();
 }
 
-searchInput.addEventListener("input", resetAndRender);
-availabilityFilter.addEventListener("change", resetAndRender);
+async function scanCatalog() {
+  const sequence = ++loadSequence;
+  searchMode = true;
+  currentPage = 1;
+  renderEmpty(booksTarget, "Searching the complete library catalog…");
+  const rows = [];
+  let cursor = null;
+  while (true) {
+    const constraints = [orderBy(documentId()), limit(scanPageSize)];
+    if (cursor) constraints.splice(1, 0, startAfter(cursor));
+    const snap = await getDocs(query(collection(db, "books"), ...constraints));
+    rows.push(...snap.docs.map((item) => ({ id: item.id, data: item.data() })));
+    if (sequence !== loadSequence) return;
+    if (snap.size < scanPageSize) break;
+    cursor = snap.docs[snap.docs.length - 1];
+  }
+  allBooks = rows;
+  renderLibrary();
+}
+
+async function refreshCatalog() {
+  const search = searchInput.value.trim();
+  const availability = availabilityFilter.value;
+  if (search || availability) {
+    if (search && !availability) {
+      try {
+        const direct = await findBookByLibraryCode(search);
+        const directAccession = String(accessionNumberOf(direct)).replace(/^0+/, "") || "0";
+        const searchedAccession = String(search).replace(/^ACC-/i, "").replace(/^0+/, "") || "0";
+        if (directAccession.toUpperCase() === searchedAccession.toUpperCase()) {
+          searchMode = true;
+          currentPage = 1;
+          allBooks = [{ id: direct.id, data: direct }];
+          renderLibrary();
+          return;
+        }
+      } catch {
+        // Non-accession searches use the incremental complete-catalog scan.
+      }
+    }
+    await scanCatalog();
+    return;
+  }
+  pageCursors = [null];
+  await loadCatalogPage(1);
+}
+
+let catalogRefreshTimer = null;
+function scheduleCatalogRefresh() {
+  window.clearTimeout(catalogRefreshTimer);
+  catalogRefreshTimer = window.setTimeout(() => {
+    refreshCatalog().catch((error) => {
+      console.error("Catalog search failed:", error);
+      renderEmpty(booksTarget, error.message || "Unable to search the catalog.");
+    });
+  }, 250);
+}
+
+searchInput.addEventListener("input", scheduleCatalogRefresh);
+availabilityFilter.addEventListener("change", scheduleCatalogRefresh);
 paginationTarget.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-page]");
   if (!button || button.disabled) return;
-  currentPage = Number(button.dataset.page);
-  renderLibrary();
+  const page = Number(button.dataset.page);
+  if (searchMode) {
+    currentPage = page;
+    renderLibrary();
+  } else {
+    loadCatalogPage(page).catch((error) => {
+      console.error("Catalog page load failed:", error);
+      showToast("Could not load this catalog page.", "error");
+    });
+  }
   window.scrollTo({ top: 0, behavior: "smooth" });
 });
 
@@ -301,14 +383,10 @@ onAuthStateChanged(auth, (user) => {
   }
 });
 
-onSnapshot(
-  query(collection(db, "books"), orderBy("updatedAt", "desc")),
-  (snap) => {
-    allBooks = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
-    renderLibrary();
-  },
-  (error) => {
-    console.error("Public library load failed:", error);
-    renderEmpty(summaryTarget, "Unable to load catalog. Check internet connection.");
-  }
-);
+try {
+  totalBooks = (await getCountFromServer(collection(db, "books"))).data().count;
+  await loadCatalogPage(1);
+} catch (error) {
+  console.error("Public library load failed:", error);
+  renderEmpty(summaryTarget, "Unable to load catalog. Check internet connection.");
+}

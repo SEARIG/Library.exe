@@ -13,6 +13,7 @@ import {
 import {
   collection,
   doc,
+  getCountFromServer,
   getDoc,
   limit,
   onSnapshot,
@@ -664,9 +665,11 @@ onSnapshot(collection(db, "users"), (snap) => {
   metrics.librarians.textContent = snap.docs.filter((item) => item.data().role === "librarian").length;
   renderNoDues();
 });
+getCountFromServer(collection(db, "books"))
+  .then((snap) => { metrics.books.textContent = String(snap.data().count); })
+  .catch((error) => console.error("Admin book count failed:", error));
 onSnapshot(collection(db, "books"), (snap) => {
   latestNoDuesBooks = snap.docs.map((item) => ({ id: item.id, data: item.data() }));
-  metrics.books.textContent = snap.size;
   renderNoDues();
 });
 onSnapshot(collection(db, "issueRequests"), (snap) => {
