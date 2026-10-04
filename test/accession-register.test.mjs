@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  ACCESSION_PARSER_VERSION,
   accessionBookData,
   accessionExportRow,
   findAccessionHeaderRow,
   normalizeImportHeader,
+  parseAccessionWorkbook,
   selectAccessionRegisterSheet,
   parseAccessionRegister
 } from "../public/js/accession-register.mjs";
@@ -132,4 +134,37 @@ test("allows optional metadata to remain blank and scans the first 20 rows", () 
   assert.equal(row.accessionDate, "");
   assert.equal(row.year, "");
   assert.equal(row.pages, "");
+});
+
+test("canonical workbook parser reads Books Import and exposes runtime diagnostics", async () => {
+  const logs = [];
+  const logger = {
+    group: (...values) => logs.push(values),
+    log: (...values) => logs.push(values),
+    groupEnd: () => {}
+  };
+  const worksheet = {
+    A1: { v: "Accession No.", t: "s", w: "Accession No." },
+    matrix: [
+      ["", "Date", "Author", "Title", "Place & Publisher", "Year", "Pages", "Vol.", "Source", "Bill No. & Date", "Cost (Rs.)", "Notes"],
+      ["001", "", "Author", "Title", "Publisher", "2020", "100", "", "", "", "10", ""]
+    ]
+  };
+  const xlsx = {
+    read: () => ({ SheetNames: ["Books Import"], Sheets: { "Books Import": worksheet } }),
+    utils: { sheet_to_json: (sheet) => sheet.matrix }
+  };
+  const file = {
+    name: "register.xlsx",
+    size: 123,
+    arrayBuffer: async () => new ArrayBuffer(8)
+  };
+
+  const result = await parseAccessionWorkbook(file, xlsx, { logger });
+  assert.equal(ACCESSION_PARSER_VERSION, "2026-10-04-runtime-fix-1");
+  assert.equal(result.sheetName, "Books Import");
+  assert.equal(result.headerRowIndex, 0);
+  assert.equal(result.matrix[0][0], "Accession No.");
+  assert.ok(logs.some((entry) => entry[0] === "Books Import!A1.v:" && entry[1] === "Accession No."));
+  assert.ok(logs.some((entry) => entry[0] === "Detected header index:" && entry[1] === 0));
 });

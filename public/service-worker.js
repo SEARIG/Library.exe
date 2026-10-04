@@ -1,4 +1,4 @@
-const CACHE_NAME = "msu-lms-pwa-v4";
+const CACHE_NAME = "msu-lms-pwa-v5";
 const STATIC_ASSETS = [
   "/",
   "/index.html",
@@ -65,6 +65,8 @@ function shouldBypassCache(request) {
   return (
     url.pathname.startsWith("/api/")
     || url.pathname.startsWith("/__/")
+    || url.pathname === "/js/accession-register.mjs"
+    || url.pathname === "/js/librarian-dashboard.js"
     || url.pathname.startsWith("/downloads/")
     || url.pathname.endsWith(".apk")
     || url.pathname.includes("/firestore/")

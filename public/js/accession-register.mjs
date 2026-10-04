@@ -17,6 +17,8 @@ export const ACCESSION_TEMPLATE_HEADERS = [
   "Notes"
 ];
 
+export const ACCESSION_PARSER_VERSION = "2026-10-04-runtime-fix-1";
+
 const FIELD_ALIASES = {
   accessionNumber: [
     "Accession No.",
@@ -95,6 +97,39 @@ function accessionDateText(value) {
 }
 
 const ACCESSION_HEADERS = new Set(FIELD_ALIASES.accessionNumber.map(normalizeImportHeader));
+const KNOWN_MLSU_TEMPLATE_HEADERS = new Set([
+  "Accession No.",
+  "Date",
+  "Author",
+  "Title",
+  "Place & Publisher",
+  "Year",
+  "Pages",
+  "Vol.",
+  "Source",
+  "Bill No. & Date",
+  "Cost (Rs.)",
+  "Notes"
+].map(normalizeImportHeader));
+
+function knownMlsuTemplateHeaderRow(row = []) {
+  const normalized = new Set((Array.isArray(row) ? row : []).map(normalizeImportHeader).filter(Boolean));
+  return [...KNOWN_MLSU_TEMPLATE_HEADERS].every((header) => normalized.has(header));
+}
+
+function directA1Value(cell) {
+  if (!cell || typeof cell !== "object") return cellText(cell);
+  return cellText(cell.v ?? cell.w ?? "");
+}
+
+function withDirectA1(matrix = [], a1) {
+  const value = directA1Value(a1);
+  if (!ACCESSION_HEADERS.has(normalizeImportHeader(value))) return matrix;
+  const rows = Array.isArray(matrix) ? matrix.map((row) => Array.isArray(row) ? [...row] : []) : [];
+  if (!rows.length) rows.push([]);
+  rows[0][0] = value;
+  return rows;
+}
 
 export function findAccessionHeaderRow(matrix = [], maxRows = ACCESSION_HEADER_SCAN_LIMIT) {
   return matrix.slice(0, Math.max(0, maxRows)).findIndex((row) =>
@@ -112,14 +147,21 @@ export function selectAccessionRegisterSheet(worksheets = [], maxRows = ACCESSIO
   );
 
   for (const sheet of [...booksImport, ...fallbackSheets]) {
-    const headerRowIndex = findAccessionHeaderRow(sheet.matrix, maxRows);
+    const matrix = withDirectA1(sheet.matrix, sheet.a1);
+    const knownTemplateRowIndex = matrix
+      .slice(0, Math.max(0, maxRows))
+      .findIndex(knownMlsuTemplateHeaderRow);
+    const headerRowIndex = knownTemplateRowIndex >= 0
+      ? knownTemplateRowIndex
+      : findAccessionHeaderRow(matrix, maxRows);
     if (headerRowIndex >= 0) {
       return {
         sheetName: sheet.name,
-        matrix: sheet.matrix,
+        matrix,
         headerRowIndex,
         sheetHeaderRow: headerRowIndex + 1,
-        detectedColumns: (sheet.matrix[headerRowIndex] || []).map(cellText).filter(Boolean)
+        detectedColumns: (matrix[headerRowIndex] || []).map(cellText).filter(Boolean),
+        a1: sheet.a1 || null
       };
     }
   }
@@ -128,6 +170,88 @@ export function selectAccessionRegisterSheet(worksheets = [], maxRows = ACCESSIO
     throw new Error("Books Import sheet found, but no accession-number column could be recognized.");
   }
   throw new Error("No valid accession-register sheet was found. Expected a column named 'Accession No.' or 'Accession Number'.");
+}
+
+function readFileAsArrayBuffer(file) {
+  if (file && typeof file.arrayBuffer === "function") return file.arrayBuffer();
+  return new Promise((resolve, reject) => {
+    if (typeof FileReader === "undefined") {
+      reject(new Error("This browser cannot read the selected workbook."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => resolve(event.target.result);
+    reader.onerror = () => reject(reader.error || new Error("Could not read the selected workbook."));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+export async function parseAccessionWorkbook(file, xlsx = globalThis.XLSX, options = {}) {
+  if (!file) throw new Error("Choose an accession register file.");
+  if (!xlsx?.read || !xlsx?.utils?.sheet_to_json) throw new Error("XLSX library is not loaded.");
+
+  const logger = options.logger || console;
+  const buffer = await readFileAsArrayBuffer(file);
+  const workbook = xlsx.read(buffer, { type: "array", cellDates: false });
+  if (!workbook.SheetNames?.length) throw new Error("The workbook does not contain a worksheet.");
+
+  const worksheets = workbook.SheetNames.map((name) => {
+    const sheet = workbook.Sheets[name];
+    return {
+      name,
+      a1: sheet?.A1 ? { v: sheet.A1.v, t: sheet.A1.t, w: sheet.A1.w } : null,
+      matrix: xlsx.utils.sheet_to_json(sheet, {
+        header: 1,
+        defval: "",
+        raw: false,
+        blankrows: true
+      })
+    };
+  });
+  const booksImportSheet = worksheets.find((sheet) => normalizeImportHeader(sheet.name) === "books import");
+  const headerCandidates = worksheets.map((sheet) => ({
+    sheet: sheet.name,
+    rows: sheet.matrix.slice(0, ACCESSION_HEADER_SCAN_LIMIT).map((row, index) => ({
+      row: index + 1,
+      normalized: (Array.isArray(row) ? row : []).map(normalizeImportHeader)
+    }))
+  }));
+
+  logger.group?.("ACCESSION IMPORT DEBUG");
+  try {
+    logger.log?.("File:", file.name || "(unnamed)");
+    logger.log?.("Size:", Number(file.size) || buffer.byteLength || 0);
+    logger.log?.("Parser version:", ACCESSION_PARSER_VERSION);
+    logger.log?.("Function:", "parseAccessionWorkbook");
+    logger.log?.("Workbook sheets:", workbook.SheetNames);
+    logger.log?.("Books Import!A1.v:", booksImportSheet?.a1?.v);
+    logger.log?.("Books Import!A1.t:", booksImportSheet?.a1?.t);
+    logger.log?.("Books Import!A1.w:", booksImportSheet?.a1?.w);
+    logger.log?.("First 5 rows:", booksImportSheet?.matrix?.slice(0, 5) || []);
+    logger.log?.("Header candidate rows:", headerCandidates);
+
+    const selected = selectAccessionRegisterSheet(worksheets);
+    const normalizedHeaders = (selected.matrix[selected.headerRowIndex] || []).map(normalizeImportHeader);
+    logger.log?.("Selected sheet:", selected.sheetName);
+    logger.log?.("Detected header index:", selected.headerRowIndex);
+    logger.log?.("Normalized headers:", normalizedHeaders);
+
+    return {
+      sheetName: selected.sheetName,
+      matrix: selected.matrix,
+      sheetHeaderRow: selected.sheetHeaderRow,
+      headerRowIndex: selected.headerRowIndex,
+      detectedColumns: selected.detectedColumns,
+      a1: selected.a1
+    };
+  } finally {
+    logger.groupEnd?.();
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.__MLSU_ACCESSION_PARSER_VERSION__ = ACCESSION_PARSER_VERSION;
+  window.__MLSU_PARSE_ACCESSION__ = parseAccessionWorkbook;
 }
 
 export function parseAccessionRegister(matrix = [], existingBooks = new Map(), updateExisting = false) {

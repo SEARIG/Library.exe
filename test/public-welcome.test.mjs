@@ -85,10 +85,12 @@ test("public catalog output remains limited to safe book metadata", () => {
   assert.match(read("public/library.html"), /Download Student App/);
 });
 
-test("service worker bypasses APK downloads and caches the local QR only", () => {
+test("service worker bypasses APK downloads and live accession importer scripts", () => {
   const worker = read("public/service-worker.js");
   assert.match(worker, /url\.pathname\.startsWith\("\/downloads\/"\)/);
   assert.match(worker, /url\.pathname\.endsWith\("\.apk"\)/);
+  assert.match(worker, /url\.pathname === "\/js\/accession-register\.mjs"/);
+  assert.match(worker, /url\.pathname === "\/js\/librarian-dashboard\.js"/);
   assert.match(worker, /\/assets\/mlsu-lms-apk-qr\.svg/);
   assert.doesNotMatch(worker, /MLSU-LMS\.apk/);
 });

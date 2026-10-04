@@ -34,13 +34,13 @@ import {
   sendEmailNotification
 } from "./notifications.js";
 import {
+  ACCESSION_PARSER_VERSION,
   ACCESSION_TEMPLATE_HEADERS,
   accessionBookData,
   accessionExportRow,
-  normalizeImportHeader,
+  parseAccessionWorkbook,
   parseAccessionRegister,
-  selectAccessionRegisterSheet
-} from "./accession-register.mjs?v=3";
+} from "./accession-register.mjs?v=4";
 import {
   collection,
   deleteDoc,
@@ -215,54 +215,7 @@ function barcodeValueFor(accessionNumber, fallbackBid = "") {
   return accessionBarcode(accessionNumber) || `BOOK-${fallbackBid}`;
 }
 
-function readWorkbookRows(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const workbook = window.XLSX.read(event.target.result, {
-          type: "array",
-          cellDates: false
-        });
-        if (!workbook.SheetNames.length) throw new Error("The workbook does not contain a worksheet.");
-        const worksheets = workbook.SheetNames.map((name) => ({
-          name,
-          matrix: window.XLSX.utils.sheet_to_json(workbook.Sheets[name], {
-            header: 1,
-            defval: "",
-            raw: false,
-            blankrows: true
-          })
-        }));
-        if (showBookDebug) {
-          const booksImportSheet = worksheets.find((sheet) => normalizeImportHeader(sheet.name) === "books import");
-          const firstCell = booksImportSheet?.matrix?.[0]?.[0];
-          console.log("[BOOK IMPORT] Workbook sheets:", workbook.SheetNames);
-          console.log("[BOOK IMPORT] Books Import first 5 raw rows:", booksImportSheet?.matrix?.slice(0, 5) || []);
-          console.log("[BOOK IMPORT] First cell raw value:", firstCell);
-          console.log("[BOOK IMPORT] First cell typeof:", typeof firstCell);
-          console.log("[BOOK IMPORT] First cell JSON:", JSON.stringify(firstCell));
-        }
-        const selected = selectAccessionRegisterSheet(worksheets);
-        if (showBookDebug) {
-          console.log("[BOOK IMPORT] Selected sheet:", selected.sheetName);
-          console.log("[BOOK IMPORT] Header row:", selected.sheetHeaderRow);
-          console.log("[BOOK IMPORT] Detected columns:", selected.detectedColumns);
-        }
-        resolve({
-          sheetName: selected.sheetName,
-          matrix: selected.matrix,
-          sheetHeaderRow: selected.sheetHeaderRow,
-          detectedColumns: selected.detectedColumns
-        });
-      } catch (error) {
-        reject(error);
-      }
-    };
-    reader.onerror = reject;
-    reader.readAsArrayBuffer(file);
-  });
-}
+console.info(`[ACCESSION IMPORT] Loaded parser ${ACCESSION_PARSER_VERSION}`);
 
 function numberValue(value, fallback = 1) {
   const parsed = Number(value);
@@ -2564,7 +2517,7 @@ async function processBookImportFile(file) {
   }
   $("#bookImportFileName").textContent = file.name;
   $("#bookImportResult").textContent = "Reading and validating file...";
-  const workbookData = await readWorkbookRows(file);
+  const workbookData = await parseAccessionWorkbook(file, window.XLSX);
   pendingBookImportMatrix = workbookData.matrix;
   pendingBookImportSheetName = workbookData.sheetName;
   const parsed = normalizeBookImportRows(pendingBookImportMatrix);
