@@ -2018,7 +2018,7 @@ function renderDuplicateCleanupPreview(plan) {
     <span class="summary-ready"><strong>${plan.deletableCount}</strong>Safe to delete</span>
     <span class="summary-warning"><strong>${plan.metadataMergeCount}</strong>Metadata fields to merge</span>
     <span class="summary-invalid"><strong>${plan.skippedGroupCount}</strong>Manual review</span>`;
-  confirmButton.disabled = plan.deletableCount === 0;
+  confirmButton.toggleAttribute("disabled", plan.deletableCount === 0);
 
   if (!plan.groups.length) {
     renderEmpty(preview, "No duplicate accession numbers were found.");

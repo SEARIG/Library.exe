@@ -37,6 +37,7 @@ test("duplicate cleanup is preview-first and protects referenced records", () =>
   assert.match(page, /No records are changed until an Admin confirms/);
   assert.match(script, /function scanDuplicateBooks\(\)/);
   assert.match(script, /function executeDuplicateCleanup\(\)/);
+  assert.match(script, /confirmButton\.toggleAttribute\("disabled", plan\.deletableCount === 0\)/);
   assert.match(script, /collection\(db, "bookIssues"\)/);
   assert.match(script, /collection\(db, "issueRequests"\)/);
   assert.match(script, /collection\(db, "returnRequests"\)/);
